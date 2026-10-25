@@ -3,7 +3,7 @@
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult, pdf_array::PdfArray,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::page::PdfPage;
 
@@ -21,12 +21,29 @@ impl PageTree {
     pub const KEY: &'static [u8] = b"Pages";
 }
 
+/// Decodes the tree, then passes inherited attributes down it once, so each page and
+/// each `/Pages` node combines with its ancestors a single time.
+impl FromPdfObject for PageTree {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let root: PageTreeBranch = context.read(context.object())?;
+        let mut pages = Vec::new();
+        root.flatten_into(
+            &InheritedAttributes::default(),
+            &mut pages,
+            &mut ResourceMerges::default(),
+        );
+        Ok(Self { pages })
+    }
+}
+
 /// A `/Kids` entry of a page-tree node, dispatched on its `/Type`.
 enum PageTreeNode {
     /// A leaf `/Page` object.
     Page(PdfPage),
     /// An intermediate `/Pages` node.
-    Pages(PageTree),
+    Pages(PageTreeBranch),
 }
 
 impl FromPdfObject for PageTreeNode {
@@ -37,7 +54,7 @@ impl FromPdfObject for PageTreeNode {
             context.read(context.object().dictionary()?.get_or_err(b"Type")?)?;
         match &*node_type {
             PdfPage::KEY => PdfPage::from_pdf_object(context).map(Self::Page),
-            PageTree::KEY => PageTree::from_pdf_object(context).map(Self::Pages),
+            PageTree::KEY => PageTreeBranch::from_pdf_object(context).map(Self::Pages),
             other => Err(PdfPagesError::InvalidKidsEntryType {
                 found_type: String::from_utf8_lossy(other).into_owned(),
             }
@@ -46,23 +63,53 @@ impl FromPdfObject for PageTreeNode {
     }
 }
 
-impl FromPdfObject for PageTree {
+/// A `/Pages` node as written: its own inheritable attributes and its kids, with
+/// nothing inherited yet.
+struct PageTreeBranch {
+    /// The attributes this node defines for its descendants.
+    inherited: InheritedAttributes,
+    /// The readable `/Kids` entries, in source order.
+    kids: Vec<PageTreeNode>,
+}
+
+impl FromPdfObject for PageTreeBranch {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let object = context.object();
         let mut context = context.dictionary()?;
-        let kids = context.required::<PdfArray>(b"Kids")?;
-        let inherited: InheritedAttributes = context.read(object)?;
-        let mut pages = Vec::new();
-        for value in kids.iter() {
+        let kids_array = context.required::<PdfArray>(b"Kids")?;
+        let inherited = context.read(object)?;
+        let mut kids = Vec::with_capacity(kids_array.len());
+        for value in kids_array.iter() {
             match context.read::<PageTreeNode>(value) {
-                Ok(PageTreeNode::Page(page)) => pages.push(page),
-                Ok(PageTreeNode::Pages(child)) => pages.extend(child.pages),
+                Ok(kid) => kids.push(kid),
                 Err(ObjectReadError::CyclicReference { .. }) => continue,
                 Err(error) => return Err(error),
             }
         }
-        pages.iter_mut().for_each(|page| inherited.apply_to(page));
-        Ok(Self { pages })
+        Ok(Self { inherited, kids })
+    }
+}
+
+impl PageTreeBranch {
+    /// Appends this node's pages to `pages` in source order, each with the attributes
+    /// it inherits from this node and from `parent`, the combined attributes of its
+    /// ancestors.
+    fn flatten_into(
+        self,
+        parent: &InheritedAttributes,
+        pages: &mut Vec<PdfPage>,
+        merges: &mut ResourceMerges,
+    ) {
+        let inherited = self.inherited.under(parent, merges);
+        for kid in self.kids {
+            match kid {
+                PageTreeNode::Page(mut page) => {
+                    inherited.apply_to(&mut page, merges);
+                    pages.push(page);
+                }
+                PageTreeNode::Pages(branch) => branch.flatten_into(&inherited, pages, merges),
+            }
+        }
     }
 }
 
@@ -92,27 +139,70 @@ impl FromPdfObject for InheritedAttributes {
 }
 
 impl InheritedAttributes {
+    /// Combines a node's own attributes with those it inherits from `parent`.
+    fn under(self, parent: &Self, merges: &mut ResourceMerges) -> Self {
+        Self {
+            resources: merges.inherit(self.resources, parent.resources.as_ref()),
+            media_box: self.media_box.or(parent.media_box),
+            crop_box: self.crop_box.or(parent.crop_box),
+            rotation: self.rotation.or(parent.rotation),
+        }
+    }
+
     /// Fills in the attributes a descendant page does not define itself.
-    ///
-    /// Per PDF spec §7.7.4, a page with no `/Resources` inherits the ancestor's resources
-    /// directly, while a page with its own `/Resources` keeps its entries and fills in any
-    /// categories or names it lacks from the ancestor.
-    fn apply_to(&self, page: &mut PdfPage) {
+    fn apply_to(&self, page: &mut PdfPage, merges: &mut ResourceMerges) {
         page.media_box = page.media_box.or(self.media_box);
         page.crop_box = page.crop_box.or(self.crop_box);
         page.rotation = page.rotation.or(self.rotation);
-        let Some(inherited) = &self.resources else {
-            return;
-        };
-        match &page.resources {
+        page.resources = merges.inherit(page.resources.take(), self.resources.as_ref());
+    }
+}
+
+/// The resource merges made while flattening a page tree, so nodes and pages that
+/// share a `/Resources` dictionary below the same ancestors share one merged copy.
+#[derive(Default)]
+struct ResourceMerges {
+    /// Merges keyed by the addresses of the own and the inherited resources.
+    merged: HashMap<(usize, usize), ResourceMerge>,
+}
+
+/// One merge of a node's own resources with the resources it inherits.
+struct ResourceMerge {
+    /// The own resources, held so their address is not reused while it keys a merge.
+    _own: Arc<Resources>,
+    /// The inherited resources, held for the same reason.
+    _parent: Arc<Resources>,
+    /// The merged resources, or the own resources when the parent adds nothing.
+    merged: Arc<Resources>,
+}
+
+impl ResourceMerges {
+    /// Returns the resources of a node or page given its own and the inherited ones.
+    ///
+    /// Per PDF spec §7.7.4, a node with no `/Resources` inherits the ancestor's resources
+    /// directly, while a node with its own `/Resources` keeps its entries and fills in any
+    /// categories or names it lacks from the ancestor.
+    fn inherit(
+        &mut self,
+        own: Option<Arc<Resources>>,
+        parent: Option<&Arc<Resources>>,
+    ) -> Option<Arc<Resources>> {
+        match (own, parent) {
+            (own, None) => own,
+            (None, Some(parent)) => Some(Arc::clone(parent)),
             // The same shared resources object: nothing to merge.
-            Some(own) if Arc::ptr_eq(own, inherited) => {}
-            Some(own) => {
-                if let Some(merged) = own.merged_with_parent(inherited) {
-                    page.resources = Some(Arc::new(merged));
-                }
+            (Some(own), Some(parent)) if Arc::ptr_eq(&own, parent) => Some(own),
+            (Some(own), Some(parent)) => {
+                let key = (Arc::as_ptr(&own).addr(), Arc::as_ptr(parent).addr());
+                let merge = self.merged.entry(key).or_insert_with(|| ResourceMerge {
+                    merged: own
+                        .merged_with_parent(parent)
+                        .map_or_else(|| Arc::clone(&own), Arc::new),
+                    _own: own,
+                    _parent: Arc::clone(parent),
+                });
+                Some(Arc::clone(&merge.merged))
             }
-            None => page.resources = Some(Arc::clone(inherited)),
         }
     }
 }
@@ -156,7 +246,7 @@ mod tests {
             resources: Some(Arc::clone(&parent)),
             ..Default::default()
         }
-        .apply_to(&mut page);
+        .apply_to(&mut page, &mut ResourceMerges::default());
 
         let inherited = page
             .resources
@@ -201,13 +291,14 @@ mod tests {
             resources: Some(Arc::clone(&parent)),
             ..Default::default()
         }
-        .apply_to(&mut page);
+        .apply_to(&mut page, &mut ResourceMerges::default());
 
         let result = page
             .resources
             .as_ref()
             .expect("page should still have resources");
-        assert!(!Arc::ptr_eq(result, &child_res));
+        // The parent adds nothing the child lacks, so the child's resources are kept as is.
+        assert!(Arc::ptr_eq(result, &child_res));
 
         // "CS1" must remain the child's version (DeviceRGB), not replaced by the parent's (DeviceGray).
         assert!(
@@ -256,7 +347,7 @@ mod tests {
             resources: Some(Arc::clone(&parent)),
             ..Default::default()
         }
-        .apply_to(&mut page);
+        .apply_to(&mut page, &mut ResourceMerges::default());
 
         let result = page.resources.as_ref().expect("page should have resources");
 
@@ -299,7 +390,7 @@ mod tests {
             media_box: Some(parent_mb),
             ..Default::default()
         }
-        .apply_to(&mut page);
+        .apply_to(&mut page, &mut ResourceMerges::default());
 
         let inherited = page
             .media_box
@@ -338,7 +429,7 @@ mod tests {
             media_box: Some(parent_mb),
             ..Default::default()
         }
-        .apply_to(&mut page);
+        .apply_to(&mut page, &mut ResourceMerges::default());
 
         let result = page.media_box.expect("page should still have media box");
         assert_eq!(

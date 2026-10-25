@@ -172,37 +172,51 @@ impl Resources {
     /// in one category (e.g. a font named `"F1"`) never blocks inheritance of a
     /// parent entry of a different category with the same name (e.g. an XObject
     /// named `"F1"`).
+    ///
+    /// Returns `None` when `parent` defines no entry that `self` lacks, so `self`
+    /// can be used unchanged.
     pub fn merged_with_parent(&self, parent: &Self) -> Option<Self> {
         let child = self;
-
-        Some(Self {
-            fonts: Self::merged_category(&child.fonts, &parent.fonts),
-            ext_g_states: Self::merged_category(&child.ext_g_states, &parent.ext_g_states),
-            patterns: Self::merged_category(&child.patterns, &parent.patterns),
-            xobjects: Self::merged_category(&child.xobjects, &parent.xobjects),
-            shadings: Self::merged_category(&child.shadings, &parent.shadings),
-            color_spaces: Self::merged_category(&child.color_spaces, &parent.color_spaces),
-            optional_content: Self::merged_category(
-                &child.optional_content,
-                &parent.optional_content,
-            ),
+        let inherits_any = child.fonts.lacks_any_of(&parent.fonts)
+            || child.ext_g_states.lacks_any_of(&parent.ext_g_states)
+            || child.patterns.lacks_any_of(&parent.patterns)
+            || child.xobjects.lacks_any_of(&parent.xobjects)
+            || child.shadings.lacks_any_of(&parent.shadings)
+            || child.color_spaces.lacks_any_of(&parent.color_spaces)
+            || child
+                .optional_content
+                .lacks_any_of(&parent.optional_content);
+        inherits_any.then(|| Self {
+            fonts: child.fonts.merged_with(&parent.fonts),
+            ext_g_states: child.ext_g_states.merged_with(&parent.ext_g_states),
+            patterns: child.patterns.merged_with(&parent.patterns),
+            xobjects: child.xobjects.merged_with(&parent.xobjects),
+            shadings: child.shadings.merged_with(&parent.shadings),
+            color_spaces: child.color_spaces.merged_with(&parent.color_spaces),
+            optional_content: child.optional_content.merged_with(&parent.optional_content),
         })
     }
+}
 
-    /// Returns one merged resource category with child entries taking precedence.
-    fn merged_category<T: Clone>(
-        child: &HashMap<Vec<u8>, T>,
-        parent: &HashMap<Vec<u8>, T>,
-    ) -> HashMap<Vec<u8>, T> {
-        let mut merged = HashMap::with_capacity(child.len().saturating_add(parent.len()));
-        merged.extend(
-            child
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone())),
-        );
-        for (k, v) in parent {
-            if !merged.contains_key(k) {
-                merged.insert(k.clone(), v.clone());
+/// One named resource category, merged with the same category of an ancestor.
+trait ResourceCategory {
+    /// Returns whether `parent` defines a name that `self` does not.
+    fn lacks_any_of(&self, parent: &Self) -> bool;
+
+    /// Returns `self` with the entries only `parent` defines added.
+    fn merged_with(&self, parent: &Self) -> Self;
+}
+
+impl<T: Clone> ResourceCategory for HashMap<Vec<u8>, T> {
+    fn lacks_any_of(&self, parent: &Self) -> bool {
+        parent.keys().any(|name| !self.contains_key(name))
+    }
+
+    fn merged_with(&self, parent: &Self) -> Self {
+        let mut merged = self.clone();
+        for (name, value) in parent {
+            if !merged.contains_key(name) {
+                merged.insert(name.clone(), value.clone());
             }
         }
         merged
