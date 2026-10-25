@@ -5,11 +5,13 @@ use crate::{
     font::{FontSource, GlyphId},
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
     pdf_font_program::{CidType0Program, TrueTypeProgram},
+    standard14::{Standard14Font, from_base_font_name},
 };
 use pdf_cmap::{Cid, PdfCMap, Type0EncodingCMap};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
+use read_fonts::{ps::agl, tables::post::DEFAULT_GLYPH_NAMES};
 use std::{collections::HashMap, sync::Arc};
 
 /// Descendant subtype used by a Type 0 composite font.
@@ -36,8 +38,8 @@ pub struct CidFontSpec {
     pub metrics: PdfMetrics,
     /// CID-to-glyph identifier mapping, used by CIDFontType2 only.
     pub cid_to_gid: CidToGidMap,
-    /// Best-effort CID-to-Unicode mapping for collection-backed font substitution.
-    pub cid_to_unicode: Option<Arc<HashMap<u16, char>>>,
+    /// Best-effort CID-to-Unicode mapping for font substitution.
+    pub cid_to_unicode: Option<CidToUnicode>,
 }
 
 /// Normalized Type 0 composite font.
@@ -72,6 +74,33 @@ impl CidToGidMap {
         };
         let gid = table.get(usize::try_from(cid.0).ok()?)?;
         Some(GlyphId(u32::from(*gid)))
+    }
+}
+
+/// Best-effort CID-to-Unicode mapping used when a CID font has no `/ToUnicode` entry.
+#[derive(Clone)]
+pub enum CidToUnicode {
+    /// Inverted predefined Unicode CMap of a CJK character collection.
+    Collection(Arc<HashMap<u16, char>>),
+    /// CIDs are glyph indices in the standard Macintosh glyph order.
+    ///
+    /// TrueType core fonts such as Arial, Times New Roman, and Courier New keep this order for
+    /// their first 258 glyphs. A non-embedded Identity CIDFontType2 font naming one of them
+    /// selects glyphs of that font by index, so its CIDs follow this order.
+    StandardGlyphOrder,
+}
+
+impl CidToUnicode {
+    /// Returns the Unicode value of `cid`, if known.
+    #[must_use]
+    pub fn get(&self, cid: u16) -> Option<char> {
+        match self {
+            Self::Collection(map) => map.get(&cid).copied(),
+            Self::StandardGlyphOrder => DEFAULT_GLYPH_NAMES
+                .get(usize::from(cid))
+                .copied()
+                .and_then(agl::name_to_char),
+        }
     }
 }
 
@@ -127,8 +156,18 @@ impl FromPdfObject for CidFontSpec {
         let system_info = context
             .optional::<CidSystemInfo>(b"CIDSystemInfo")?
             .unwrap_or_default();
-        let cid_to_unicode = system_info.cid_to_unicode_map();
-        let cid_to_gid = context.lenient(b"CIDToGIDMap").unwrap_or_default();
+        let cid_to_gid: CidToGidMap = context.lenient(b"CIDToGIDMap").unwrap_or_default();
+        // A substituted TrueType core font without its own glyph map is indexed by CID.
+        let indexes_core_font = kind == CidFontKind::Type2
+            && program.is_none()
+            && matches!(cid_to_gid, CidToGidMap::Identity)
+            && base_font
+                .as_deref()
+                .and_then(from_base_font_name)
+                .is_some_and(Standard14Font::has_standard_glyph_order);
+        let cid_to_unicode = system_info
+            .cid_to_unicode_map()
+            .or_else(|| indexes_core_font.then_some(CidToUnicode::StandardGlyphOrder));
         Ok(Self {
             kind,
             descriptor,

@@ -11,7 +11,9 @@ use crate::glyph_widths_map::GlyphWidthsMap;
 pub use crate::pdf_font_spec::PdfFontSpec;
 pub use crate::simple_font_spec::SimpleFontSpec;
 pub use crate::standard14::Standard14Font;
-pub use crate::type0_font_spec::{CidFontKind, CidFontSpec, CidToGidMap, Type0FontSpec};
+pub use crate::type0_font_spec::{
+    CidFontKind, CidFontSpec, CidToGidMap, CidToUnicode, Type0FontSpec,
+};
 pub use crate::type3_font_spec::{CharProcedures, Type3FontSpec};
 pub use pdf_cmap::{PdfCode, ToUnicodeMap};
 

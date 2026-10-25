@@ -198,6 +198,9 @@ impl PdfFontSpec {
             PdfFontSpec::Type1(font)
             | PdfFontSpec::MultipleMasterType1(font)
             | PdfFontSpec::TrueType(font) => font.standard14.unwrap_or_default(),
+            PdfFontSpec::Type0(font) => {
+                standard14::from_base_font_name(&font.base_font).unwrap_or_default()
+            }
             _ => Standard14Font::Helvetica,
         }
     }

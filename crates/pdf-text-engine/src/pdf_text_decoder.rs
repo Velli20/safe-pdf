@@ -135,7 +135,7 @@ fn type0_selector(descendant: &CidFontSpec, cid: Cid) -> GlyphSelector<'static> 
 
 /// Resolves extraction Unicode for one composite-font mapping.
 ///
-/// The source-code `/ToUnicode` map is authoritative. A best-effort collection CID map is used only
+/// The source-code `/ToUnicode` map is authoritative. The descendant's best-effort CID map is used only
 /// when `/ToUnicode` has no entry and the CID fits that map's 16-bit key space.
 fn type0_unicode(font: &Type0FontSpec, mapping: CidMapping) -> UnicodeSequence {
     font.to_unicode
@@ -146,8 +146,7 @@ fn type0_unicode(font: &Type0FontSpec, mapping: CidMapping) -> UnicodeSequence {
             font.descendant
                 .cid_to_unicode
                 .as_ref()?
-                .get(&cid)
-                .copied()
+                .get(cid)
                 .map(Into::into)
         })
         .unwrap_or_default()

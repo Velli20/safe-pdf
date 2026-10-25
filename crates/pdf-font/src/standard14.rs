@@ -186,6 +186,13 @@ pub(crate) fn from_flags(flags: FontFlags) -> Standard14Font {
 }
 
 impl Standard14Font {
+    /// Returns whether the TrueType core font behind this identity, such as Arial for Helvetica,
+    /// keeps the standard Macintosh glyph order. The symbol fonts do not.
+    #[must_use]
+    pub fn has_standard_glyph_order(self) -> bool {
+        !matches!(self, Self::Symbol | Self::ZapfDingbats)
+    }
+
     /// Returns the advance width, in 1/1000 em, of a named glyph in this font's AFM metrics.
     ///
     /// Courier is monospaced, so every glyph name is 600 units wide. Other fonts return `None`
