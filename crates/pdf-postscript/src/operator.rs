@@ -59,14 +59,23 @@ pub enum Operator {
     Sin,
     /// cos (angle -- cos(angle)) cosine of an angle in degrees.
     Cos,
-    /// tan (angle -- tan(angle)) tangent of an angle in degrees.
+    /// tan (angle -- tan(angle)) tangent of an angle in degrees. Accepted, but not
+    /// part of the Type 4 function operator set.
     Tan,
-    /// atan (y x -- angle) angle in degrees from the positive x-axis to point (x, y).
+    /// atan (y x -- angle) angle in degrees, in [0, 360), from the positive x-axis
+    /// to point (x, y).
     Atan,
-    /// log (x -- ln(x)) natural logarithm.
+    /// exp (base exponent -- base^exponent) exponentiation, always a real.
+    Exp,
+    /// ln (x -- ln(x)) natural logarithm.
+    Ln,
+    /// log (x -- log10(x)) base-10 logarithm.
     Log,
     /// abs (x -- |x|) absolute value.
     Abs,
+    /// neg (x -- -x) negation. An integer stays an integer unless the result
+    /// does not fit, in which case it becomes a real.
+    Neg,
     /// cvi (x -- int) convert to integer (truncate toward zero in PostScript).
     Cvi,
     /// cvr (x -- real) convert to real. Values are already stored as `f64`,
@@ -74,9 +83,17 @@ pub enum Operator {
     Cvr,
     /// mod (a b -- a%b) remainder (same sign behavior as PostScript: sign of a).
     Mod,
-    /// floor (x -- floor(x)) greatest integer less than or equal to x.
+    /// floor (x -- floor(x)) greatest integral value less than or equal to x,
+    /// with the operand's type.
     Floor,
-    /// truncate (x -- truncated) implementation-specific explicit truncation.
+    /// ceiling (x -- ceiling(x)) least integral value greater than or equal to x,
+    /// with the operand's type.
+    Ceiling,
+    /// round (x -- rounded) nearest integral value, halves rounding toward
+    /// positive infinity, with the operand's type.
+    Round,
+    /// truncate (x -- truncated) x with its fractional part removed (toward zero),
+    /// with the operand's type.
     Truncate,
     /// if (bool proc -- ) executes `proc` iff bool is true. Here stored as
     /// already-parsed operator sequence (executable array).

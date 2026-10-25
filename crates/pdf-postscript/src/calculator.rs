@@ -372,14 +372,29 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
             Operator::Atan => {
                 let x = frame.pop()?.to_f64("atan")?;
                 let y = frame.pop()?.to_f64("atan")?;
-                frame.push(Value::Real(y.atan2(x).to_degrees()))?;
+                let angle = y.atan2(x).to_degrees();
+                // `atan2` yields (-180, 180]; PostScript angles lie in [0, 360).
+                let angle = if angle < 0.0 { angle + 360.0 } else { angle };
+                frame.push(Value::Real(angle))?;
+            }
+            Operator::Exp => {
+                let exponent = frame.pop()?.to_f64("exp")?;
+                let base = frame.pop()?.to_f64("exp")?;
+                frame.push(checked_real(base.powf(exponent), "exp")?)?;
+            }
+            Operator::Ln => {
+                let a = frame.pop()?.to_f64("ln")?;
+                if a <= 0.0 {
+                    return Err(CalcError::LogDomainError { value: a });
+                }
+                frame.push(Value::Real(a.ln()))?;
             }
             Operator::Log => {
                 let a = frame.pop()?.to_f64("log")?;
                 if a <= 0.0 {
                     return Err(CalcError::LogDomainError { value: a });
                 }
-                frame.push(Value::Real(a.ln()))?;
+                frame.push(Value::Real(a.log10()))?;
             }
             Operator::Mod => {
                 let b = frame.pop()?;
@@ -387,8 +402,24 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                 frame.push(modulo(a, b)?)?;
             }
             Operator::Floor => {
-                let a = frame.pop()?.to_f64("floor")?;
-                frame.push(real_to_checked_integer(a.floor(), "floor")?)?;
+                let a = frame.pop()?;
+                frame.push(round_number(a, "floor", f64::floor)?)?;
+            }
+            Operator::Ceiling => {
+                let a = frame.pop()?;
+                frame.push(round_number(a, "ceiling", f64::ceil)?)?;
+            }
+            Operator::Round => {
+                let a = frame.pop()?;
+                frame.push(round_number(a, "round", |value| {
+                    // Halves round toward positive infinity (`-2.5` becomes `-2`).
+                    let floor = value.floor();
+                    if value - floor >= 0.5 {
+                        floor + 1.0
+                    } else {
+                        floor
+                    }
+                })?)?;
             }
             Operator::Cvi => {
                 let a = frame.pop()?;
@@ -402,6 +433,10 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
             Operator::Abs => {
                 let a = frame.pop()?;
                 frame.push(abs(a)?)?;
+            }
+            Operator::Neg => {
+                let a = frame.pop()?;
+                frame.push(neg(a)?)?;
             }
             Operator::Roll => {
                 let m_val = frame.pop()?.to_i32("roll")?;
@@ -449,8 +484,8 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                 }
             }
             Operator::Truncate => {
-                let a = frame.pop()?.to_f64("truncate")?;
-                frame.push(real_to_checked_integer(a.trunc(), "truncate")?)?;
+                let a = frame.pop()?;
+                frame.push(round_number(a, "truncate", f64::trunc)?)?;
             }
             Operator::Number(value) => frame.push(*value)?,
         }
@@ -532,6 +567,33 @@ fn abs(value: Value) -> Result<Value, CalcError> {
         Value::Real(value) => checked_real(value.abs(), "abs"),
         Value::Bool(_) => Err(CalcError::InvalidOperandType {
             op: "abs",
+            expected: "number",
+            found: value.type_name(),
+        }),
+    }
+}
+
+fn neg(value: Value) -> Result<Value, CalcError> {
+    match value {
+        Value::Integer(value) => Ok(value
+            .checked_neg()
+            .map_or_else(|| Value::Real(-f64::from(value)), Value::Integer)),
+        Value::Real(value) => checked_real(-value, "neg"),
+        Value::Bool(_) => Err(CalcError::InvalidOperandType {
+            op: "neg",
+            expected: "number",
+            found: value.type_name(),
+        }),
+    }
+}
+
+/// Applies an integral rounding function to a number, keeping the operand's type.
+fn round_number(value: Value, op: &'static str, round: fn(f64) -> f64) -> Result<Value, CalcError> {
+    match value {
+        Value::Integer(_) => Ok(value),
+        Value::Real(value) => checked_real(round(value), op),
+        Value::Bool(_) => Err(CalcError::InvalidOperandType {
+            op,
             expected: "number",
             found: value.type_name(),
         }),
@@ -1176,9 +1238,9 @@ mod typed_tests {
             result,
             vec![
                 Value::Integer(3),
-                Value::Integer(-3),
+                Value::Real(-3.0),
                 Value::Real(5.0),
-                Value::Integer(-2),
+                Value::Real(-2.0),
             ]
         );
 
