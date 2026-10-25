@@ -59,3 +59,41 @@ impl Value {
         }
     }
 }
+
+/// Parses a literal word of a Type 4 program: `true`, `false`, a radix integer
+/// (`base#digits`), a decimal integer, or a real. An integer outside the 32-bit
+/// range reads as a real, as in PostScript.
+impl TryFrom<&[u8]> for Value {
+    type Error = CalcError;
+
+    fn try_from(word: &[u8]) -> Result<Self, Self::Error> {
+        let invalid = || CalcError::InvalidNumber(String::from_utf8_lossy(word).into_owned());
+        let text = core::str::from_utf8(word).map_err(|_| invalid())?;
+        match text {
+            "true" => return Ok(Self::Bool(true)),
+            "false" => return Ok(Self::Bool(false)),
+            _ => {}
+        }
+        if let Some((base, digits)) = text.split_once('#') {
+            let base = base
+                .parse::<u32>()
+                .ok()
+                .filter(|base| (2..=36).contains(base))
+                .ok_or_else(invalid)?;
+            // The digits are an unsigned 32-bit pattern, so `16#FFFFFFFF` reads as -1.
+            return u32::from_str_radix(digits, base)
+                .ok()
+                .filter(|_| !digits.starts_with(['+', '-']))
+                .map(|value| Self::Integer(value.cast_signed()))
+                .ok_or_else(invalid);
+        }
+        if let Ok(value) = text.parse::<i32>() {
+            return Ok(Self::Integer(value));
+        }
+        text.parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(Self::Real)
+            .ok_or_else(invalid)
+    }
+}

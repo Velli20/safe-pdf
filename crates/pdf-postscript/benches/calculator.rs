@@ -7,7 +7,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use pdf_postscript::{calculator::execute, operator::Operator, parser::parse_tokens, value::Value};
+use pdf_postscript::{calculator::execute, operator::Operator, parser, value::Value};
 
 const SAMPLES: usize = 256;
 
@@ -25,9 +25,7 @@ const STACK: &str = "{ 3 copy 2 index 1 index add 4 1 roll mul exch div 5 1 roll
     3 copy pop pop pop pop 4 2 roll add add exch pop }";
 
 fn parse(code: &str) -> Vec<Operator> {
-    let code = code.replace('{', " { ").replace('}', " } ");
-    parse_tokens(&code.split_whitespace().collect::<Vec<_>>())
-        .expect("benchmark program should parse")
+    parser::parse(code.as_bytes()).expect("benchmark program should parse")
 }
 
 fn benchmark_program(criterion: &mut Criterion, name: &str, code: &str, inputs: usize) {

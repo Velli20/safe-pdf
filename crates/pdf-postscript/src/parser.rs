@@ -1,135 +1,150 @@
-use crate::{calculator::CalcError, operator::Operator, value::Value};
+use std::mem;
 
-/// Represents a block of operations.
-struct ProgramBlock {
-    ops: Vec<Vec<Operator>>,
+use crate::{calculator::CalcError, operator::Operator};
+
+/// PDF whitespace bytes, which separate tokens.
+const WHITESPACE: &[u8] = b"\0\t\n\x0C\r ";
+
+/// PostScript delimiter bytes, which end a word.
+const DELIMITERS: &[u8] = b"()<>[]{}/%";
+
+/// One lexical token of a Type 4 program.
+enum Token<'a> {
+    /// `{`, the start of a procedure.
+    ProcBegin,
+    /// `}`, the end of a procedure.
+    ProcEnd,
+    /// An operator name or a literal.
+    Word(&'a [u8]),
 }
 
-impl ProgramBlock {
-    /// Create a new empty program block.
-    fn new() -> Self {
-        Self { ops: vec![vec![]] }
-    }
+/// Splits Type 4 program bytes into tokens, skipping whitespace and `%` comments.
+struct Lexer<'a> {
+    bytes: &'a [u8],
+}
 
-    /// Push a new operator onto the current block.
-    fn push(&mut self, op: Operator) -> Result<(), CalcError> {
-        self.ops
-            .last_mut()
-            .ok_or(CalcError::EmptyBlockStack)?
-            .push(op);
-        Ok(())
-    }
-
-    /// Pop the current block and return it.
-    fn pop(&mut self) -> Option<Vec<Operator>> {
-        self.ops.pop()
-    }
-
-    /// Push a new block onto the stack.
-    fn push_block(&mut self) -> Result<(), CalcError> {
-        self.ops.push(vec![]);
-        Ok(())
+impl<'a> Lexer<'a> {
+    /// Consumes and returns the leading bytes that satisfy `matches`.
+    fn take_while(&mut self, matches: impl Fn(&u8) -> bool) -> &'a [u8] {
+        let len = self
+            .bytes
+            .iter()
+            .position(|byte| !matches(byte))
+            .unwrap_or(self.bytes.len());
+        let (taken, rest) = self
+            .bytes
+            .split_at_checked(len)
+            .unwrap_or((self.bytes, &[]));
+        self.bytes = rest;
+        taken
     }
 }
 
-/// Parse a linear slice of token strings into a flat `Vec<Operator>`.
-///
-/// The grammar handled is intentionally small: numeric literals, the subset of
-/// operators defined in [`Operator`], and procedure blocks delimited by `{` and
-/// `}` which are collected and stored inside `Operator::If` / `Operator::IfElse`.
-///
-/// Block parsing uses a stack (`block_stack`) so nesting is supported (only as
-/// needed by tests for `if` / `ifelse`). A closing brace currently acts as a
-/// marker; actual attachment to control operators happens when encountering
-/// `if` / `ifelse`.
-pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
-    let mut i = 0;
-    let mut block_stack = ProgramBlock::new();
-    while i < tokens.len() {
-        match tokens
-            .get(i)
-            .copied()
-            .ok_or(CalcError::TokenIndexOverflow)?
-        {
-            "add" => block_stack.push(Operator::Add)?,
-            "sub" => block_stack.push(Operator::Sub)?,
-            "mul" => block_stack.push(Operator::Mul)?,
-            "div" => block_stack.push(Operator::Div)?,
-            "idiv" => block_stack.push(Operator::Idiv)?,
-            "dup" => block_stack.push(Operator::Dup)?,
-            "exch" => block_stack.push(Operator::Exch)?,
-            "pop" => block_stack.push(Operator::Pop)?,
-            "eq" => block_stack.push(Operator::Eq)?,
-            "ne" => block_stack.push(Operator::Ne)?,
-            "gt" => block_stack.push(Operator::Gt)?,
-            "lt" => block_stack.push(Operator::Lt)?,
-            "ge" => block_stack.push(Operator::Ge)?,
-            "le" => block_stack.push(Operator::Le)?,
-            "and" => block_stack.push(Operator::And)?,
-            "or" => block_stack.push(Operator::Or)?,
-            "xor" => block_stack.push(Operator::Xor)?,
-            "not" => block_stack.push(Operator::Not)?,
-            "bitshift" => block_stack.push(Operator::Bitshift)?,
-            "if" => {
-                let block1 = block_stack.pop().ok_or(CalcError::MissingIfBlock)?;
-                block_stack.push(Operator::If(block1))?;
-            }
-            "ifelse" => {
-                let block1 = block_stack.pop().ok_or(CalcError::MissingIfElseBlocks)?;
-                let block2 = block_stack.pop().ok_or(CalcError::MissingIfElseBlocks)?;
-                block_stack.push(Operator::IfElse(block2, block1))?;
-            }
-            "{" => {
-                block_stack.push_block()?;
-            }
-            "}" => {}
-            "copy" => block_stack.push(Operator::Copy)?,
-            "index" => block_stack.push(Operator::Index)?,
-            "roll" => block_stack.push(Operator::Roll)?,
-            "sqrt" => block_stack.push(Operator::Sqrt)?,
-            "sin" => block_stack.push(Operator::Sin)?,
-            "cos" => block_stack.push(Operator::Cos)?,
-            "tan" => block_stack.push(Operator::Tan)?,
-            "atan" => block_stack.push(Operator::Atan)?,
-            "exp" => block_stack.push(Operator::Exp)?,
-            "ln" => block_stack.push(Operator::Ln)?,
-            "log" => block_stack.push(Operator::Log)?,
-            "cvi" => block_stack.push(Operator::Cvi)?,
-            "cvr" => block_stack.push(Operator::Cvr)?,
-            "mod" => block_stack.push(Operator::Mod)?,
-            "floor" => block_stack.push(Operator::Floor)?,
-            "ceiling" => block_stack.push(Operator::Ceiling)?,
-            "round" => block_stack.push(Operator::Round)?,
-            "truncate" => block_stack.push(Operator::Truncate)?,
-            "abs" => block_stack.push(Operator::Abs)?,
-            "neg" => block_stack.push(Operator::Neg)?,
-            "true" => block_stack.push(Operator::Number(Value::Bool(true)))?,
-            "false" => block_stack.push(Operator::Number(Value::Bool(false)))?,
-            t => {
-                let value = parse_number(t)?;
-                block_stack.push(Operator::Number(value))?;
-            }
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Result<Token<'a>, CalcError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            self.take_while(|byte| WHITESPACE.contains(byte));
+            let (&first, rest) = self.bytes.split_first()?;
+            let token = match first {
+                // A comment runs to the end of the line.
+                b'%' => {
+                    self.take_while(|byte| !matches!(byte, b'\r' | b'\n'));
+                    continue;
+                }
+                b'{' => Ok(Token::ProcBegin),
+                b'}' => Ok(Token::ProcEnd),
+                _ if DELIMITERS.contains(&first) => Err(CalcError::UnexpectedDelimiter(first)),
+                _ => {
+                    let word = self.take_while(|byte| {
+                        !WHITESPACE.contains(byte) && !DELIMITERS.contains(byte)
+                    });
+                    return Some(Ok(Token::Word(word)));
+                }
+            };
+            self.bytes = rest;
+            return Some(token);
         }
-        i = i.checked_add(1).ok_or(CalcError::TokenIndexOverflow)?;
     }
-
-    block_stack.pop().ok_or(CalcError::EmptyBlockStack)
 }
 
-fn parse_number(token: &str) -> Result<Value, CalcError> {
-    if token.contains('.') || token.contains('e') || token.contains('E') {
-        let value = token
-            .parse::<f64>()
-            .map_err(|_| CalcError::InvalidNumber(token.to_string()))?;
-        if value.is_finite() {
-            Ok(Value::Real(value))
+/// A procedure being read, with the finished procedures that wait for `if` or `ifelse`.
+#[derive(Default)]
+struct Procedure {
+    ops: Vec<Operator>,
+    operands: Vec<Vec<Operator>>,
+}
+
+impl Procedure {
+    /// Appends the operator a word names. `if` and `ifelse` take the pending
+    /// procedures as operands; any other word must not follow a procedure.
+    fn push_word(&mut self, word: &[u8]) -> Result<(), CalcError> {
+        let op = match word {
+            b"if" => {
+                let [then]: [Vec<Operator>; 1] = mem::take(&mut self.operands)
+                    .try_into()
+                    .map_err(|_| CalcError::MissingIfBlock)?;
+                Operator::If(then)
+            }
+            b"ifelse" => {
+                let [then, otherwise]: [Vec<Operator>; 2] = mem::take(&mut self.operands)
+                    .try_into()
+                    .map_err(|_| CalcError::MissingIfElseBlocks)?;
+                Operator::IfElse(then, otherwise)
+            }
+            word if self.operands.is_empty() => Operator::try_from(word)?,
+            _ => return Err(CalcError::UnexpectedProcedure),
+        };
+        self.ops.push(op);
+        Ok(())
+    }
+
+    /// Returns the operators of a procedure whose closing `}` was reached.
+    fn finish(self) -> Result<Vec<Operator>, CalcError> {
+        if self.operands.is_empty() {
+            Ok(self.ops)
         } else {
-            Err(CalcError::InvalidNumber(token.to_string()))
+            Err(CalcError::UnexpectedProcedure)
         }
-    } else {
-        token
-            .parse::<i32>()
-            .map(Value::Integer)
-            .map_err(|_| CalcError::InvalidNumber(token.to_string()))
     }
+}
+
+/// Parses a Type 4 function program into the operators of its outer procedure.
+///
+/// The program is one `{ ... }` procedure, optionally surrounded by whitespace
+/// and `%` comments. Nested procedures are only allowed as the operands of
+/// `if` and `ifelse`, which store them as `Operator::If` / `Operator::IfElse`.
+/// Nesting is tracked with an explicit stack, so deep nesting cannot overflow
+/// the native stack.
+pub fn parse(program: &[u8]) -> Result<Vec<Operator>, CalcError> {
+    let mut tokens = Lexer { bytes: program };
+    if !matches!(tokens.next().transpose()?, Some(Token::ProcBegin)) {
+        return Err(CalcError::MissingProgramProcedure);
+    }
+
+    let mut procedures = vec![Procedure::default()];
+    while let Some(token) = tokens.next().transpose()? {
+        match token {
+            Token::ProcBegin => procedures.push(Procedure::default()),
+            Token::Word(word) => procedures
+                .last_mut()
+                .ok_or(CalcError::UnbalancedBraces)?
+                .push_word(word)?,
+            Token::ProcEnd => {
+                let finished = procedures
+                    .pop()
+                    .ok_or(CalcError::UnbalancedBraces)?
+                    .finish()?;
+                match procedures.last_mut() {
+                    Some(parent) => parent.operands.push(finished),
+                    // The outer procedure closed; only whitespace and comments may follow.
+                    None if tokens.next().is_none() => return Ok(finished),
+                    None => return Err(CalcError::UnbalancedBraces),
+                }
+            }
+        }
+    }
+
+    Err(CalcError::UnbalancedBraces)
 }

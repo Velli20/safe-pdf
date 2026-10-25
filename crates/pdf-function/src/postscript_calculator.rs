@@ -86,12 +86,8 @@ impl FromPdfObject for PostScriptCalculatorFunction {
         let domain = dictionary.required_intervals(b"Domain")?;
         let range = dictionary.required_intervals(b"Range")?;
 
-        // Parse PostScript code: add spaces around braces for tokenization
-        let code_str = String::from_utf8_lossy(context.stream().raw_data());
-        let code_with_spaces = code_str.replace('{', " { ").replace('}', " } ");
-        let tokens: Vec<&str> = code_with_spaces.split_whitespace().collect();
-        let operators =
-            pdf_postscript::parser::parse_tokens(&tokens).map_err(FunctionReadError::from)?;
+        let operators = pdf_postscript::parser::parse(context.stream().raw_data())
+            .map_err(FunctionReadError::from)?;
 
         Ok(Self {
             operators,
