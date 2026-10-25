@@ -1,7 +1,6 @@
 //! Composite Type 0 specifications and their CID descendant fonts.
 
 use crate::{
-    cid_to_unicode::CidToUnicode,
     error::FontError,
     font::{FontSource, GlyphId},
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
@@ -12,7 +11,8 @@ use pdf_cmap::{Cid, PdfCMap, Type0EncodingCMap};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
-use std::sync::Arc;
+use read_fonts::{ps::agl, tables::post::DEFAULT_GLYPH_NAMES};
+use std::{collections::HashMap, sync::Arc};
 
 /// Descendant subtype used by a Type 0 composite font.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -74,6 +74,33 @@ impl CidToGidMap {
         };
         let gid = table.get(usize::try_from(cid.0).ok()?)?;
         Some(GlyphId(u32::from(*gid)))
+    }
+}
+
+/// Best-effort CID-to-Unicode mapping used when a CID font has no `/ToUnicode` entry.
+#[derive(Clone)]
+pub enum CidToUnicode {
+    /// Inverted predefined Unicode CMap of a CJK character collection.
+    Collection(Arc<HashMap<u16, char>>),
+    /// CIDs are glyph indices in the standard Macintosh glyph order.
+    ///
+    /// TrueType core fonts such as Arial, Times New Roman, and Courier New keep this order for
+    /// their first 258 glyphs. A non-embedded Identity CIDFontType2 font naming one of them
+    /// selects glyphs of that font by index, so its CIDs follow this order.
+    StandardGlyphOrder,
+}
+
+impl CidToUnicode {
+    /// Returns the Unicode value of `cid`, if known.
+    #[must_use]
+    pub fn get(&self, cid: u16) -> Option<char> {
+        match self {
+            Self::Collection(map) => map.get(&cid).copied(),
+            Self::StandardGlyphOrder => DEFAULT_GLYPH_NAMES
+                .get(usize::from(cid))
+                .copied()
+                .and_then(agl::name_to_char),
+        }
     }
 }
 

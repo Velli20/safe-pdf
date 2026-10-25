@@ -1,8 +1,8 @@
 //! Best-effort font descriptor metadata and CID collection information.
 
 use crate::{
-    cid_to_unicode::CidToUnicode,
     pdf::{CidSystemInfo, PdfFontDescriptor},
+    type0_font_spec::CidToUnicode,
 };
 use pdf_cmap::predefined::PredefinedCMap;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
@@ -47,7 +47,7 @@ impl FromPdfObject for CidSystemInfo {
 }
 
 impl CidSystemInfo {
-    /// Finds the existing collection-based Unicode fallback when the ordering is known.
+    /// Finds the collection-based Unicode fallback when the ordering is known.
     pub(crate) fn cid_to_unicode_map(&self) -> Option<CidToUnicode> {
         let cmap_name: &[u8] = match self.ordering.as_ref() {
             b"Japan1" => b"UniJIS-UCS2-HW-H",
@@ -57,6 +57,8 @@ impl CidSystemInfo {
             _ => return None,
         };
         let cmap = PredefinedCMap::from_name(cmap_name).ok()??;
-        Some(CidToUnicode::Collection(Arc::new(cmap.cid_to_unicode_map())))
+        Some(CidToUnicode::Collection(Arc::new(
+            cmap.cid_to_unicode_map(),
+        )))
     }
 }
