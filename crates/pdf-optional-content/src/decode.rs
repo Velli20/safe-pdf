@@ -122,7 +122,8 @@ impl FromPdfObject for OptionalContentMembership {
                 // `/OCGs` is a single group or an array of them.
                 groups: context.optional_list(b"OCGs")?,
                 policy: context.optional(b"P")?.unwrap_or_default(),
-                has_visibility_expression: context.contains(b"VE"),
+                // A malformed expression falls back to `/OCGs` and `/P`.
+                visibility_expression: context.lenient(b"VE"),
             }),
             // A single group is a membership of that group under the default `AnyOn` policy.
             // A missing or invalid `/Type` is ignored and the dictionary read as a group.
@@ -134,7 +135,7 @@ impl FromPdfObject for OptionalContentMembership {
                         name.as_deref(),
                     )?],
                     policy: OptionalContentPolicy::AnyOn,
-                    has_visibility_expression: false,
+                    visibility_expression: None,
                 })
             }
         }

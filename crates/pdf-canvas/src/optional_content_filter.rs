@@ -6,7 +6,7 @@ use pdf_optional_content::{OptionalContentMembership, OptionalContentState};
 /// Only the outermost hiding sequence is tracked: everything nested inside hidden
 /// content is hidden too, so inner sequences need no visibility lookup.
 pub(crate) struct OptionalContentFilter<'a> {
-    /// Group visibility the filter applies; at least one group is off.
+    /// Group visibility the filter applies.
     state: &'a OptionalContentState,
     /// Number of open marked-content sequences.
     depth: usize,
@@ -15,14 +15,16 @@ pub(crate) struct OptionalContentFilter<'a> {
 }
 
 impl<'a> OptionalContentFilter<'a> {
-    /// Creates a filter for `state`, or `None` when every group is on and no content
-    /// can be hidden.
-    pub(crate) fn new(state: &'a OptionalContentState) -> Option<Self> {
-        state.hides_any().then_some(Self {
+    /// Creates a filter for `state`.
+    ///
+    /// Content can be hidden even when every group is on, by an `/AnyOff` or `/AllOff`
+    /// policy or a `/Not` visibility expression, so every state is filtered.
+    pub(crate) fn new(state: &'a OptionalContentState) -> Self {
+        Self {
             state,
             depth: 0,
             hidden_from: None,
-        })
+        }
     }
 
     /// Returns a filter over the same state with no open sequences, for a nested canvas.
