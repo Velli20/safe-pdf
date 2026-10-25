@@ -53,25 +53,14 @@ pub enum CalcError {
 struct Frame<'a> {
     ops: &'a [Operator],
     ip: usize,
-    stack: Vec<Value>,
 }
 
-impl<'a> Frame<'a> {
-    /// Handles completion of a frame: propagates result to parent or returns if root.
-    /// Returns Some(final_stack) if execution should return, or None to continue.
-    fn complete_frame(frames: &mut Vec<Frame<'a>>) -> Option<Vec<Value>> {
-        let finished = frames.pop()?;
-        if let Some(parent) = frames.last_mut() {
-            parent.stack.clear();
-            parent.stack.extend(finished.stack);
-            None
-        } else {
-            Some(finished.stack)
-        }
-    }
+/// The operand stack shared by the program and every procedure it executes.
+struct OperandStack {
+    values: Vec<Value>,
 }
 
-impl Frame<'_> {
+impl OperandStack {
     /// Pushes a value onto the top of the stack.
     fn push(&mut self, value: Value) -> Result<(), CalcError> {
         match value {
@@ -79,7 +68,7 @@ impl Frame<'_> {
                 Err(CalcError::ArithmeticOverflow { op: "push" })
             }
             _ => {
-                self.stack.push(value);
+                self.values.push(value);
                 Ok(())
             }
         }
@@ -88,7 +77,7 @@ impl Frame<'_> {
     /// Pops a value from the top of the stack.
     /// Returns an error if the stack is empty.
     pub fn pop(&mut self) -> Result<Value, CalcError> {
-        self.stack.pop().ok_or(CalcError::StackUnderflow {
+        self.values.pop().ok_or(CalcError::StackUnderflow {
             needed: 1,
             found: 0,
         })
@@ -96,16 +85,19 @@ impl Frame<'_> {
 
     /// Returns the number of elements in the stack.
     pub fn len(&self) -> usize {
-        self.stack.len()
+        self.values.len()
     }
 
     /// Returns the value at the top of the stack without removing it.
     /// Returns an error if the stack is empty.
     pub fn back(&self) -> Result<Value, CalcError> {
-        self.stack.last().copied().ok_or(CalcError::StackUnderflow {
-            needed: 1,
-            found: 0,
-        })
+        self.values
+            .last()
+            .copied()
+            .ok_or(CalcError::StackUnderflow {
+                needed: 1,
+                found: 0,
+            })
     }
 }
 
@@ -113,27 +105,23 @@ impl Frame<'_> {
 ///
 /// The interpreter uses a typed operand stack. Procedures
 /// (blocks for `if` / `ifelse`) are represented as nested `Vec<Operator>` and
-/// are executed with cloned snapshots of the current stack.
+/// operate on the same stack as the program that runs them.
 ///
 /// Returned is the final stack contents (bottom-to-top order) on success.
 ///
 /// Errors include stack underflow, division by zero, square root of a negative
 /// number, and invalid counts for `roll` / `copy`.
-pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, CalcError> {
+pub fn execute(input_stack: Vec<Value>, ops: &[Operator]) -> Result<Vec<Value>, CalcError> {
+    let mut stack = OperandStack {
+        values: input_stack,
+    };
     let mut frames: Vec<Frame> = Vec::new();
-    frames.push(Frame {
-        ops,
-        ip: 0,
-        stack: Vec::from(input_stack),
-    });
+    frames.push(Frame { ops, ip: 0 });
 
     while let Some(frame) = frames.last_mut() {
         if frame.ip >= frame.ops.len() {
-            if let Some(final_stack) = Frame::complete_frame(&mut frames) {
-                return Ok(final_stack);
-            } else {
-                continue;
-            }
+            frames.pop();
+            continue;
         }
 
         let op = &frame
@@ -148,88 +136,88 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
             .ok_or(CalcError::ArithmeticOverflow { op: "ip_inc" })?;
         match op {
             Operator::Add => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(add(a, b)?)?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(add(a, b)?)?;
             }
             Operator::Sub => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(sub(a, b)?)?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(sub(a, b)?)?;
             }
             Operator::Mul => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(mul(a, b)?)?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(mul(a, b)?)?;
             }
             Operator::Div => {
-                let b = frame.pop()?;
+                let b = stack.pop()?;
                 let b_num = b.to_f64("div")?;
                 if b_num == 0.0 {
                     return Err(CalcError::DivisionByZero);
                 }
-                let a = frame.pop()?;
+                let a = stack.pop()?;
                 let result = a.to_f64("div")? / b_num;
-                frame.push(Value::Real(result))?;
+                stack.push(Value::Real(result))?;
             }
             Operator::Idiv => {
-                let b = frame.pop()?.to_i32("idiv")?;
+                let b = stack.pop()?.to_i32("idiv")?;
                 if b == 0 {
                     return Err(CalcError::DivisionByZero);
                 }
-                let a = frame.pop()?.to_i32("idiv")?;
-                frame.push(Value::Integer(
+                let a = stack.pop()?.to_i32("idiv")?;
+                stack.push(Value::Integer(
                     a.checked_div(b)
                         .ok_or(CalcError::ArithmeticOverflow { op: "idiv" })?,
                 ))?;
             }
             Operator::Dup => {
-                let a = frame.back()?;
-                frame.push(a)?;
+                let a = stack.back()?;
+                stack.push(a)?;
             }
             Operator::Exch => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(b)?;
-                frame.push(a)?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(b)?;
+                stack.push(a)?;
             }
             Operator::Pop => {
-                frame.pop()?;
+                stack.pop()?;
             }
             Operator::Eq => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(Value::Bool(a == b))?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(Value::Bool(a == b))?;
             }
             Operator::Ne => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(Value::Bool(a != b))?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(Value::Bool(a != b))?;
             }
             Operator::Gt => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(Value::Bool(a.to_f64("gt")? > b.to_f64("gt")?))?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(Value::Bool(a.to_f64("gt")? > b.to_f64("gt")?))?;
             }
             Operator::Lt => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(Value::Bool(a.to_f64("lt")? < b.to_f64("lt")?))?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(Value::Bool(a.to_f64("lt")? < b.to_f64("lt")?))?;
             }
             Operator::Ge => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(Value::Bool(a.to_f64("ge")? >= b.to_f64("ge")?))?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(Value::Bool(a.to_f64("ge")? >= b.to_f64("ge")?))?;
             }
             Operator::Le => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(Value::Bool(a.to_f64("le")? <= b.to_f64("le")?))?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(Value::Bool(a.to_f64("le")? <= b.to_f64("le")?))?;
             }
             Operator::And => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(logical_or_bitwise_binary(
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(logical_or_bitwise_binary(
                     "and",
                     a,
                     b,
@@ -238,9 +226,9 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                 )?)?;
             }
             Operator::Or => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(logical_or_bitwise_binary(
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(logical_or_bitwise_binary(
                     "or",
                     a,
                     b,
@@ -249,9 +237,9 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                 )?)?;
             }
             Operator::Xor => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(logical_or_bitwise_binary(
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(logical_or_bitwise_binary(
                     "xor",
                     a,
                     b,
@@ -260,8 +248,8 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                 )?)?;
             }
             Operator::Not => {
-                let a = frame.pop()?;
-                frame.push(match a {
+                let a = stack.pop()?;
+                stack.push(match a {
                     Value::Bool(value) => Value::Bool(!value),
                     Value::Integer(value) => Value::Integer(!value),
                     Value::Real(_) => {
@@ -274,63 +262,42 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                 })?;
             }
             Operator::Bitshift => {
-                let shift = frame.pop()?.to_i32("bitshift")?;
-                let value = frame.pop()?.to_i32("bitshift")?;
-                frame.push(Value::Integer(bitshift(value, shift)?))?;
+                let shift = stack.pop()?.to_i32("bitshift")?;
+                let value = stack.pop()?.to_i32("bitshift")?;
+                stack.push(Value::Integer(bitshift(value, shift)?))?;
             }
             Operator::If(block) => {
-                let cond = frame.pop()?.to_bool("if")?;
+                let cond = stack.pop()?.to_bool("if")?;
                 if cond {
-                    // Push new frame with a cloned snapshot of current stack
-                    let snapshot = frame.stack.clone();
-                    frames.push(Frame {
-                        ops: block,
-                        ip: 0,
-                        stack: snapshot,
-                    });
+                    frames.push(Frame { ops: block, ip: 0 });
                 }
             }
             Operator::IfElse(block1, block2) => {
-                let cond = frame.pop()?.to_bool("ifelse")?;
+                let cond = stack.pop()?.to_bool("ifelse")?;
                 let chosen = if cond { block1 } else { block2 };
-                let snapshot = frame.stack.clone();
-                frames.push(Frame {
-                    ops: chosen,
-                    ip: 0,
-                    stack: snapshot,
-                });
+                frames.push(Frame { ops: chosen, ip: 0 });
             }
             Operator::Copy => {
-                let n_val = frame.pop()?.to_i32("copy")?;
+                let n_val = stack.pop()?.to_i32("copy")?;
                 let n = usize::try_from(n_val).map_err(|_| CalcError::NegativeIntegerOperand {
                     op: "copy",
                     value: f64::from(n_val),
                 })?;
 
-                let len = frame.len();
-                let start = len
+                let start = stack
+                    .len()
                     .checked_sub(n)
                     .ok_or(CalcError::ArithmeticOverflow { op: "copy_index" })?;
-                let to_copy = frame
-                    .stack
-                    .get(start..)
-                    .ok_or(CalcError::IndexOutOfBounds {
-                        op: "copy",
-                        length: frame.len(),
-                        index: start,
-                    })?
-                    .to_vec();
-                for v in to_copy {
-                    frame.push(v)?;
-                }
+                // `start` is at most the length, and the copied values are already finite.
+                stack.values.extend_from_within(start..);
             }
             Operator::Index => {
-                let n_val = frame.pop()?.to_i32("index")?;
+                let n_val = stack.pop()?.to_i32("index")?;
                 let n = usize::try_from(n_val).map_err(|_| CalcError::NegativeIntegerOperand {
                     op: "index",
                     value: f64::from(n_val),
                 })?;
-                let len = frame.len();
+                let len = stack.len();
                 if n >= len {
                     return Err(CalcError::IndexOutOfBounds {
                         op: "index",
@@ -343,69 +310,107 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                     .checked_sub(1)
                     .and_then(|value| value.checked_sub(n))
                     .ok_or(CalcError::ArithmeticOverflow { op: "index" })?;
-                let value = *frame.stack.get(target).ok_or(CalcError::IndexOutOfBounds {
-                    op: "index",
-                    length: len,
-                    index: n,
-                })?;
-                frame.push(value)?;
+                let value = *stack
+                    .values
+                    .get(target)
+                    .ok_or(CalcError::IndexOutOfBounds {
+                        op: "index",
+                        length: len,
+                        index: n,
+                    })?;
+                stack.push(value)?;
             }
             Operator::Sqrt => {
-                let a = frame.pop()?.to_f64("sqrt")?;
+                let a = stack.pop()?.to_f64("sqrt")?;
                 if a < 0.0 {
                     return Err(CalcError::NegativeSqrt);
                 }
-                frame.push(Value::Real(a.sqrt()))?;
+                stack.push(Value::Real(a.sqrt()))?;
             }
             Operator::Sin => {
-                let angle = frame.pop()?.to_f64("sin")?;
-                frame.push(Value::Real(angle.to_radians().sin()))?;
+                let angle = stack.pop()?.to_f64("sin")?;
+                stack.push(Value::Real(angle.to_radians().sin()))?;
             }
             Operator::Cos => {
-                let angle = frame.pop()?.to_f64("cos")?;
-                frame.push(Value::Real(angle.to_radians().cos()))?;
+                let angle = stack.pop()?.to_f64("cos")?;
+                stack.push(Value::Real(angle.to_radians().cos()))?;
             }
             Operator::Tan => {
-                let angle = frame.pop()?.to_f64("tan")?;
-                frame.push(Value::Real(angle.to_radians().tan()))?;
+                let angle = stack.pop()?.to_f64("tan")?;
+                stack.push(Value::Real(angle.to_radians().tan()))?;
             }
             Operator::Atan => {
-                let x = frame.pop()?.to_f64("atan")?;
-                let y = frame.pop()?.to_f64("atan")?;
-                frame.push(Value::Real(y.atan2(x).to_degrees()))?;
+                let x = stack.pop()?.to_f64("atan")?;
+                let y = stack.pop()?.to_f64("atan")?;
+                let angle = y.atan2(x).to_degrees();
+                // `atan2` yields (-180, 180]; PostScript angles lie in [0, 360).
+                let angle = if angle < 0.0 { angle + 360.0 } else { angle };
+                stack.push(Value::Real(angle))?;
             }
-            Operator::Log => {
-                let a = frame.pop()?.to_f64("log")?;
+            Operator::Exp => {
+                let exponent = stack.pop()?.to_f64("exp")?;
+                let base = stack.pop()?.to_f64("exp")?;
+                stack.push(checked_real(base.powf(exponent), "exp")?)?;
+            }
+            Operator::Ln => {
+                let a = stack.pop()?.to_f64("ln")?;
                 if a <= 0.0 {
                     return Err(CalcError::LogDomainError { value: a });
                 }
-                frame.push(Value::Real(a.ln()))?;
+                stack.push(Value::Real(a.ln()))?;
+            }
+            Operator::Log => {
+                let a = stack.pop()?.to_f64("log")?;
+                if a <= 0.0 {
+                    return Err(CalcError::LogDomainError { value: a });
+                }
+                stack.push(Value::Real(a.log10()))?;
             }
             Operator::Mod => {
-                let b = frame.pop()?;
-                let a = frame.pop()?;
-                frame.push(modulo(a, b)?)?;
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(modulo(a, b)?)?;
             }
             Operator::Floor => {
-                let a = frame.pop()?.to_f64("floor")?;
-                frame.push(real_to_checked_integer(a.floor(), "floor")?)?;
+                let a = stack.pop()?;
+                stack.push(round_number(a, "floor", f64::floor)?)?;
+            }
+            Operator::Ceiling => {
+                let a = stack.pop()?;
+                stack.push(round_number(a, "ceiling", f64::ceil)?)?;
+            }
+            Operator::Round => {
+                let a = stack.pop()?;
+                stack.push(round_number(a, "round", |value| {
+                    // Halves round toward positive infinity (`-2.5` becomes `-2`).
+                    let floor = value.floor();
+                    if value - floor >= 0.5 {
+                        floor + 1.0
+                    } else {
+                        floor
+                    }
+                })?)?;
             }
             Operator::Cvi => {
-                let a = frame.pop()?;
+                let a = stack.pop()?;
                 let truncated = a.to_f64("cvi")?.trunc();
-                frame.push(real_to_checked_integer(truncated, "cvi")?)?;
+                stack.push(real_to_checked_integer(truncated, "cvi")?)?;
             }
             Operator::Cvr => {
-                let a = frame.pop()?;
-                frame.push(Value::Real(a.to_f64("cvr")?))?;
+                let a = stack.pop()?;
+                stack.push(Value::Real(a.to_f64("cvr")?))?;
             }
             Operator::Abs => {
-                let a = frame.pop()?;
-                frame.push(abs(a)?)?;
+                let a = stack.pop()?;
+                stack.push(abs(a)?)?;
+            }
+            Operator::Neg => {
+                let a = stack.pop()?;
+                stack.push(neg(a)?)?;
             }
             Operator::Roll => {
-                let m_val = frame.pop()?.to_i32("roll")?;
-                let n_val = frame.pop()?.to_i32("roll")?;
+                let m_val = stack.pop()?.to_i32("roll")?;
+                let n_val = stack.pop()?.to_i32("roll")?;
                 let m = isize::try_from(m_val).map_err(|_| CalcError::NegativeIntegerOperand {
                     op: "roll",
                     value: f64::from(m_val),
@@ -414,17 +419,17 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                     op: "roll",
                     value: f64::from(n_val),
                 })?;
-                if n > frame.len() {
+                if n > stack.len() {
                     return Err(CalcError::RollCountTooLarge {
                         n,
-                        size: frame.len(),
+                        size: stack.len(),
                     });
                 }
                 if n == 0 {
                     // Nothing to rotate.
                     continue;
                 }
-                let start = frame
+                let start = stack
                     .len()
                     .checked_sub(n)
                     .ok_or(CalcError::ArithmeticOverflow { op: "roll_index" })?;
@@ -435,29 +440,30 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
                 let m_norm_usize = usize::try_from(m_norm)
                     .map_err(|_| CalcError::ArithmeticOverflow { op: "roll" })?;
                 if m_norm_usize != 0 {
-                    let length = frame.len();
+                    let length = stack.len();
                     // Rotate only if there's an actual shift.
-                    let tail = frame
-                        .stack
-                        .get_mut(start..)
-                        .ok_or(CalcError::IndexOutOfBounds {
-                            op: "roll",
-                            length,
-                            index: start,
-                        })?;
+                    let tail =
+                        stack
+                            .values
+                            .get_mut(start..)
+                            .ok_or(CalcError::IndexOutOfBounds {
+                                op: "roll",
+                                length,
+                                index: start,
+                            })?;
                     tail.rotate_right(m_norm_usize);
                 }
             }
             Operator::Truncate => {
-                let a = frame.pop()?.to_f64("truncate")?;
-                frame.push(real_to_checked_integer(a.trunc(), "truncate")?)?;
+                let a = stack.pop()?;
+                stack.push(round_number(a, "truncate", f64::trunc)?)?;
             }
-            Operator::Number(value) => frame.push(*value)?,
+            Operator::Number(value) => stack.push(*value)?,
         }
     }
 
-    // Should only be reachable if there were zero frames (which cannot happen)
-    Ok(Vec::new())
+    // The root frame finished, so the stack holds the program result.
+    Ok(stack.values)
 }
 
 /// Convenience helper that tokenizes & parses a PostScript-like `code` string
@@ -469,7 +475,7 @@ pub fn execute(input_stack: &[Value], ops: &[Operator]) -> Result<Vec<Value>, Ca
 pub fn evaluate_postscript(input_stack: &[Value], code: &str) -> Result<Vec<Value>, CalcError> {
     let code = code.replace("{", " { ").replace("}", " } ");
     let ops = parse_tokens(&code.split_whitespace().collect::<Vec<_>>())?;
-    execute(input_stack, &ops)
+    execute(input_stack.to_vec(), &ops)
 }
 
 fn add(a: Value, b: Value) -> Result<Value, CalcError> {
@@ -532,6 +538,33 @@ fn abs(value: Value) -> Result<Value, CalcError> {
         Value::Real(value) => checked_real(value.abs(), "abs"),
         Value::Bool(_) => Err(CalcError::InvalidOperandType {
             op: "abs",
+            expected: "number",
+            found: value.type_name(),
+        }),
+    }
+}
+
+fn neg(value: Value) -> Result<Value, CalcError> {
+    match value {
+        Value::Integer(value) => Ok(value
+            .checked_neg()
+            .map_or_else(|| Value::Real(-f64::from(value)), Value::Integer)),
+        Value::Real(value) => checked_real(-value, "neg"),
+        Value::Bool(_) => Err(CalcError::InvalidOperandType {
+            op: "neg",
+            expected: "number",
+            found: value.type_name(),
+        }),
+    }
+}
+
+/// Applies an integral rounding function to a number, keeping the operand's type.
+fn round_number(value: Value, op: &'static str, round: fn(f64) -> f64) -> Result<Value, CalcError> {
+    match value {
+        Value::Integer(_) => Ok(value),
+        Value::Real(value) => checked_real(round(value), op),
+        Value::Bool(_) => Err(CalcError::InvalidOperandType {
+            op,
             expected: "number",
             found: value.type_name(),
         }),
@@ -1176,9 +1209,9 @@ mod typed_tests {
             result,
             vec![
                 Value::Integer(3),
-                Value::Integer(-3),
+                Value::Real(-3.0),
                 Value::Real(5.0),
-                Value::Integer(-2),
+                Value::Real(-2.0),
             ]
         );
 

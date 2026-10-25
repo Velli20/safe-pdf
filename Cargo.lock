@@ -2436,6 +2436,7 @@ dependencies = [
 name = "pdf-postscript"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "num-traits",
  "thiserror 2.0.12",
 ]
