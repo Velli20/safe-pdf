@@ -293,7 +293,7 @@ mod tests {
             IndirectValue::Object(object) => object,
             IndirectValue::Stream(header) => {
                 let length = ObjectReader::new(EmptySource)
-                    .read::<usize>(header.dictionary().get_or_err(b"Length")?)?;
+                    .required::<usize>(header.dictionary(), b"Length")?;
                 parser.parse_stream_body(header, length)?
             }
         };

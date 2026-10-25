@@ -12,8 +12,8 @@ use crate::object_id::ObjectId;
 use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_name::PdfName;
+use crate::pdf_object::PdfObject;
 use crate::reader::ObjectAccess;
-use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
 use pdf_graphics::interval::Interval;
 use std::collections::HashMap;
@@ -106,6 +106,14 @@ pub struct DictionaryContext<'read, A: ObjectAccess + ?Sized> {
 }
 
 impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
+    /// Binds a dictionary the caller already holds to an active access implementation.
+    ///
+    /// Entries are read within the access's current traversal, as if the dictionary had
+    /// been reached through it.
+    pub fn new(dictionary: &'read Dictionary, access: &'read mut A) -> Self {
+        Self { dictionary, access }
+    }
+
     /// Returns whether `key` is present, whatever its value, including null or invalid ones.
     pub fn contains(&self, key: &[u8]) -> bool {
         self.dictionary.get(key).is_some()
@@ -136,7 +144,7 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
     ///
     /// For an entry that may refer back to an object being decoded, whose eager read would
     /// reenter the active path.
-    pub fn resolve_entry(&mut self, key: &[u8]) -> ReadResult<Option<ResolvedObject>> {
+    pub fn resolve_entry(&mut self, key: &[u8]) -> ReadResult<Option<PdfObject>> {
         let Some(object) = self.dictionary.get(key) else {
             return Ok(None);
         };
@@ -500,7 +508,7 @@ macro_rules! context_access {
             pub fn resolve(
                 &mut self,
                 object: &ObjectVariant,
-            ) -> ReadResult<crate::resolved_object::ResolvedObject> {
+            ) -> ReadResult<crate::pdf_object::PdfObject> {
                 self.access.resolve(object)
             }
 

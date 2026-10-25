@@ -72,7 +72,7 @@ impl PdfReader {
         diagnostics: &mut Vec<PdfReadDiagnostic>,
     ) -> Result<PdfDocument, PdfReaderError> {
         let reader = ObjectReader::new(objects);
-        let catalog = reader.read::<Catalog>(trailer.dictionary.get_or_err(b"Root")?)?;
+        let catalog = reader.required::<Catalog>(&trailer.dictionary, b"Root")?;
         Ok(catalog.into_document(reader, diagnostics))
     }
 }
