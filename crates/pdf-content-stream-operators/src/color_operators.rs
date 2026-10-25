@@ -18,20 +18,21 @@ impl ColorOperands {
     /// followed by a pattern name.
     #[inline]
     pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
+        let mut components = Vec::with_capacity(operands.array().len());
         // The pattern name should come last, after the numeric color components
-        let count = operands
-            .array()
-            .iter()
-            .take_while(|value| !value.is_name())
-            .count();
-        let components = (0..count)
-            .map(|index| operands.at(index))
-            .collect::<ReadResult<_>>()?;
-        let pattern = operands.at::<PdfString>(count).ok().map(|name| name.bytes);
+        for (index, object) in operands.array().iter().enumerate() {
+            if object.is_name() {
+                return Ok(Self {
+                    components,
+                    pattern: Some(operands.at::<PdfString>(index)?.bytes),
+                });
+            }
+            components.push(operands.at(index)?);
+        }
 
         Ok(Self {
             components,
-            pattern,
+            pattern: None,
         })
     }
 
