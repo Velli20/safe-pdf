@@ -7,6 +7,7 @@
 //! advances the document revision.
 use crate::error::OptionalContentError;
 use crate::ocg_state::{OcgStateEntry, OcgTarget};
+use crate::visibility_expression::VisibilityExpression;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Identity of one optional content group within its source document.
@@ -87,10 +88,9 @@ pub struct OptionalContentMembership {
     pub groups: Vec<OptionalContentGroupId>,
     /// The `/P` policy; `AnyOn` when the entry is absent.
     pub policy: OptionalContentPolicy,
-    /// Whether a `/VE` visibility expression was present. Expressions are not
-    /// evaluated, and content carrying one is treated as visible. Retaining the
-    /// flag lets a host report the limitation without decoding the entry again.
-    pub has_visibility_expression: bool,
+    /// The `/VE` visibility expression. When present it decides visibility in place
+    /// of `/OCGs` and `/P`.
+    pub visibility_expression: Option<VisibilityExpression>,
 }
 
 impl OptionalContentMembership {
@@ -99,6 +99,10 @@ impl OptionalContentMembership {
     /// Callers use this to refresh only the pages a state change can affect.
     pub fn depends_on(&self, changed: &BTreeSet<OptionalContentGroupId>) -> bool {
         self.groups.iter().any(|id| changed.contains(id))
+            || self
+                .visibility_expression
+                .as_ref()
+                .is_some_and(|expression| expression.depends_on(changed))
     }
 }
 
@@ -190,11 +194,13 @@ impl OptionalContentState {
 
     /// Whether content depending on `content` is currently displayed.
     ///
-    /// An `/OCMD` with no member groups imposes no restriction, and one carrying a
-    /// `/VE` visibility expression is treated as visible because the expression
-    /// takes precedence over `/OCGs` and is not evaluated here.
+    /// A `/VE` visibility expression takes precedence over `/OCGs` and `/P`; without
+    /// one, an `/OCMD` with no member groups imposes no restriction.
     pub fn is_visible(&self, content: &OptionalContentMembership) -> bool {
-        if content.has_visibility_expression || content.groups.is_empty() {
+        if let Some(expression) = &content.visibility_expression {
+            return expression.is_visible(self);
+        }
+        if content.groups.is_empty() {
             return true;
         }
         let mut groups = content.groups.iter().map(|id| self.group_visible(id));
@@ -242,14 +248,9 @@ impl OptionalContentState {
         changed
     }
 
-    /// Whether any tracked group is off; when none is, no content depends on this state.
-    pub fn hides_any(&self) -> bool {
-        self.visible.values().any(|visible| !visible)
-    }
-
     /// Whether one group is on. An untracked group is visible, the safe default for
     /// a document whose `/OCProperties` never declared it.
-    fn group_visible(&self, id: &OptionalContentGroupId) -> bool {
+    pub(crate) fn group_visible(&self, id: &OptionalContentGroupId) -> bool {
         self.visible.get(id).copied().unwrap_or(true)
     }
 

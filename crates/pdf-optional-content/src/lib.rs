@@ -9,6 +9,8 @@ pub mod error;
 pub mod ocg_state;
 /// Optional content group visibility applied to page content and annotations.
 pub mod optional_content;
+/// `/VE` visibility expressions of optional content membership dictionaries.
+pub mod visibility_expression;
 mod wire;
 
 pub use error::OptionalContentError;
@@ -18,3 +20,4 @@ pub use optional_content::{
     OptionalContentGroupId, OptionalContentMembership, OptionalContentPolicy,
     OptionalContentProperties, OptionalContentState,
 };
+pub use visibility_expression::VisibilityExpression;

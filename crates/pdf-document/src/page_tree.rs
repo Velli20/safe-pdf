@@ -3,7 +3,7 @@
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult, pdf_array::PdfArray,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{any::TypeId, collections::HashMap, sync::Arc};
 
 use crate::page::PdfPage;
 
@@ -35,6 +35,13 @@ impl FromPdfObject for PageTree {
             &mut ResourceMerges::default(),
         );
         Ok(Self { pages })
+    }
+
+    /// The root is decoded as the same node its kids are, so a kid naming the root is
+    /// a cycle rather than a second copy of the tree.
+    #[inline]
+    fn cycle_key() -> TypeId {
+        PageTreeNode::cycle_key()
     }
 }
 

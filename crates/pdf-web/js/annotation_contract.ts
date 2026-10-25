@@ -1176,11 +1176,10 @@ groups: Array<OptionalContentGroupId>,
  */
 policy: OptionalContentPolicy,
 /**
- * Whether a `/VE` visibility expression was present. Expressions are not
- * evaluated, and content carrying one is treated as visible. Retaining the
- * flag lets a host report the limitation without decoding the entry again.
+ * The `/VE` visibility expression. When present it decides visibility in place
+ * of `/OCGs` and `/P`.
  */
-has_visibility_expression: boolean, };
+visibility_expression: VisibilityExpression | null, };
 
 /**
  * The `/P` visibility policy of an `/OCMD` membership dictionary.
@@ -1773,6 +1772,11 @@ field_type: Array<number>,
  * Current retained value, distinct from an absent value.
  */
 value: WidgetFieldValue | null, };
+
+/**
+ * An `/OCMD` `/VE` visibility expression combining group states with boolean operators.
+ */
+export type VisibilityExpression = { "Group": OptionalContentGroupId } | { "Not": VisibilityExpression } | { "And": Array<VisibilityExpression> } | { "Or": Array<VisibilityExpression> };
 
 /**
  * One projected entry plus its DOM placement.

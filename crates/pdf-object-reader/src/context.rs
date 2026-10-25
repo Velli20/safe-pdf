@@ -143,7 +143,7 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
     /// Resolves an entry's reference chain without entering its eager decoding scope.
     ///
     /// For an entry that may refer back to an object being decoded, whose eager read would
-    /// reenter the active path.
+    /// reenter an object still being decoded.
     pub fn resolve_entry(&mut self, key: &[u8]) -> ReadResult<Option<PdfObject>> {
         let Some(object) = self.dictionary.get(key) else {
             return Ok(None);

@@ -1,5 +1,6 @@
 //! Reader orchestration and session-local traversal state.
 
+use std::any::TypeId;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 
@@ -17,27 +18,18 @@ use crate::pdf_object::PdfObject;
 use crate::source::ObjectSource;
 use std::sync::Arc;
 
-/// Bounds reference traversal and nested decoding, including direct containers.
+/// Bounds nested decoding, including direct containers and reference hops.
 ///
-/// Both limits default to 128. They count active stack depth, not total objects.
+/// The limit defaults to 128. It counts active stack depth, not total objects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadLimits {
-    max_reference_depth: NonZeroUsize,
     max_decode_depth: NonZeroUsize,
 }
 
 impl ReadLimits {
-    /// Configures independent limits for active references and decoder invocations.
-    pub fn new(max_reference_depth: NonZeroUsize, max_decode_depth: NonZeroUsize) -> Self {
-        Self {
-            max_reference_depth,
-            max_decode_depth,
-        }
-    }
-
-    /// Returns the maximum number of simultaneously active indirect references.
-    pub fn max_reference_depth(self) -> NonZeroUsize {
-        self.max_reference_depth
+    /// Configures the limit on simultaneously active decoder invocations.
+    pub fn new(max_decode_depth: NonZeroUsize) -> Self {
+        Self { max_decode_depth }
     }
 
     /// Returns the maximum nesting of decoders, including direct array elements.
@@ -48,10 +40,7 @@ impl ReadLimits {
 
 impl Default for ReadLimits {
     fn default() -> Self {
-        Self::new(
-            NonZeroUsize::new(128).unwrap_or(NonZeroUsize::MIN),
-            NonZeroUsize::new(128).unwrap_or(NonZeroUsize::MIN),
-        )
+        Self::new(NonZeroUsize::new(128).unwrap_or(NonZeroUsize::MIN))
     }
 }
 
@@ -108,7 +97,7 @@ impl<S, C> ObjectReader<S, C> {
         &self.content_stream_ids
     }
 
-    /// Returns the reference and decoding depth limits.
+    /// Returns the decoding depth limit.
     pub fn limits(&self) -> ReadLimits {
         self.limits
     }
@@ -117,7 +106,6 @@ impl<S, C> ObjectReader<S, C> {
     pub fn session(&self) -> ReadSession<'_, S, C> {
         ReadSession {
             reader: self,
-            active_path: Vec::new(),
             active_ids: HashSet::new(),
             decode_depth: 0,
         }
@@ -203,10 +191,10 @@ pub trait ObjectAccess {
     /// decoding must use the read operations, which retain the scope.
     fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<PdfObject>;
 
-    /// Resolves and eagerly decodes within the current active path.
+    /// Resolves and eagerly decodes within the current traversal.
     fn read<T: FromPdfObject>(&mut self, object: &ObjectVariant) -> ReadResult<T>;
 
-    /// Acquires and eagerly decodes within the current active path.
+    /// Acquires and eagerly decodes within the current traversal.
     fn read_indirect<T: FromPdfObject>(&mut self, id: ObjectId) -> ReadResult<T>;
 
     /// Reads through typed caching without waiting on recursive or concurrent loads.
@@ -222,7 +210,12 @@ pub trait ObjectAccess {
 
 /// Borrows a reader and holds the active state of one logical traversal.
 ///
-/// An eager decoder's reference path remains active until it returns. Typed
+/// An object an eager decoder reached by reference stays active until it returns. A cycle is a
+/// decoder re-entering an object it is still decoding, compared by
+/// [`FromPdfObject::cycle_key`]; another decoder may read that object, as when a
+/// membership dictionary names itself in its own visibility expression. Each decoder
+/// decodes an object the same way every time, so only the same decoder re-entering it
+/// could recurse forever. Typed
 /// cache lookups are handled before eager cycle rejection, so recursive shared
 /// reads can return an already-published pending handle. Sibling visits are not
 /// cycles once their earlier traversal scope has ended.
@@ -238,16 +231,10 @@ pub trait ObjectAccess {
 /// ```
 pub struct ReadSession<'reader, S, C = ConcurrentObjectCache> {
     reader: &'reader ObjectReader<S, C>,
-    active_path: Vec<ObjectId>,
-    active_ids: HashSet<ObjectId>,
+    /// The objects being decoded, each with the cycle key of the decoder reading it.
+    active_ids: HashSet<(ObjectId, TypeId)>,
+    /// The number of active decoder invocations, bounded by [`ReadLimits`].
     decode_depth: usize,
-}
-
-impl<S, C> ReadSession<'_, S, C> {
-    /// Returns the current indirect-object path for diagnostics.
-    pub fn active_path(&self) -> &[ObjectId] {
-        &self.active_path
-    }
 }
 
 impl<S, C> ObjectAccess for ReadSession<'_, S, C>
@@ -292,21 +279,13 @@ where
 
     fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<PdfObject> {
         // Raw probes have chain-local tracking, so shared recursive edges can be inspected.
-        let mut path = Vec::new();
         let mut ids = HashSet::new();
         let mut object = PdfObject::new(object.clone());
         while let ObjectVariant::Reference(id) = object.value() {
             let id = *id;
             if !ids.insert(id) {
-                return Err(ObjectReadError::CyclicReference { repeated: id, path });
+                return Err(ObjectReadError::CyclicReference { repeated: id });
             }
-            if path.len() >= self.reader.limits.max_reference_depth().get() {
-                return Err(ObjectReadError::ReferenceDepthExceeded {
-                    maximum: self.reader.limits.max_reference_depth().get(),
-                    path,
-                });
-            }
-            path.push(id);
             object = self.load_object(id)?;
         }
         Ok(object)
@@ -381,24 +360,13 @@ where
         // The child owns its traversal scope. Parent state remains intact on errors and unwinding.
         let mut child = ReadSession {
             reader: self.reader,
-            active_path: self.active_path.clone(),
             active_ids: self.active_ids.clone(),
             decode_depth: self.decode_depth.saturating_add(1),
         };
         let object = loop {
-            if !child.active_ids.insert(id) {
-                return Err(ObjectReadError::CyclicReference {
-                    repeated: id,
-                    path: child.active_path,
-                });
+            if !child.active_ids.insert((id, T::cycle_key())) {
+                return Err(ObjectReadError::CyclicReference { repeated: id });
             }
-            if child.active_path.len() >= child.reader.limits.max_reference_depth().get() {
-                return Err(ObjectReadError::ReferenceDepthExceeded {
-                    maximum: child.reader.limits.max_reference_depth().get(),
-                    path: child.active_path,
-                });
-            }
-            child.active_path.push(id);
             let object = child.load_object(id)?;
             match object.value() {
                 ObjectVariant::Reference(next) => id = *next,

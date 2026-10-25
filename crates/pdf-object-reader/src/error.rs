@@ -63,21 +63,11 @@ pub enum ObjectReadError {
         #[source]
         source: BoxedError,
     },
-    /// Reference traversal revisited an object active in the current read.
-    #[error("cyclic reference encountered at {repeated:?}; active path: {path:?}")]
+    /// A decoder followed a reference back to an object it was still decoding.
+    #[error("cyclic reference encountered at {repeated:?}")]
     CyclicReference {
-        /// The object identifier repeated in the active path.
+        /// The object the same decoder was already decoding.
         repeated: ObjectId,
-        /// The active traversal path at the point the cycle was detected.
-        path: Vec<ObjectId>,
-    },
-    /// Reference traversal exceeded the configured depth limit.
-    #[error("reference depth exceeded maximum {maximum}; active path: {path:?}")]
-    ReferenceDepthExceeded {
-        /// The maximum permitted number of simultaneously active references.
-        maximum: usize,
-        /// The path whose next reference would exceed the limit.
-        path: Vec<ObjectId>,
     },
     /// Nested decoding, including direct containers, exceeded its depth limit.
     #[error("decoding depth exceeded maximum {maximum}")]

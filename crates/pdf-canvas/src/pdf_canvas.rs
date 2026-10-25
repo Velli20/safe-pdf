@@ -132,11 +132,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     }
 
     /// Hides content in marked-content sequences whose optional content is off in `state`.
-    ///
-    /// A state with every group on is not attached, so marked content costs nothing.
     #[must_use]
     pub fn with_optional_content(mut self, state: &'a OptionalContentState) -> Self {
-        self.optional_content = OptionalContentFilter::new(state);
+        self.optional_content = Some(OptionalContentFilter::new(state));
         self
     }
 
