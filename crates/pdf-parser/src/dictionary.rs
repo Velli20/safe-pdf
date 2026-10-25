@@ -1,8 +1,6 @@
-use std::collections::BTreeMap;
-
 use pdf_object_reader::{
-    dictionary::Dictionary, object_variant::ObjectVariant, pdf_string::PdfString,
-    string_kind::StringKind,
+    dictionary::Dictionary, object_variant::ObjectVariant, pdf_name::PdfName,
+    pdf_string::PdfString, string_kind::StringKind,
 };
 use pdf_tokenizer::PdfToken;
 
@@ -10,8 +8,8 @@ use crate::{error::ParserError, parser::PdfParser};
 
 enum DictionaryEntryState {
     ExpectKeyOrTerminator,
-    ExpectValue { key: Vec<u8> },
-    ContinueNameValue { key: Vec<u8>, value: Vec<u8> },
+    ExpectValue { key: PdfName },
+    ContinueNameValue { key: PdfName, value: PdfName },
 }
 
 impl PdfParser<'_> {
@@ -37,7 +35,7 @@ impl PdfParser<'_> {
 
     /// Parses the key-value pairs inside a regular dictionary until `>>`.
     fn parse_dictionary_entries(&mut self) -> Result<Dictionary, ParserError> {
-        let mut dictionary = BTreeMap::new();
+        let mut dictionary = Dictionary::default();
         let mut state = DictionaryEntryState::ExpectKeyOrTerminator;
 
         loop {
@@ -52,7 +50,7 @@ impl PdfParser<'_> {
             if matches!(state, DictionaryEntryState::ExpectKeyOrTerminator)
                 && self.is_at_dictionary_end()
             {
-                return Ok(Dictionary::new(dictionary));
+                return Ok(dictionary);
             }
 
             state = self.next_dictionary_state(&mut dictionary, state)?;
@@ -64,14 +62,14 @@ impl PdfParser<'_> {
     /// This stops as soon as the next non-whitespace token is no longer a name
     /// key, leaving `ID` in the input stream for the caller to consume.
     pub(crate) fn parse_inline_image_entries(&mut self) -> Result<Dictionary, ParserError> {
-        let mut dictionary = BTreeMap::new();
+        let mut dictionary = Dictionary::default();
 
         loop {
             self.skip_whitespace_and_comments();
 
             match self.tokenizer.peek() {
                 Some(PdfToken::Solidus) => {}
-                Some(_) => return Ok(Dictionary::new(dictionary)),
+                Some(_) => return Ok(dictionary),
                 None => return Err(ParserError::UnexpectedEndOfFile),
             }
 
@@ -96,7 +94,7 @@ impl PdfParser<'_> {
     /// Advances the regular dictionary state machine by one step.
     fn next_dictionary_state(
         &mut self,
-        dictionary: &mut BTreeMap<Vec<u8>, ObjectVariant>,
+        dictionary: &mut Dictionary,
         state: DictionaryEntryState,
     ) -> Result<DictionaryEntryState, ParserError> {
         match state {
@@ -122,8 +120,8 @@ impl PdfParser<'_> {
     /// characters so spaced name values remain intact.
     fn parse_dictionary_value_state(
         &mut self,
-        dictionary: &mut BTreeMap<Vec<u8>, ObjectVariant>,
-        key: Vec<u8>,
+        dictionary: &mut Dictionary,
+        key: PdfName,
     ) -> Result<DictionaryEntryState, ParserError> {
         match self.tokenizer.peek() {
             Some(PdfToken::Solidus) => {
@@ -141,9 +139,9 @@ impl PdfParser<'_> {
     /// Extends a spaced name value until it reaches a real delimiter or key boundary.
     fn continue_dictionary_name_value(
         &mut self,
-        dictionary: &mut BTreeMap<Vec<u8>, ObjectVariant>,
-        key: Vec<u8>,
-        mut value: Vec<u8>,
+        dictionary: &mut Dictionary,
+        key: PdfName,
+        value: PdfName,
     ) -> Result<DictionaryEntryState, ParserError> {
         if self.is_at_dictionary_end() || matches!(self.tokenizer.peek(), Some(PdfToken::Solidus)) {
             dictionary.insert(key, PdfString::from(value, StringKind::Name));
@@ -160,10 +158,11 @@ impl PdfParser<'_> {
         }
 
         let suffix = self.tokenizer.read_while_u8(Self::is_pdf_regular_character);
-        if !suffix.is_empty() {
-            value.push(b' ');
-            value.extend_from_slice(suffix);
-        }
+        let value = if suffix.is_empty() {
+            value
+        } else {
+            PdfName::from([value.as_bytes(), suffix].join(&b' '))
+        };
 
         Ok(DictionaryEntryState::ContinueNameValue { key, value })
     }
@@ -202,12 +201,12 @@ mod tests {
             let result = parser.parse_dictionary().unwrap();
 
             assert_eq!(
-                result.dictionary.len(),
+                result.len(),
                 expected_count,
                 "Expected {} elements for input '{}', got {}",
                 expected_count,
                 String::from_utf8_lossy(input),
-                result.dictionary.len()
+                result.len()
             );
         }
     }
@@ -324,7 +323,7 @@ mod tests {
         let mut parser = PdfParser::from(b"/IM true /W 1 /H 1 ID \x00\x01".as_slice());
         let result = parser.parse_inline_image_entries().unwrap();
 
-        assert_eq!(result.dictionary.len(), 3);
+        assert_eq!(result.len(), 3);
         assert!(parser.tokenizer.data().starts_with(b"ID \x00\x01"));
     }
 

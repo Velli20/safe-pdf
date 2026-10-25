@@ -251,12 +251,12 @@ fn walk(
             }
         }
         ObjectVariant::Dictionary(dictionary) => {
-            for value in dictionary.dictionary.values() {
+            for (_, value) in dictionary.iter() {
                 walk(objects, value, next, features);
             }
         }
         ObjectVariant::Stream(stream) => {
-            for value in stream.dictionary.dictionary.values() {
+            for (_, value) in stream.dictionary.iter() {
                 walk(objects, value, next, features);
             }
         }

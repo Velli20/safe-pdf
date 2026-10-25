@@ -279,7 +279,7 @@ mod tests {
         let mut parser = PdfParser::from(b"ID x\nEI".as_slice());
 
         let dictionary = parser.parse_inline_image_dictionary().unwrap();
-        assert!(dictionary.dictionary.is_empty());
+        assert!(dictionary.is_empty());
         assert_eq!(parser.parse_inline_image_data(None).unwrap(), b"x\n");
         assert_eq!(parser.tokenizer.data(), b"");
     }

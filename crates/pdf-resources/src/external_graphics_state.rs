@@ -177,7 +177,7 @@ mod tests {
     use super::{ExternalGraphicsState, ExternalGraphicsStateKey};
 
     fn dash_dict(dash_array: Vec<ObjectVariant>, dash_phase: f32) -> Dictionary {
-        Dictionary::new(BTreeMap::from([(
+        Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"D"),
             ObjectVariant::Array(
                 vec![
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn soft_mask_none_is_preserved() {
-        let dictionary = Dictionary::new(BTreeMap::from([(
+        let dictionary = Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"SMask"),
             pdf_object_reader::pdf_string::PdfString::from(
                 b"None",
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn invalid_soft_mask_name_is_rejected() {
-        let dictionary = Dictionary::new(BTreeMap::from([(
+        let dictionary = Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"SMask"),
             pdf_object_reader::pdf_string::PdfString::from(
                 b"Invalid",

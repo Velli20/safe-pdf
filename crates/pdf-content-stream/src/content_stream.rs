@@ -96,12 +96,7 @@ mod tests {
     }
 
     fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
-        StreamObject::new(
-            object_number,
-            0,
-            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
-            data.to_vec(),
-        )
+        StreamObject::new(object_number, 0, Dictionary::default(), data.to_vec())
     }
 
     struct MapResolver {
@@ -291,7 +286,7 @@ mod tests {
 
     #[test]
     fn optional_contents_preserves_allocator_for_missing_contents() {
-        let page = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
+        let page = Dictionary::default();
         let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let contents = reader
@@ -318,7 +313,7 @@ mod tests {
             ]
             .into(),
         );
-        let page = Dictionary::new(BTreeMap::from([(Vec::from(b"Contents"), contents)]));
+        let page = Dictionary::from_iter(BTreeMap::from([(Vec::from(b"Contents"), contents)]));
         let resolver = MapResolver {
             objects: BTreeMap::from([
                 (1, ObjectVariant::Stream(stream_object(1, b"q"))),

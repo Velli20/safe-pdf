@@ -217,7 +217,7 @@ mod tests {
             ObjectVariant::Integer(raw_data.len() as i64),
         );
 
-        StreamObject::new_encoded(0, 0, Dictionary::new(dict_map), raw_data)
+        StreamObject::new_encoded(0, 0, Dictionary::from_iter(dict_map), raw_data)
     }
 
     #[test]
@@ -384,24 +384,20 @@ mod tests {
         );
         dict_map.insert(
             Vec::from(b"DecodeParms"),
-            ObjectVariant::Dictionary(Dictionary::new(
-                vec![
-                    (
-                        Vec::from(b"Columns"),
-                        ObjectVariant::Integer(columns as i64),
-                    ),
-                    (Vec::from(b"Predictor"), ObjectVariant::Integer(12)),
-                ]
-                .into_iter()
-                .collect(),
-            )),
+            ObjectVariant::Dictionary(Dictionary::from_iter(vec![
+                (
+                    Vec::from(b"Columns"),
+                    ObjectVariant::Integer(columns as i64),
+                ),
+                (Vec::from(b"Predictor"), ObjectVariant::Integer(12)),
+            ])),
         );
         dict_map.insert(
             Vec::from(b"Length"),
             ObjectVariant::Integer(compressed.len() as i64),
         );
 
-        StreamObject::new_encoded(0, 0, Dictionary::new(dict_map), compressed)
+        StreamObject::new_encoded(0, 0, Dictionary::from_iter(dict_map), compressed)
     }
 
     #[test]

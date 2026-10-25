@@ -326,11 +326,11 @@ impl FromPdfObject for MaskMode {
 }
 
 /// Reads a name, accepting a string in its place as producers substitute one for the
-/// other. The bytes are shared with the object, not copied.
+/// other. Short names are copied inline; longer ones share the object's bytes.
 impl FromPdfObject for PdfName {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object() {
-            ObjectVariant::String(value) => Ok(Self(std::sync::Arc::clone(&value.bytes))),
+            ObjectVariant::String(value) => Ok(Self::from_shared(&value.bytes)),
             other => Err(ObjectError::TypeMismatch("Name", other.name()).into()),
         }
     }

@@ -24,12 +24,7 @@ impl pdf_object_reader::FromPdfObject for PageContents {
 }
 
 fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
-    StreamObject::new(
-        object_number,
-        0,
-        Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
-        data.to_vec(),
-    )
+    StreamObject::new(object_number, 0, Dictionary::default(), data.to_vec())
 }
 
 struct MapResolver {
@@ -151,7 +146,7 @@ fn content_stream_read_skips_unknown_operator_and_recovers() {
 
 #[test]
 fn optional_contents_preserves_allocator_for_missing_contents() {
-    let page = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
+    let page = Dictionary::default();
     let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
     let contents = reader
@@ -178,7 +173,7 @@ fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
         ]
         .into(),
     );
-    let page = Dictionary::new(BTreeMap::from([(Vec::from(b"Contents"), contents)]));
+    let page = Dictionary::from_iter(BTreeMap::from([(Vec::from(b"Contents"), contents)]));
     let resolver = MapResolver {
         objects: BTreeMap::from([
             (1, ObjectVariant::Stream(stream_object(1, b"1 2"))),

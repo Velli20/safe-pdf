@@ -79,12 +79,10 @@ mod tests {
     use pdf_object_reader::EmptySource;
     use pdf_object_reader::object_variant::ObjectVariant;
     use pdf_object_reader::{Dictionary, ObjectReader};
-    use std::collections::BTreeMap;
 
     #[test]
     fn params_from_empty_dict_uses_defaults() -> ReadResult<()> {
-        use std::collections::BTreeMap;
-        let dict = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
+        let dict = Dictionary::default();
         let p = ObjectReader::new(EmptySource)
             .read::<CCITTFaxParams>(&ObjectVariant::Dictionary(dict))?;
         assert_eq!(p.k, 0);
@@ -102,25 +100,16 @@ mod tests {
     fn params_from_dict_reads_all_keys() -> ReadResult<()> {
         use pdf_object_reader::object_variant::ObjectVariant;
 
-        let mut dict = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
-        dict.dictionary
-            .insert(b"K".to_vec(), ObjectVariant::Integer(-1));
-        dict.dictionary
-            .insert(b"Columns".to_vec(), ObjectVariant::Integer(800));
-        dict.dictionary
-            .insert(b"Rows".to_vec(), ObjectVariant::Integer(600));
-        dict.dictionary
-            .insert(b"EndOfLine".to_vec(), ObjectVariant::Boolean(true));
-        dict.dictionary
-            .insert(b"EncodedByteAlign".to_vec(), ObjectVariant::Boolean(true));
-        dict.dictionary
-            .insert(b"EndOfBlock".to_vec(), ObjectVariant::Boolean(false));
-        dict.dictionary
-            .insert(b"BlackIs1".to_vec(), ObjectVariant::Boolean(true));
-        dict.dictionary.insert(
-            b"DamagedRowsBeforeError".to_vec(),
-            ObjectVariant::Integer(2),
-        );
+        let dict = Dictionary::from_entries([
+            (b"K", ObjectVariant::Integer(-1)),
+            (b"Columns", ObjectVariant::Integer(800)),
+            (b"Rows", ObjectVariant::Integer(600)),
+            (b"EndOfLine", ObjectVariant::Boolean(true)),
+            (b"EncodedByteAlign", ObjectVariant::Boolean(true)),
+            (b"EndOfBlock", ObjectVariant::Boolean(false)),
+            (b"BlackIs1", ObjectVariant::Boolean(true)),
+            (b"DamagedRowsBeforeError", ObjectVariant::Integer(2)),
+        ]);
 
         let p = ObjectReader::new(EmptySource)
             .read::<CCITTFaxParams>(&ObjectVariant::Dictionary(dict))?;

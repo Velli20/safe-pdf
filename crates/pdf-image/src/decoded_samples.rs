@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn decode_direct_preserves_shared_identity_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),

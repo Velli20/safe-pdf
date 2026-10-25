@@ -18,7 +18,7 @@ fn content_stream(text: &[u8]) -> ContentStream {
     let mut data = b"BT /F1 10 Tf (".to_vec();
     data.extend_from_slice(text);
     data.extend_from_slice(b") Tj ET");
-    let stream = StreamObject::new(1, 0, Dictionary::new(Default::default()), data);
+    let stream = StreamObject::new(1, 0, Dictionary::default(), data);
     pdf_object_reader::ObjectReader::new(EmptySource)
         .read::<ContentStream>(&ObjectVariant::Stream(stream))
         .expect("benchmark stream should parse")

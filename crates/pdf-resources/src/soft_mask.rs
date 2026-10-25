@@ -112,7 +112,7 @@ mod tests {
     use super::{MaskTransfer, SoftMask};
 
     fn soft_mask_dictionary(stream_object_number: usize, subtype: &str) -> Dictionary {
-        let form_dictionary = Dictionary::new(BTreeMap::from([
+        let form_dictionary = Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"BBox"),
                 ObjectVariant::Array(
@@ -135,7 +135,7 @@ mod tests {
         ]));
         let stream = StreamObject::new(stream_object_number, 0, form_dictionary, Vec::new());
 
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"G"), ObjectVariant::Stream(stream)),
             (
                 Vec::from(b"S"),
@@ -170,9 +170,7 @@ mod tests {
             ]),
             b"{1 exch sub}".to_vec(),
         );
-        dictionary
-            .dictionary
-            .insert(b"TR".to_vec(), ObjectVariant::Stream(function));
+        dictionary.insert(b"TR".to_vec(), ObjectVariant::Stream(function));
         let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let mask = reader
             .read::<SoftMask>(&ObjectVariant::Dictionary(dictionary))
@@ -186,9 +184,7 @@ mod tests {
     #[test]
     fn identity_mask_transfer_needs_no_table() {
         let mut dictionary = soft_mask_dictionary(7, "Form");
-        dictionary
-            .dictionary
-            .insert(b"TR".to_vec(), ObjectVariant::name_from_bytes(b"Identity"));
+        dictionary.insert(b"TR".to_vec(), ObjectVariant::name_from_bytes(b"Identity"));
         let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let mask = reader
             .read::<SoftMask>(&ObjectVariant::Dictionary(dictionary))
@@ -229,7 +225,7 @@ mod tests {
         let Some(ObjectVariant::Stream(mut stream)) = dictionary.take(b"G") else {
             panic!("group stream");
         };
-        stream.dictionary.dictionary.insert(
+        stream.dictionary.insert(
             b"Resources".to_vec(),
             ObjectVariant::Dictionary(Dictionary::from_entries([(
                 b"ExtGState".as_slice(),
@@ -242,9 +238,7 @@ mod tests {
                 )])),
             )])),
         );
-        dictionary
-            .dictionary
-            .insert(b"G".to_vec(), ObjectVariant::Reference(ObjectId::new(7, 0)));
+        dictionary.insert(b"G".to_vec(), ObjectVariant::Reference(ObjectId::new(7, 0)));
         let mut objects = ObjectCollection::default();
         objects
             .insert(ObjectId::new(7, 0), ObjectVariant::Stream(stream))

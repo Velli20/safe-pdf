@@ -1,3 +1,4 @@
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -21,13 +22,17 @@ impl PdfParser<'_> {
     ///
     /// # Returns
     ///
-    /// A `Name` object containing the decoded name string (with hex escapes resolved),
-    /// or a `NameObjectError` on failure.
-    pub fn parse_name(&mut self) -> Result<Vec<u8>, NameObjectError> {
+    /// The decoded name (with hex escapes resolved), or a `NameObjectError` on failure.
+    /// A name without escapes is copied straight from the input.
+    pub fn parse_name(&mut self) -> Result<PdfName, NameObjectError> {
         self.tokenizer.expect(PdfToken::Solidus)?;
 
         let name = self.tokenizer.read_while_u8(|b| !Self::is_pdf_delimiter(b));
-        escape(name)
+        if name.contains(&b'#') {
+            escape(name).map(PdfName::from)
+        } else {
+            Ok(PdfName::from_bytes(name))
+        }
     }
 }
 
@@ -112,7 +117,7 @@ mod tests {
             let mut parser = PdfParser::from(input);
             let value = parser.parse_name().unwrap();
             assert_eq!(
-                value,
+                value.as_bytes(),
                 expected,
                 "input: `{}`",
                 String::from_utf8_lossy(input)

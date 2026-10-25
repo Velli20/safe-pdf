@@ -316,7 +316,7 @@ mod tests {
         for (key, value) in entries {
             map.insert(Vec::from(key.as_bytes()), value);
         }
-        Dictionary::new(map)
+        Dictionary::from_iter(map)
     }
 
     #[test]
