@@ -12,10 +12,10 @@ use crate::encryption::EncryptDictionary;
 use crate::error::PdfReaderError;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    ObjectReader, cross_reference_table::CrossReferenceEntryType, object_error::ObjectError,
-    object_id::ObjectId, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    FromPdfObject, ObjectReader, cross_reference_table::CrossReferenceEntryType,
+    object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant,
 };
-use pdf_parser::{error::ParserError, parser::PdfParser};
+use pdf_parser::{error::ParserError, indirect_object::IndirectValue, parser::PdfParser};
 
 /// Upper bound on indirect objects loaded for one encryption dictionary.
 ///
@@ -48,7 +48,7 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
         identifier: Option<ObjectId>,
         diagnostics: &mut Vec<PdfReadDiagnostic>,
     ) -> Result<Option<EncryptDictionary>, PdfReaderError> {
-        match self.parse_dictionary(encrypt) {
+        match self.read::<EncryptDictionary>(encrypt) {
             Ok(dictionary) => Ok(Some(dictionary)),
             Err(error) if error.is_recoverable_optional_object_error() => {
                 diagnostics.push(PdfReadDiagnostic::new(
@@ -63,28 +63,28 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
         }
     }
 
-    /// Loads the dictionary and its referenced objects, then decodes it.
-    fn parse_dictionary(
-        &self,
-        encrypt: ObjectVariant,
-    ) -> Result<EncryptDictionary, PdfReaderError> {
-        let dictionary = match encrypt {
-            ObjectVariant::Reference(identifier) => self.load_object(identifier.number)?,
+    /// Loads `value` and the objects it references, then decodes it through them.
+    ///
+    /// Nested references that cannot be loaded are left unresolved; decoding reports
+    /// them only if the entry holding them is actually needed.
+    pub(crate) fn read<T: FromPdfObject>(&self, value: ObjectVariant) -> Result<T, PdfReaderError> {
+        let mut objects = ObjectCollection::default();
+        let value = match value {
+            ObjectVariant::Reference(identifier) => {
+                self.load_object(identifier.number, &objects)?
+            }
             object => object,
         };
-        let objects = self.load_referenced_objects(&dictionary)?;
-        Ok(ObjectReader::new(&objects).read::<EncryptDictionary>(&dictionary)?)
+        self.load_referenced_objects(&value, &mut objects)?;
+        Ok(ObjectReader::new(objects).read::<T>(&value)?)
     }
 
-    /// Loads the objects referenced from `root` into a collection used for resolution.
-    ///
-    /// Nested references that cannot be loaded are left unresolved; parsing the
-    /// dictionary reports them only if the entry holding them is actually needed.
+    /// Loads the objects referenced from `root` into `objects`.
     fn load_referenced_objects(
         &self,
         root: &ObjectVariant,
-    ) -> Result<ObjectCollection, PdfReaderError> {
-        let mut objects = ObjectCollection::default();
+        objects: &mut ObjectCollection,
+    ) -> Result<(), PdfReaderError> {
         let mut pending = PendingReferences::default();
         pending.push_nested(root);
         let mut loaded = 0usize;
@@ -94,18 +94,24 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
             if objects.get(identifier.number).is_some() {
                 continue;
             }
-            let Ok(object) = self.load_object(identifier.number) else {
+            let Ok(object) = self.load_object(identifier.number, objects) else {
                 continue;
             };
             pending.push_nested(&object);
             objects.insert(identifier, object)?;
             loaded = loaded.saturating_add(1);
         }
-        Ok(objects)
+        Ok(())
     }
 
     /// Parses the uncompressed indirect object `number` at its cross-reference offset.
-    fn load_object(&self, number: usize) -> Result<ObjectVariant, PdfReaderError> {
+    ///
+    /// A stream's `/Length` may refer to one of the `objects` already loaded.
+    fn load_object(
+        &self,
+        number: usize,
+        objects: &ObjectCollection,
+    ) -> Result<ObjectVariant, PdfReaderError> {
         let byte_offset = self
             .entries
             .get(&number)
@@ -117,7 +123,16 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
                 position: byte_offset,
             },
         )?;
-        Ok(parser.parse_indirect_object_value(identifier, &PassthroughResolver)?)
+        Ok(match parser.parse_indirect_object_value(identifier)? {
+            IndirectValue::Object(object) => object,
+            IndirectValue::Stream(header) => {
+                let length = objects
+                    .loaded()
+                    .read::<usize>(header.dictionary().get_or_err(b"Length")?)
+                    .map_err(ParserError::from)?;
+                parser.parse_stream_body(header, length)?
+            }
+        })
     }
 }
 

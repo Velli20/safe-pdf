@@ -18,7 +18,7 @@ enum InterpolationOrder {
 /// Reads a sampled function's `/Order`; an absent entry is the caller's linear default.
 impl FromPdfObject for InterpolationOrder {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().try_number::<i32>(context.source())? {
+        match context.decode::<i32>()? {
             1 => Ok(Self::Linear),
             3 => Ok(Self::Cubic),
             _ => Err(FunctionReadError::InvalidOrder.into()),

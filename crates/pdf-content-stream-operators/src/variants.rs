@@ -599,8 +599,7 @@ impl PdfOperatorVariant {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use pdf_object_reader::{
-        ArrayContext, ObjectReader, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant,
+        ArrayContext, EmptySource, ObjectReader, object_variant::ObjectVariant,
     };
 
     use super::*;
@@ -617,7 +616,7 @@ mod tests {
                 kind: pdf_object_reader::string_kind::StringKind::Literal,
             },
         )];
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
 
         let operator =
@@ -643,7 +642,7 @@ mod tests {
                 pdf_object_reader::string_kind::StringKind::Literal,
             ),
         ];
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
 
         let operator =

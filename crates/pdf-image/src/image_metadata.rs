@@ -151,7 +151,7 @@ mod tests {
 
     use pdf_filter::filter::{Filter, Filters};
     use pdf_object_reader::{
-        dictionary::Dictionary, object_error::ObjectError, object_resolver::PassthroughResolver,
+        EmptySource, dictionary::Dictionary, object_error::ObjectError,
         object_variant::ObjectVariant,
     };
 
@@ -159,7 +159,7 @@ mod tests {
     use crate::error::PdfImageError;
 
     fn read(dictionary: &Dictionary) -> Result<ImageMetadata, PdfImageError> {
-        pdf_object_reader::ObjectReader::new(PassthroughResolver)
+        pdf_object_reader::ObjectReader::new(EmptySource)
             .read(&ObjectVariant::Dictionary(dictionary.clone()))
             .map_err(PdfImageError::from)
     }

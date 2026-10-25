@@ -9,8 +9,7 @@ use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
 use pdf_font::{FontProgramFormat, FontSource, PdfFontSpec};
 use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-    stream::StreamObject,
+    EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
 };
 use pdf_resources::{resource::Resource, resources::Resources};
 use pdf_text_engine::bundled_font_system;
@@ -20,7 +19,7 @@ fn content_stream(text: &[u8]) -> ContentStream {
     data.extend_from_slice(text);
     data.extend_from_slice(b") Tj ET");
     let stream = StreamObject::new(1, 0, Dictionary::new(Default::default()), data);
-    pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+    pdf_object_reader::ObjectReader::new(EmptySource)
         .read::<ContentStream>(&ObjectVariant::Stream(stream))
         .expect("benchmark stream should parse")
 }

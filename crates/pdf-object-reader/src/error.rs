@@ -175,3 +175,14 @@ impl From<crate::ContentStreamIdExhausted> for ObjectReadError {
         }
     }
 }
+
+impl ObjectReadError {
+    /// Returns whether the read failed on a cyclic reference, at any container depth.
+    pub fn is_cyclic_reference(&self) -> bool {
+        match self {
+            Self::At { source, .. } => source.is_cyclic_reference(),
+            Self::CyclicReference { .. } => true,
+            _ => false,
+        }
+    }
+}

@@ -32,7 +32,7 @@ pub enum FunctionType {
 /// Reads the `/FunctionType` entry of a function dictionary.
 impl FromPdfObject for FunctionType {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().try_number::<i32>(context.source())? {
+        match context.decode::<i32>()? {
             0 => Ok(Self::Sampled),
             2 => Ok(Self::ExponentialInterpolation),
             3 => Ok(Self::Stitching),

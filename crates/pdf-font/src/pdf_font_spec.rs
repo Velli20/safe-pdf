@@ -10,13 +10,14 @@ use crate::error::FontError;
 use crate::fallback::{
     FallbackCandidate, FallbackProvider, GlyphFallbackRequest, WholeFontFallbackRequest,
 };
+use crate::flags::FontFlags;
 use crate::font::GlyphId;
 use crate::font::{FontMetadata, FontProgramFormat, FontSource};
 use crate::pdf::{
     FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding, SimpleFontSpec,
     Type0FontSpec, Type3FontSpec,
 };
-use crate::standard14::Standard14Font;
+use crate::standard14::{self, Standard14Font};
 use pdf_cmap::WritingMode;
 
 const NOTO_SANS_CJK_JP_REGULAR: &[u8] =
@@ -53,8 +54,11 @@ impl FromPdfObject for PdfFontSpec {
             Some(b"Type3") => context.read(value).map(Self::Type3).ok(),
             _ => None,
         };
-        Ok(spec
-            .unwrap_or_else(|| Self::from(crate::fallback::fallback_standard14_font(&mut context))))
+        // The whole-font fallback follows BaseFont alone, without descriptor flags.
+        Ok(spec.unwrap_or_else(|| {
+            let base_font = context.lenient::<Arc<[u8]>>(b"BaseFont");
+            Self::from(standard14::select(base_font.as_deref(), FontFlags::empty()))
+        }))
     }
 }
 

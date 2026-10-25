@@ -33,3 +33,8 @@ workspace = true
 
 [dev-dependencies]
 pdf-color-space = { path = "../pdf-color-space" }
+criterion = "0.8"
+
+[[bench]]
+name = "document_open"
+harness = false

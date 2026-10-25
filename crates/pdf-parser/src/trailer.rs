@@ -1,7 +1,6 @@
 use crate::{error::ParserError, parser::PdfParser};
 use pdf_object_reader::{
-    object_error::ObjectError, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    trailer::Trailer,
+    object_error::ObjectError, object_variant::ObjectVariant, trailer::Trailer,
 };
 
 impl PdfParser<'_> {
@@ -11,7 +10,7 @@ impl PdfParser<'_> {
     ///
     /// A `Trailer` object containing the parsed dictionary or a `ParserError`
     /// if the trailer is malformed.
-    pub fn parse_trailer(&mut self, objects: &dyn ObjectResolver) -> Result<Trailer, ParserError> {
+    pub fn parse_trailer(&mut self) -> Result<Trailer, ParserError> {
         const TRAILER_KEYWORD: &[u8] = b"trailer";
         const START_XREF_KEYWORD: &[u8] = b"startxref";
 
@@ -19,7 +18,7 @@ impl PdfParser<'_> {
         self.read_keyword(TRAILER_KEYWORD)?;
 
         // Try parse dictionary object.
-        let dictionary = self.parse_object(objects)?;
+        let dictionary = self.parse_object()?;
 
         let dictionary = match dictionary {
             ObjectVariant::Dictionary(value) => value,
@@ -47,7 +46,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object_reader::object_variant::ObjectVariant;
 
     use super::*;
 
@@ -56,7 +55,7 @@ mod tests {
         let input = b"trailer\n<< /Size 22 /Root 1 0 R >>\nstartxref\n187\n%%EOF";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+        let trailer = parser.parse_trailer().unwrap();
         assert_eq!(
             trailer.dictionary.get(b"Root").unwrap(),
             &ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0))
@@ -68,7 +67,7 @@ mod tests {
         let input = b"trailer\n<< /Size 22 /Root 1 0 R >> \nstartxref\n187\n%%EOF";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+        let trailer = parser.parse_trailer().unwrap();
         assert_eq!(
             trailer.dictionary.get(b"Size").unwrap(),
             &ObjectVariant::Integer(22)
@@ -81,7 +80,7 @@ mod tests {
         let input = b"trailer\r\n<< /Size 22 /Root 1 0 R >> %comment\r\nstartxref\r\n187\r\n%%EOF";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+        let trailer = parser.parse_trailer().unwrap();
         assert_eq!(
             trailer.dictionary.get(b"Root").unwrap(),
             &ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0))
@@ -94,7 +93,7 @@ mod tests {
         let input = b"trailer\n<< /Size 22 /Root 1 0 R /Prev 99 >>\nxref\n0 0\n";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+        let trailer = parser.parse_trailer().unwrap();
         assert_eq!(
             trailer.dictionary.get(b"Root").unwrap(),
             &ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0))
@@ -113,7 +112,7 @@ mod tests {
 
         for input in inputs {
             let mut parser = PdfParser::from(input);
-            let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+            let trailer = parser.parse_trailer().unwrap();
 
             assert_eq!(trailer.offset, None);
             assert_eq!(
@@ -130,7 +129,7 @@ mod tests {
         let input = b"trailer\n<< /Size 1 /Root 1 0 R >>\nstartxref\n0\n%%EOF";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+        let trailer = parser.parse_trailer().unwrap();
 
         assert_eq!(trailer.offset, Some(0));
     }
@@ -172,14 +171,10 @@ mod tests {
         let entry = table.entries.get(&1).unwrap();
         assert_eq!(entry.byte_offset(), Some(obj1_v2_offset));
         assert_eq!(
-            table
-                .trailer
-                .dictionary
-                .get(b"Prev")
-                .unwrap()
-                .try_number::<usize>(&PassthroughResolver)
-                .unwrap(),
-            xref1_offset
+            table.trailer.dictionary.get(b"Prev"),
+            Some(&ObjectVariant::Integer(
+                i64::try_from(xref1_offset).unwrap()
+            ))
         );
     }
 }

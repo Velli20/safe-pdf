@@ -46,7 +46,7 @@ impl std::fmt::Display for ShadingType {
 /// Reads the numeric `/ShadingType` entry of a shading dictionary.
 impl FromPdfObject for ShadingType {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().try_number::<i32>(context.source())? {
+        match context.decode::<i32>()? {
             1 => Ok(Self::FunctionBased),
             2 => Ok(Self::Axial),
             3 => Ok(Self::Radial),

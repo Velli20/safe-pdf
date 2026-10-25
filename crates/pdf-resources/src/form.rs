@@ -52,8 +52,7 @@ mod tests {
 
     use pdf_graphics::transform::Transform;
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
     };
 
     use super::FormXObject;
@@ -83,7 +82,7 @@ mod tests {
         ]));
         let stream = StreamObject::new(7, 0, dictionary.clone(), Vec::new());
 
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let form = reader
             .read::<FormXObject>(&ObjectVariant::Stream(stream))
@@ -134,7 +133,7 @@ mod tests {
             ),
         ]));
 
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let form = reader
             .read::<FormXObject>(

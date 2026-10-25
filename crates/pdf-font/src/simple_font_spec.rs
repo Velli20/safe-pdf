@@ -1,7 +1,6 @@
 //! Simple-font specifications and decoding for Type 1, MMType1, and TrueType.
 
 use crate::{
-    encoding::simple_encoding,
     error::FontError,
     font::FontSource,
     pdf::{PdfFontDescriptor, PdfMetrics, SimpleEncoding, ToUnicodeMap},
@@ -58,7 +57,7 @@ impl FromPdfObject for SimpleFontSpec {
             .unwrap_or_default()
             .named(base_font.as_deref());
         let symbolic = subtype.as_ref() == b"TrueType" && descriptor.metadata.symbolic;
-        let encoding = simple_encoding(&mut context, symbolic)?;
+        let encoding = SimpleEncoding::new(context.optional(b"Encoding")?, symbolic);
         let mut metrics: PdfMetrics = context.read(value)?;
         let standard14 = base_font
             .as_deref()

@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
 use pdf_parser::parser::PdfParser;
 
@@ -59,13 +58,12 @@ impl ObjectStream {
     pub(crate) fn parse_member(
         &self,
         entry: &ObjectStreamEntry,
-        objects: &dyn ObjectResolver,
     ) -> Result<Option<ObjectVariant>, PdfReaderError> {
         let offset = self.first.saturating_add(entry.relative_offset);
         let Some(slice) = self.data.get(offset..) else {
             return Ok(None);
         };
-        Ok(Some(PdfParser::from(slice).parse_object(objects)?))
+        Ok(Some(PdfParser::from(slice).parse_object()?))
     }
 }
 

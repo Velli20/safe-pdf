@@ -30,11 +30,12 @@ pub struct LabColorSpace {
 /// and `Range` entries.
 impl FromPdfObject for LabColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut dictionary = context.dictionary()?;
         let CieColorSpaceParams {
             white_point,
             black_point,
-        } = CieColorSpaceParams::read(&mut dictionary)?;
+        } = dictionary.read(object)?;
         let range = dictionary
             .optional(b"Range")?
             .unwrap_or([-100.0, 100.0, -100.0, 100.0]);

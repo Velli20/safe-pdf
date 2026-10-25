@@ -20,10 +20,14 @@ use crate::error::PdfReaderError;
 use crate::object_stream::ObjectStream;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    ObjectReader, cross_reference_table::CrossReferenceEntryType, object_error::ObjectError,
-    object_id::ObjectId, object_variant::ObjectVariant,
+    EmptySource, ObjectReader, cross_reference_table::CrossReferenceEntryType,
+    object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant,
 };
-use pdf_parser::{error::ParserError, parser::PdfParser};
+use pdf_parser::{
+    error::ParserError,
+    indirect_object::{IndirectValue, StreamHeader},
+    parser::PdfParser,
+};
 
 /// Maps an index within one object stream to the xref object numbers using that index.
 ///
@@ -254,6 +258,8 @@ pub(super) struct ObjectLoader<'input, 'loader> {
     encryption: Option<EncryptionContext>,
     /// Objects available for resolving references during subsequent parses.
     objects: ObjectCollection,
+    /// Reads direct values, such as most streams' `/Length`, without loading objects.
+    direct: ObjectReader<EmptySource>,
     /// Dependency-aware work scheduler.
     queue: ObjectLoadQueue,
     /// Recoverable failures collected for the final read report.
@@ -273,6 +279,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             parser,
             encryption,
             objects: ObjectCollection::with_capacity(plan.object_capacity),
+            direct: ObjectReader::new(EmptySource),
             queue: ObjectLoadQueue::from_plan(plan),
             diagnostics,
         }
@@ -369,9 +376,13 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
                 position: byte_offset,
             },
         )?;
-        let object = parser
-            .parse_indirect_object_value_recovering_streams(identifier, &self.objects)
-            .map_err(PdfReaderError::from)?;
+        let object = match parser.parse_indirect_object_value(identifier)? {
+            IndirectValue::Object(object) => object,
+            IndirectValue::Stream(header) => {
+                let length = self.stream_length(&header)?;
+                parser.recover_stream_body(header, length)?
+            }
+        };
 
         let Some(object) = self.decrypt(byte_offset, identifier, object) else {
             return Ok(None);
@@ -385,6 +396,21 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             .get(identifier.number)
             .is_some()
             .then_some(identifier.number))
+    }
+
+    /// Reads a stream's `/Length` hint.
+    ///
+    /// A reference may name an object loaded earlier. One that is not loaded yet fails
+    /// the parse, so the object is retried once that object has been loaded.
+    fn stream_length(&self, header: &StreamHeader) -> Result<Option<usize>, ParserError> {
+        let Some(length) = header.length() else {
+            return Ok(None);
+        };
+        let length = match length {
+            ObjectVariant::Reference(_) => self.objects.loaded().read::<Option<usize>>(length),
+            _ => self.direct.read::<Option<usize>>(length),
+        };
+        Ok(length?)
     }
 
     /// Decrypts a parsed object when the document is encrypted.
@@ -442,7 +468,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             else {
                 continue;
             };
-            let Some(value) = object_stream.parse_member(&entry, &self.objects)? else {
+            let Some(value) = object_stream.parse_member(&entry)? else {
                 continue;
             };
             self.insert_compressed_member(&object_numbers, entry.number, value, &mut loaded);
