@@ -99,7 +99,7 @@ impl FromPdfObject for PageAnnotations {
                 continue;
             }
 
-            let dictionary = resolved.dictionary()?;
+            let dictionary = resolved.value().dictionary()?;
             if dictionary.get(b"Subtype").is_none() {
                 continue;
             }

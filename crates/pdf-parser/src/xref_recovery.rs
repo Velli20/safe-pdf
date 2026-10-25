@@ -132,7 +132,7 @@ impl<'input> XrefRecovery<'input> {
         };
         let length = self
             .objects
-            .read::<usize>(header.dictionary().get_or_err(b"Length")?)?;
+            .required::<usize>(header.dictionary(), b"Length")?;
         let stream = parser.parse_stream_body(header, length)?;
         self.parse_stream_section(&stream)
     }

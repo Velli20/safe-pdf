@@ -6,14 +6,14 @@ use std::num::NonZeroUsize;
 use crate::ContentStreamIdAllocator;
 use crate::cache::Reservation;
 use crate::cache::{ConcurrentObjectCache, ObjectCache, TypedObjectCache};
-use crate::context::ObjectContext;
+use crate::context::{DictionaryContext, ObjectContext};
 use crate::decode::FromPdfObject;
+use crate::dictionary::Dictionary;
 use crate::error::{ObjectReadError, ReadResult};
 use crate::handle::ObjectHandle;
 use crate::object_id::ObjectId;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_object::PdfObject;
-use crate::resolved_object::ResolvedObject;
 use crate::source::ObjectSource;
 use std::sync::Arc;
 
@@ -142,6 +142,13 @@ where
         self.session().read_indirect(id)
     }
 
+    /// Reads a required dictionary entry in a fresh session.
+    ///
+    /// A missing key and decoding failures are annotated with the entry's key.
+    pub fn required<T: FromPdfObject>(&self, dictionary: &Dictionary, key: &[u8]) -> ReadResult<T> {
+        DictionaryContext::new(dictionary, &mut self.session()).required(key)
+    }
+
     /// Decodes through the typed cache, preserving recursive links as handles.
     ///
     /// For an indirect input, atomically reserve its typed entry before decoding.
@@ -190,9 +197,11 @@ pub trait ObjectAccess {
 
     /// Resolves a top-level reference chain with cycle and depth checks.
     ///
+    /// The returned object is never a reference.
+    ///
     /// This operation ends its tracking scope before returning. Recursive
     /// decoding must use the read operations, which retain the scope.
-    fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<ResolvedObject>;
+    fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<PdfObject>;
 
     /// Resolves and eagerly decodes within the current active path.
     fn read<T: FromPdfObject>(&mut self, object: &ObjectVariant) -> ReadResult<T>;
@@ -281,7 +290,7 @@ where
             })
     }
 
-    fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<ResolvedObject> {
+    fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<PdfObject> {
         // Raw probes have chain-local tracking, so shared recursive edges can be inspected.
         let mut path = Vec::new();
         let mut ids = HashSet::new();
@@ -300,7 +309,7 @@ where
             path.push(id);
             object = self.load_object(id)?;
         }
-        ResolvedObject::try_from(object)
+        Ok(object)
     }
 
     #[inline]

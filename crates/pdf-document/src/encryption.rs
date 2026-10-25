@@ -13,7 +13,8 @@
 use std::sync::Arc;
 
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
+    dictionary::Dictionary,
 };
 
 use crate::decryption::DecryptionError;
@@ -166,7 +167,8 @@ impl FromPdfObject for DefaultCryptFilters {
                 Some(b"Identity") => Ok(CryptFilterMethod::Identity),
                 Some(name) => {
                     let crypt_filters: Dictionary = dictionary.required(b"CF")?;
-                    let method = dictionary.read(crypt_filters.get_or_err(name)?)?;
+                    let method = DictionaryContext::new(&crypt_filters, dictionary.access())
+                        .required(name)?;
                     version.accept_crypt_filter(method)
                 }
             }

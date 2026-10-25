@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant};
+use crate::{object_id::ObjectId, object_variant::ObjectVariant};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {
@@ -70,22 +70,6 @@ impl Dictionary {
     /// Returns an `Option` containing the [`ObjectVariant`] if the key exists, or `None` if it does not.
     pub fn take(&mut self, key: &[u8]) -> Option<ObjectVariant> {
         self.dictionary.remove(key)
-    }
-
-    /// Returns a reference to the value associated with the given key, or an error if the key is missing.
-    ///
-    /// # Parameters
-    ///
-    /// - `key`: The dictionary entry name to look up.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(&ObjectVariant)` if the key exists, or an [`ObjectError::MissingRequiredKey`] if it does not.
-    pub fn get_or_err(&self, key: &[u8]) -> Result<&ObjectVariant, ObjectError> {
-        self.get(key)
-            .ok_or_else(|| ObjectError::MissingRequiredKey {
-                key: String::from_utf8_lossy(key).into_owned(),
-            })
     }
 
     /// Returns the `/Parent` entry and its object id when it is an indirect reference.

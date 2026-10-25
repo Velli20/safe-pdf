@@ -6,8 +6,8 @@ use crate::pdf_array::PdfArray;
 use crate::pdf_string::PdfString;
 use crate::string_kind::StringKind;
 use crate::{
-    cross_reference_table::CrossReferenceTable, dictionary::Dictionary, object_error::ObjectError,
-    object_id::ObjectId, stream::StreamObject, trailer::Trailer,
+    cross_reference_table::CrossReferenceTable, dictionary::Dictionary, object_id::ObjectId,
+    stream::StreamObject, trailer::Trailer,
 };
 /// Represents any PDF object as described in the PDF specification.
 ///
@@ -95,23 +95,6 @@ impl ObjectVariant {
     /// Returns `true` if this value is an `Array`.
     pub fn is_array(&self) -> bool {
         matches!(self, ObjectVariant::Array(_))
-    }
-
-    /// Returns the object number if this is a `Reference`.
-    pub fn try_object_number(&self) -> Result<usize, ObjectError> {
-        match self {
-            ObjectVariant::Reference(value) => Ok(value.number),
-            ObjectVariant::Dictionary(value) => {
-                value.object_number.ok_or(ObjectError::ObjectMissingNumber {
-                    found_type: "Dictionary",
-                })
-            }
-            ObjectVariant::Stream(value) => Ok(value.object_number),
-            _ => Err(ObjectError::TypeMismatch(
-                "Reference or Object with number",
-                self.name(),
-            )),
-        }
     }
 
     /// Returns the variant name as a static string, useful in error messages.

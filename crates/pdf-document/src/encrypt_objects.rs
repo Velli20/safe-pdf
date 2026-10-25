@@ -13,7 +13,8 @@ use crate::error::PdfReaderError;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
     FromPdfObject, ObjectReader, cross_reference_table::CrossReferenceEntryType,
-    object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_error::ObjectError, object_id::ObjectId,
+    object_variant::ObjectVariant,
 };
 use pdf_parser::{error::ParserError, indirect_object::IndirectValue, parser::PdfParser};
 
@@ -67,7 +68,7 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
     ///
     /// Nested references that cannot be loaded are left unresolved; decoding reports
     /// them only if the entry holding them is actually needed.
-    pub(crate) fn read<T: FromPdfObject>(&self, value: ObjectVariant) -> Result<T, PdfReaderError> {
+    fn read<T: FromPdfObject>(&self, value: ObjectVariant) -> Result<T, PdfReaderError> {
         let mut objects = ObjectCollection::default();
         let value = match value {
             ObjectVariant::Reference(identifier) => {
@@ -77,6 +78,23 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
         };
         self.load_referenced_objects(&value, &mut objects)?;
         Ok(ObjectReader::new(objects).read::<T>(&value)?)
+    }
+
+    /// Loads the required `key` entry of `dictionary` and the objects it references, then
+    /// decodes it through them.
+    ///
+    /// Nested references that cannot be loaded are left unresolved; decoding reports
+    /// them only if the entry holding them is actually needed.
+    pub(crate) fn required<T: FromPdfObject>(
+        &self,
+        dictionary: &Dictionary,
+        key: &[u8],
+    ) -> Result<T, PdfReaderError> {
+        let mut objects = ObjectCollection::default();
+        if let Some(value) = dictionary.get(key) {
+            self.load_referenced_objects(value, &mut objects)?;
+        }
+        Ok(ObjectReader::new(objects).required::<T>(dictionary, key)?)
     }
 
     /// Loads the objects referenced from `root` into `objects`.
@@ -128,7 +146,7 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
             IndirectValue::Stream(header) => {
                 let length = objects
                     .loaded()
-                    .read::<usize>(header.dictionary().get_or_err(b"Length")?)
+                    .required::<usize>(header.dictionary(), b"Length")
                     .map_err(ParserError::from)?;
                 parser.parse_stream_body(header, length)?
             }

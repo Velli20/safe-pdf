@@ -10,10 +10,8 @@ use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_array::PdfArray;
 use crate::pdf_name::PdfName;
-use crate::pdf_object::PdfObject;
 use crate::pdf_string::PdfString;
 use crate::reader::ObjectAccess;
-use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
 use pdf_graphics::{color::Color, interval::Interval, rect::Rect, transform::Transform};
 
@@ -108,18 +106,6 @@ impl FromPdfObject for f64 {
                 actual: context.object().kind(),
             }),
         }
-    }
-}
-
-impl FromPdfObject for PdfObject {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(PdfObject::new(context.object().clone()))
-    }
-}
-
-impl FromPdfObject for ResolvedObject {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Self::try_from(PdfObject::new(context.object().clone()))
     }
 }
 

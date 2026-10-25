@@ -1,6 +1,6 @@
 //! Shared handles for PDF values.
 
-use crate::{object_id::ObjectId, object_kind::ObjectKind, object_variant::ObjectVariant};
+use crate::{object_kind::ObjectKind, object_variant::ObjectVariant};
 use std::sync::Arc;
 
 /// Provides cheap shared ownership of one immutable PDF value.
@@ -11,11 +11,6 @@ impl PdfObject {
     /// Creates a shared object handle around a PDF value.
     pub fn new(value: ObjectVariant) -> Self {
         Self(Arc::new(value))
-    }
-
-    /// Creates an indirect-reference object.
-    pub fn reference(object_id: ObjectId) -> Self {
-        Self::new(ObjectVariant::Reference(object_id))
     }
 
     /// Returns the immutable value stored by this object handle.

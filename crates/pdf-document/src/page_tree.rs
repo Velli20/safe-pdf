@@ -47,14 +47,14 @@ enum PageTreeNode {
 }
 
 impl FromPdfObject for PageTreeNode {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let node_type: Arc<[u8]> =
-            context.read(context.object().dictionary()?.get_or_err(b"Type")?)?;
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
+        let mut dictionary = context.dictionary()?;
+        let node_type: Arc<[u8]> = dictionary.required(b"Type")?;
+        let context = ObjectContext::new(object, dictionary.access());
         match &*node_type {
-            PdfPage::KEY => PdfPage::from_pdf_object(context).map(Self::Page),
-            PageTree::KEY => PageTreeBranch::from_pdf_object(context).map(Self::Pages),
+            PdfPage::KEY => context.decode().map(Self::Page),
+            PageTree::KEY => context.decode().map(Self::Pages),
             other => Err(PdfPagesError::InvalidKidsEntryType {
                 found_type: String::from_utf8_lossy(other).into_owned(),
             }

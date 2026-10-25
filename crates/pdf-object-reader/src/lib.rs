@@ -124,8 +124,7 @@
 //!
 //! [`ObjectSource`] and [`ObjectCache`] accept custom storage strategies;
 //! [`ObjectAccess`] supports custom traversal implementations. A custom access
-//! implementation can validate a direct value with
-//! `ResolvedObject::try_from(object)`, then construct an [`ObjectContext`].
+//! implementation can construct an [`ObjectContext`] over a direct value.
 //! It remains responsible for maintaining the traversal scope around the decoder.
 //!
 //! The parser and domain decoders use the same [`ObjectVariant`] model.
@@ -167,8 +166,6 @@ pub mod pdf_object;
 pub mod pdf_string;
 /// Reader configuration and session-local traversal contracts.
 pub mod reader;
-/// Checked direct PDF object handles.
-pub mod resolved_object;
 /// Acquisition of raw indirect objects from a document snapshot.
 pub mod source;
 /// PDF string source representations.

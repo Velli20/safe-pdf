@@ -47,8 +47,7 @@ impl EncryptionContext {
             return Ok(None);
         }
 
-        let document_id =
-            loader.read::<DocumentId>(trailer.dictionary.get_or_err(b"ID")?.clone())?;
+        let document_id = loader.required::<DocumentId>(&trailer.dictionary, b"ID")?;
         let decryptor = DocumentDecryptor::new(
             &encryption,
             document_id.0.as_bytes(),
