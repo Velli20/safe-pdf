@@ -74,7 +74,7 @@ fn decode_reduced_image(
         return Ok(render_ready_image(reduced, None, &bands.reduced_metadata()));
     }
     let decoded_samples = DecodedSamples::decode(payload, metadata)?;
-    render_ready_image(decoded_samples, None, metadata).reduced(factor)
+    Ok(render_ready_image(decoded_samples, None, metadata).reduced(factor)?)
 }
 
 /// Builds a render image from decoded samples whose soft mask, if any, has the image's size.

@@ -118,31 +118,31 @@ impl BoxReduction {
     }
 
     /// Allocates the buffer for `height` reduced rows.
-    fn buffer(&self, height: usize) -> Result<Vec<u8>, PdfImageError> {
+    fn buffer(&self, height: usize) -> Result<Vec<u8>, ImageRasterError> {
         let byte_len = self
             .output_width()
             .checked_mul(height)
             .and_then(|pixels| pixels.checked_mul(self.layout.bytes_per_pixel()))
-            .ok_or(PdfImageError::Raster(ImageRasterError::ResourceLimit))?;
+            .ok_or(ImageRasterError::ResourceLimit)?;
         let mut data = Vec::new();
-        data.try_reserve_exact(byte_len)
-            .map_err(|_| PdfImageError::Raster(ImageRasterError::ResourceLimit))?;
+        data.try_reserve_exact(byte_len)?;
         Ok(data)
     }
 }
 
 /// Reduces a whole render-ready image.
-pub(crate) trait ReduceImage {
-    /// Returns the image reduced by `factor`.
+pub trait ReduceImage {
+    /// Returns the image reduced by `factor`, each output pixel averaging the
+    /// `factor` × `factor` block of pixels it covers.
     ///
     /// # Errors
     ///
     /// Returns a resource-limit error if the reduced pixels cannot be allocated.
-    fn reduced(&self, factor: usize) -> Result<Image, PdfImageError>;
+    fn reduced(&self, factor: usize) -> Result<Image, ImageRasterError>;
 }
 
 impl ReduceImage for Image {
-    fn reduced(&self, factor: usize) -> Result<Image, PdfImageError> {
+    fn reduced(&self, factor: usize) -> Result<Image, ImageRasterError> {
         let reduction = BoxReduction {
             factor,
             source_width: self.width,
