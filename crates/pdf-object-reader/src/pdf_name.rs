@@ -1,63 +1,40 @@
 //! PDF names.
 
 use std::borrow::Borrow;
-use std::cmp::Ordering;
 use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::ops::Deref;
 
-/// The longest name stored without a heap allocation.
-///
-/// With the length byte and the enum tag this keeps a name the size of a `Vec`.
-const INLINE_CAPACITY: usize = 22;
-
-/// The storage of a [`PdfName`]: short names live inline, longer ones are shared.
-#[derive(Clone)]
-enum NameStorage {
-    Inline {
-        len: u8,
-        bytes: [u8; INLINE_CAPACITY],
-    },
-    Shared(Arc<[u8]>),
-}
+use crate::inline_bytes::InlineBytes;
 
 /// Stores a PDF name as immutable bytes.
 ///
 /// Names of up to 22 bytes, which covers nearly every dictionary key and name
 /// value in practice, are stored inline without a heap allocation. Longer
 /// names share one immutable allocation between clones.
-#[derive(Clone)]
-pub struct PdfName(NameStorage);
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PdfName(InlineBytes);
 
 impl PdfName {
     /// Copies a byte sequence into a new PDF name.
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let bytes = bytes.as_ref();
-        let mut inline = [0; INLINE_CAPACITY];
-        match (u8::try_from(bytes.len()), inline.get_mut(..bytes.len())) {
-            (Ok(len), Some(prefix)) => {
-                prefix.copy_from_slice(bytes);
-                Self(NameStorage::Inline { len, bytes: inline })
-            }
-            _ => Self(NameStorage::Shared(Arc::from(bytes))),
-        }
+        Self(InlineBytes::from_bytes(bytes))
     }
 
     /// Returns the decoded bytes of the name without a leading slash.
     pub fn as_bytes(&self) -> &[u8] {
-        match &self.0 {
-            NameStorage::Inline { len, bytes } => bytes.get(..usize::from(*len)).unwrap_or(&[]),
-            NameStorage::Shared(bytes) => bytes,
-        }
+        self.0.as_bytes()
     }
+}
 
-    /// Shares the bytes of an existing allocation, copying them inline when they are short.
-    pub(crate) fn from_shared(bytes: &Arc<[u8]>) -> Self {
-        if bytes.len() <= INLINE_CAPACITY {
-            Self::from_bytes(bytes.as_ref())
-        } else {
-            Self(NameStorage::Shared(Arc::clone(bytes)))
-        }
+impl From<InlineBytes> for PdfName {
+    fn from(bytes: InlineBytes) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<PdfName> for InlineBytes {
+    fn from(name: PdfName) -> Self {
+        name.0
     }
 }
 
@@ -79,6 +56,14 @@ impl From<Vec<u8>> for PdfName {
     }
 }
 
+impl Deref for PdfName {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 impl Borrow<[u8]> for PdfName {
     fn borrow(&self) -> &[u8] {
         self.as_bytes()
@@ -88,32 +73,6 @@ impl Borrow<[u8]> for PdfName {
 impl AsRef<[u8]> for PdfName {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
-    }
-}
-
-impl PartialEq for PdfName {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_bytes() == other.as_bytes()
-    }
-}
-
-impl Eq for PdfName {}
-
-impl PartialOrd for PdfName {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for PdfName {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.as_bytes().cmp(other.as_bytes())
-    }
-}
-
-impl Hash for PdfName {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_bytes().hash(state);
     }
 }
 

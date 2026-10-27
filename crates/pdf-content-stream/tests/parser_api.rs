@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::{
@@ -84,27 +83,27 @@ fn content_stream_read_handles_bare_sign_text_array_adjustment() {
         Some(PdfOperatorVariant::ShowTextArray { elements })
             if elements
                 == &vec![
-                    PdfTextItem::Text(Arc::from(&b"e"[..])),
+                    PdfTextItem::Text(b"e".into()),
                     PdfTextItem::Adjustment(-4.0),
-                    PdfTextItem::Text(Arc::from(&b"x"[..])),
+                    PdfTextItem::Text(b"x".into()),
                     PdfTextItem::Adjustment(12.0),
-                    PdfTextItem::Text(Arc::from(&b"t"[..])),
+                    PdfTextItem::Text(b"t".into()),
                     PdfTextItem::Adjustment(-3.0),
-                    PdfTextItem::Text(Arc::from(&b"e"[..])),
+                    PdfTextItem::Text(b"e".into()),
                     PdfTextItem::Adjustment(-4.0),
-                    PdfTextItem::Text(Arc::from(&b"n"[..])),
+                    PdfTextItem::Text(b"n".into()),
                     PdfTextItem::Adjustment(-4.0),
-                    PdfTextItem::Text(Arc::from(&b"s"[..])),
+                    PdfTextItem::Text(b"s".into()),
                     PdfTextItem::Adjustment(3.0),
-                    PdfTextItem::Text(Arc::from(&b"i"[..])),
+                    PdfTextItem::Text(b"i".into()),
                     PdfTextItem::Adjustment(3.0),
-                    PdfTextItem::Text(Arc::from(&b"v"[..])),
+                    PdfTextItem::Text(b"v".into()),
                     PdfTextItem::Adjustment(0.0),
-                    PdfTextItem::Text(Arc::from(&b"e"[..])),
+                    PdfTextItem::Text(b"e".into()),
                     PdfTextItem::Adjustment(-4.0),
-                    PdfTextItem::Text(Arc::from(&b"l"[..])),
+                    PdfTextItem::Text(b"l".into()),
                     PdfTextItem::Adjustment(3.0),
-                    PdfTextItem::Text(Arc::from(&b"y"[..])),
+                    PdfTextItem::Text(b"y".into()),
                 ]
     ));
 }
@@ -117,7 +116,7 @@ fn content_stream_preserves_non_utf8_font_name() {
         .expect("non-UTF-8 resource names should parse");
 
     assert!(
-        matches!(parsed.operators.as_slice(), [SetFont { name, size: 12.0 }] if **name == [0xFF])
+        matches!(parsed.operators.as_slice(), [SetFont { name, size: 12.0 }] if name.as_bytes() == [0xFF])
     );
 }
 

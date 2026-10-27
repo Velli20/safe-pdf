@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -14,16 +16,47 @@ pub enum LiteralStringObjectError {
     TooManyOpeningParentheses,
 }
 
-impl PdfParser<'_> {
+impl<'a> PdfParser<'a> {
     /// Parses a PDF literal string object from the current position in the input stream.
+    ///
+    /// A string without escape sequences is borrowed from the input.
     ///
     /// # Errors
     ///
     /// Returns an error if parentheses are unbalanced or delimiters are missing.
-    pub fn parse_literal_string(&mut self) -> Result<Vec<u8>, LiteralStringObjectError> {
+    pub fn parse_literal_string(&mut self) -> Result<Cow<'a, [u8]>, LiteralStringObjectError> {
         // Expect the opening parenthesis `(`.
         self.tokenizer.expect(PdfToken::LeftParenthesis)?;
 
+        match self.unescaped_literal_string() {
+            Some(characters) => Ok(Cow::Borrowed(characters)),
+            None => self.escaped_literal_string().map(Cow::Owned),
+        }
+    }
+
+    /// Reads the body of a literal string that contains no backslash, consuming it and the
+    /// closing parenthesis. Returns `None` without consuming anything otherwise.
+    fn unescaped_literal_string(&mut self) -> Option<&'a [u8]> {
+        let remaining = self.tokenizer.input.get(self.tokenizer.position..)?;
+        let mut depth = 0_usize;
+        for (index, &byte) in remaining.iter().enumerate() {
+            match byte {
+                b'\\' => return None,
+                b'(' => depth = depth.checked_add(1)?,
+                b')' if depth == 0 => {
+                    self.tokenizer.read_exactly(index.checked_add(1)?).ok()?;
+                    return remaining.get(..index);
+                }
+                b')' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Reads the body of a literal string after its opening parenthesis, resolving escape
+    /// sequences.
+    fn escaped_literal_string(&mut self) -> Result<Vec<u8>, LiteralStringObjectError> {
         let mut characters = Vec::new();
         let mut depth = 0_usize;
         let mut escaped = false;

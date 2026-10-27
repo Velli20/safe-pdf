@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use pdf_graphics::pdf_path::PdfPath;
+use pdf_object_reader::inline_bytes::InlineBytes;
 
 use crate::error::FontError;
 pub use crate::font_registry::FontRegistry;
@@ -164,7 +165,7 @@ pub struct FontMetadata {
 
 /// A normalized glyph name without a leading PDF slash.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct GlyphName(pub Arc<[u8]>);
+pub struct GlyphName(pub InlineBytes);
 
 /// Global metrics expressed in font design units.
 #[derive(Debug, Clone, Copy, PartialEq)]

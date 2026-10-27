@@ -67,7 +67,7 @@ fn escape(input: &[u8]) -> Result<Vec<u8>, NameObjectError> {
 
 /// Converts an ASCII hex digit to its numeric value (0–15).
 /// Caller must ensure the byte is a valid hex digit.
-const fn hex_digit_value(b: u8) -> u8 {
+pub(crate) const fn hex_digit_value(b: u8) -> u8 {
     match b {
         b'0'..=b'9' => b.saturating_sub(b'0'),
         b'a' => 10,
