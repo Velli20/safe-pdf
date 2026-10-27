@@ -52,10 +52,10 @@ pub enum CrossReferenceEntryType {
         generation_number: usize,
     },
     /// Type 2: object stored in a compressed object stream.
-    Compressed {
-        object_stream_number: usize,
-        index_within_stream: usize,
-    },
+    ///
+    /// The member is found by its object number in the stream's header; the xref's
+    /// in-stream index is not kept, because it can disagree with the header.
+    Compressed { object_stream_number: usize },
     /// Type 0: free object (not in use).
     Free {
         next_free_object: usize,
@@ -73,10 +73,9 @@ impl CrossReferenceEntryType {
     }
 
     /// Creates an entry for an object stored within a compressed object stream.
-    pub fn new_compressed(object_stream_number: usize, index_within_stream: usize) -> Self {
+    pub fn new_compressed(object_stream_number: usize) -> Self {
         CrossReferenceEntryType::Compressed {
             object_stream_number,
-            index_within_stream,
         }
     }
 

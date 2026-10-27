@@ -926,10 +926,8 @@ fn build_xref_table_merges_hybrid_xref_stream_entries() {
     match pages_entry {
         CrossReferenceEntryType::Compressed {
             object_stream_number,
-            index_within_stream,
         } => {
             assert_eq!(*object_stream_number, 4);
-            assert_eq!(*index_within_stream, 0);
         }
         other => panic!("expected compressed xref entry for obj 2, got {other:?}"),
     }
@@ -938,10 +936,8 @@ fn build_xref_table_merges_hybrid_xref_stream_entries() {
     match page_entry {
         CrossReferenceEntryType::Compressed {
             object_stream_number,
-            index_within_stream,
         } => {
             assert_eq!(*object_stream_number, 4);
-            assert_eq!(*index_within_stream, 1);
         }
         other => panic!("expected compressed xref entry for obj 3, got {other:?}"),
     }

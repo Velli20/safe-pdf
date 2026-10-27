@@ -12,7 +12,7 @@
 //! deferred object is retried only when the exact object number it needs becomes
 //! available.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::encryption_context::EncryptionContext;
@@ -29,12 +29,11 @@ use pdf_parser::{
     parser::PdfParser,
 };
 
-/// Maps an index within one object stream to the xref object numbers using that index.
+/// The object numbers the xref places in one object stream.
 ///
-/// Multiple object numbers can target the same index in malformed PDFs. Keeping
-/// all of them preserves best-effort behavior while allowing the normal,
-/// one-to-one case to move the parsed value without cloning it.
-type CompressedStreamPlan = BTreeMap<usize, Vec<usize>>;
+/// Members are found by the object numbers in the stream's header, which is the
+/// only authority on what the stream holds.
+type CompressedStreamPlan = BTreeSet<usize>;
 
 /// Work derived from the cross-reference table before object parsing begins.
 struct LoadPlan {
@@ -63,13 +62,12 @@ impl LoadPlan {
         // earlier objects, so retain the reader's established reverse-xref order.
         normal_objects.reverse();
 
-        // BTreeMap keeps stream and index processing deterministic, including
+        // BTreeMap keeps stream processing deterministic, including
         // which unresolved stream is reported first.
         let mut compressed_streams = BTreeMap::<usize, CompressedStreamPlan>::new();
         for (&object_number, entry) in entries {
             let CrossReferenceEntryType::Compressed {
                 object_stream_number,
-                index_within_stream,
             } = entry
             else {
                 continue;
@@ -77,15 +75,12 @@ impl LoadPlan {
             compressed_streams
                 .entry(*object_stream_number)
                 .or_default()
-                .entry(*index_within_stream)
-                .or_default()
-                .push(object_number);
+                .insert(object_number);
         }
 
         let compressed_count = compressed_streams
             .values()
-            .flat_map(BTreeMap::values)
-            .map(Vec::len)
+            .map(BTreeSet::len)
             .fold(0usize, usize::saturating_add);
         let object_capacity = normal_objects.len().saturating_add(compressed_count);
 
@@ -149,7 +144,7 @@ enum ObjectLoadTask {
     CompressedStream {
         /// Indirect object number of the containing `/ObjStm`.
         object_stream_number: usize,
-        /// Xref members requested from the stream, grouped by stream index.
+        /// Object numbers the xref places in the stream.
         plan: CompressedStreamPlan,
     },
 }
@@ -440,14 +435,14 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
 
     /// Parses one available object stream and inserts all xref-requested members.
     ///
-    /// The header is walked once, in step with the index-ordered plan, and only
-    /// requested members are parsed. Reading stops after the last requested index.
+    /// Each member is identified by the object number the stream's header gives it.
+    /// The header is read only until every requested member has been found.
     ///
     /// Returns the inserted object numbers so the scheduler can wake their dependents.
     fn load_compressed_stream(
         &mut self,
         object_stream_number: usize,
-        stream_plan: CompressedStreamPlan,
+        mut requested: CompressedStreamPlan,
     ) -> Result<Vec<usize>, PdfReaderError> {
         let stream_object = self.objects.get(object_stream_number).ok_or(
             ObjectError::FailedResolveObjectReference {
@@ -455,71 +450,40 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             },
         )?;
         let object_stream: ObjectStream = ObjectReader::new(&self.objects).read(stream_object)?;
-        let mut loaded = Vec::with_capacity(stream_plan.len());
-        let mut requests = stream_plan.into_iter().peekable();
+        let mut loaded = Vec::with_capacity(requested.len());
 
-        for (index_within_stream, entry) in object_stream.entries().enumerate() {
-            if requests.peek().is_none() {
+        for entry in object_stream.entries() {
+            if requested.is_empty() {
                 break;
             }
             let entry = entry?;
-            let Some((_, object_numbers)) =
-                requests.next_if(|(requested_index, _)| *requested_index == index_within_stream)
-            else {
+            if !requested.remove(&entry.number) {
                 continue;
-            };
+            }
             let Some(value) = object_stream.parse_member(&entry)? else {
                 continue;
             };
-            self.insert_compressed_member(&object_numbers, entry.number, value, &mut loaded);
+            self.objects.insert_compressed(entry.number, value);
+            loaded.push(entry.number);
         }
 
+        self.report_missing_members(requested);
         Ok(loaded)
     }
 
-    /// Inserts one parsed object-stream member under every xref number that requested it.
-    ///
-    /// A clone is required only when a malformed xref maps more than one object
-    /// number to the same object-stream index; the final target takes ownership.
-    fn insert_compressed_member(
-        &mut self,
-        object_numbers: &[usize],
-        stream_object_number: usize,
-        value: ObjectVariant,
-        loaded: &mut Vec<usize>,
-    ) {
-        let Some((&last_object_number, duplicate_object_numbers)) = object_numbers.split_last()
-        else {
-            return;
-        };
-
-        for &object_number in duplicate_object_numbers {
-            self.report_compressed_number_mismatch(object_number, stream_object_number);
-            self.objects.insert_compressed(object_number, value.clone());
-            loaded.push(object_number);
-        }
-
-        self.report_compressed_number_mismatch(last_object_number, stream_object_number);
-        self.objects.insert_compressed(last_object_number, value);
-        loaded.push(last_object_number);
-    }
-
-    /// Records a recoverable diagnostic when xref and object-stream numbers disagree.
-    fn report_compressed_number_mismatch(
-        &mut self,
-        expected_object_number: usize,
-        actual_object_number: usize,
-    ) {
-        if actual_object_number == expected_object_number {
-            return;
-        }
-        self.diagnostics.push(PdfReadDiagnostic::new(
-            PdfReadDiagnosticKind::CompressedObject,
-            None,
-            // Objects stored in object streams always have generation zero.
-            Some(ObjectId::new(expected_object_number, 0)),
-            "xref compressed object number differed from its object stream entry",
-        ));
+    /// Records a recoverable diagnostic for each object the xref places in an object
+    /// stream whose header does not list it. Such objects stay absent.
+    fn report_missing_members(&mut self, missing: CompressedStreamPlan) {
+        self.diagnostics
+            .extend(missing.into_iter().map(|object_number| {
+                PdfReadDiagnostic::new(
+                    PdfReadDiagnosticKind::CompressedObject,
+                    None,
+                    // Objects stored in object streams always have generation zero.
+                    Some(ObjectId::new(object_number, 0)),
+                    "object stream does not contain the object",
+                )
+            }));
     }
 }
 
@@ -528,12 +492,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn load_plan_partitions_entries_and_groups_compressed_indexes() {
+    fn load_plan_partitions_entries_and_groups_compressed_members() {
         let entries = BTreeMap::from([
             (0, CrossReferenceEntryType::new_free(0, 65_535)),
             (1, CrossReferenceEntryType::new_normal(10, 0)),
-            (2, CrossReferenceEntryType::new_compressed(5, 1)),
-            (3, CrossReferenceEntryType::new_compressed(5, 1)),
+            (2, CrossReferenceEntryType::new_compressed(5)),
+            (3, CrossReferenceEntryType::new_compressed(5)),
             (4, CrossReferenceEntryType::new_normal(0, 0)),
             (5, CrossReferenceEntryType::new_normal(50, 0)),
         ]);
@@ -543,10 +507,8 @@ mod tests {
         assert_eq!(plan.normal_objects, VecDeque::from([50, 10]));
         assert_eq!(plan.object_capacity, 4);
         assert_eq!(
-            plan.compressed_streams
-                .get(&5)
-                .and_then(|stream| stream.get(&1)),
-            Some(&vec![2, 3])
+            plan.compressed_streams.get(&5),
+            Some(&BTreeSet::from([2, 3]))
         );
     }
 
