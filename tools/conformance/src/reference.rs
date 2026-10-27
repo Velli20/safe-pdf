@@ -17,12 +17,14 @@ pub fn page_size(page: &PdfPage<'_>) -> [f32; 2] {
     [page.width().value, page.height().value]
 }
 
-/// Content-only render settings matching `PdfRenderer::render`, which excludes annotations.
-pub fn config(width: u32, height: u32) -> Result<PdfRenderConfig> {
+/// Render settings for a `width` x `height` image. Without `annotations` they match
+/// `PdfRenderer::render`, which draws page content only; with them, annotations and form
+/// fields are drawn too, as the web renderer's annotation layer does.
+pub fn config(width: u32, height: u32, annotations: bool) -> Result<PdfRenderConfig> {
     Ok(PdfRenderConfig::new()
         .set_target_size(i32::try_from(width)?, i32::try_from(height)?)
-        .render_annotations(false)
-        .render_form_data(false)
+        .render_annotations(annotations)
+        .render_form_data(annotations)
         .set_clear_color(PdfColor::WHITE))
 }
 

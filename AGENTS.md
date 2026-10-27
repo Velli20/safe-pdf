@@ -93,7 +93,9 @@ the pull request when a document reads worse or better. On `main` (merged pull r
 manual runs) it also renders the PDFium corpus against PDFium's annotation-free render (the
 pdf.js corpus is only read), keeps one GitHub issue per failure cause across both corpora,
 closes issues whose failure is gone, and publishes the viewers to GitHub Pages under
-`/conformance/`. To
+`/conformance/`. On `main` the PDFium corpus is also rendered with `--renderer web`: the
+browser stack (`pdf-web`, Canvas 2D plus its annotation layer) in headless Chrome, compared
+with PDFium's render including annotations and form fields, reported as `pdfium-web`. To
 fix a conformance issue, follow `.claude/skills/fix-conformance-issue/SKILL.md`
 (`cargo conformance repro <key>`, then `cargo conformance verify <key>`). See
 `tools/conformance/README.md`.

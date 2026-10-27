@@ -1,6 +1,7 @@
 //! Failure signatures that cluster cases sharing a likely root cause.
 
 use crate::{
+    corpus::Renderer,
     model::{DrawRef, ErrorDetail, PageOutput, ProcessEvidence, Region, RegionClass, Status},
     source_hints,
 };
@@ -190,6 +191,17 @@ pub fn panic_message(stderr: &str) -> Option<(String, String)> {
         }
     }
     None
+}
+
+/// Marks a signature with the renderer that produced it, after its status prefix
+/// (`mismatch: [web] …`), so failures of the web renderer cluster apart from the Skia
+/// renderer's. Skia signatures are returned unchanged.
+pub fn tagged(signature: String, renderer: Renderer) -> String {
+    match (renderer, signature.split_once(": ")) {
+        (Renderer::Web, Some((status, rest))) => format!("{status}: [web] {rest}"),
+        (Renderer::Web, None) => format!("{signature} [web]"),
+        (Renderer::Skia, _) => signature,
+    }
 }
 
 /// Signature of a crashed or timed-out worker.

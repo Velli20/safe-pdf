@@ -7,7 +7,7 @@
 
 use crate::{
     baseline::Delta,
-    corpus::CorpusKind,
+    corpus::{CorpusKind, Target},
     issue_state::IssueState,
     issues::{Group, Part},
     model::{CaseResult, ErrorDetail, PageOutput, ProcessEvidence, Status},
@@ -66,7 +66,7 @@ impl BodyContext {
     }
 
     /// Returns the published report of a corpus on GitHub Pages, ending in `/`.
-    pub fn pages(&self, kind: CorpusKind) -> String {
+    pub fn pages(&self, kind: Target) -> String {
         pages_url(&self.repo, kind)
     }
 
@@ -80,7 +80,7 @@ impl BodyContext {
 }
 
 /// Returns the published report of a corpus for a repository, ending in `/`.
-pub fn pages_url(repo: &str, kind: CorpusKind) -> String {
+pub fn pages_url(repo: &str, kind: Target) -> String {
     let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
     format!(
         "https://{}.github.io/{name}/conformance/{}/",
@@ -282,7 +282,7 @@ impl Entry<'_> {
             .ok()?
             .to_string_lossy()
             .replace('\\', "/");
-        let kind = self.part.run.kind;
+        let kind = self.part.run.kind.corpus;
         let (url, pinned) = kind.source();
         let revision = self
             .part
@@ -870,6 +870,7 @@ fn agents(
 mod tests {
     use super::*;
     use crate::{
+        corpus::Renderer,
         issues::{self, CorpusRun},
         model::{Case, PageResult},
         report_index::{Cluster, Index},
@@ -941,7 +942,7 @@ mod tests {
             dir: "clippath-1234abcd".to_owned(),
         };
         CorpusRun {
-            kind: CorpusKind::Pdfjs,
+            kind: Target::new(CorpusKind::Pdfjs, Renderer::Skia),
             index: Index {
                 corpus: "pdfjs".to_owned(),
                 corpus_root: "/corpus".to_owned(),
@@ -1027,7 +1028,10 @@ mod tests {
 
     #[test]
     fn links_into_pages() {
-        let base = pages_url("Velli20/safe-pdf", CorpusKind::Pdfjs);
+        let base = pages_url(
+            "Velli20/safe-pdf",
+            Target::new(CorpusKind::Pdfjs, Renderer::Skia),
+        );
         assert_eq!(
             base,
             "https://velli20.github.io/safe-pdf/conformance/pdfjs/"

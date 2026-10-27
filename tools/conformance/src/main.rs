@@ -32,11 +32,12 @@ mod signature;
 mod source_hints;
 mod stream_graph;
 mod trace_backend;
+mod web_render;
 mod worker;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use corpus::CorpusKind;
+use corpus::{CorpusKind, Renderer, Target};
 use std::{fs, path::PathBuf, process::ExitCode, time::Duration};
 
 #[derive(Parser)]
@@ -59,10 +60,20 @@ enum Command {
         #[arg(long)]
         links: bool,
     },
-    /// Check cases and write reports to target/conformance/<corpus>/.
+    /// Check cases and write reports to target/conformance/<corpus>/ (the web renderer's to
+    /// target/conformance/<corpus>-web/).
     Run {
         #[arg(long, value_enum)]
         corpus: CorpusKind,
+        /// Renderer compared with the reference: `skia` draws page content only, `web` is the
+        /// browser stack with its annotation layer, compared with PDFium's render of page
+        /// content, annotations and form fields.
+        #[arg(long, value_enum, default_value_t)]
+        renderer: Renderer,
+        /// Chrome executable for the web renderer (default: the installed Google Chrome or
+        /// Chromium).
+        #[arg(long, env = "CHROME_PATH")]
+        chrome: Option<PathBuf>,
         /// Corpus checkout (default: target/conformance/corpora/<corpus>).
         #[arg(long)]
         root: Option<PathBuf>,
@@ -76,7 +87,7 @@ enum Command {
         #[arg(long)]
         page: Option<usize>,
         /// Parallel workers.
-        #[arg(short, long, default_value_t = default_jobs())]
+        #[arg(short, long, default_value_t = run::default_jobs())]
         jobs: usize,
         /// Pixels per PDF point.
         #[arg(long, default_value_t = 1.5)]
@@ -115,6 +126,8 @@ enum Command {
     ReadDiff {
         #[arg(long, value_enum)]
         corpus: CorpusKind,
+        #[arg(long, value_enum, default_value_t)]
+        renderer: Renderer,
         /// `reads.json` of the run to compare against, usually the base branch's.
         #[arg(long)]
         base: PathBuf,
@@ -123,9 +136,10 @@ enum Command {
     SetupPdfium,
     /// File, update and close GitHub issues for the failure clusters of the last runs (uses `gh`).
     Issues {
-        /// Corpora whose last runs are reported together; repeat the flag.
+        /// Reports whose last runs are reported together, such as `pdfium` or `pdfium-web`;
+        /// repeat the flag.
         #[arg(long, value_enum, required = true)]
-        corpus: Vec<CorpusKind>,
+        corpus: Vec<Target>,
         /// Repository as owner/name.
         #[arg(long, env = "GITHUB_REPOSITORY")]
         repo: String,
@@ -148,6 +162,8 @@ enum Command {
     Show {
         #[arg(long, value_enum)]
         corpus: CorpusKind,
+        #[arg(long, value_enum, default_value_t)]
+        renderer: Renderer,
         /// Case id.
         case: String,
     },
@@ -155,6 +171,8 @@ enum Command {
     Accept {
         #[arg(long, value_enum)]
         corpus: CorpusKind,
+        #[arg(long, value_enum, default_value_t)]
+        renderer: Renderer,
         /// Only record this case.
         #[arg(long)]
         case: Option<String>,
@@ -196,6 +214,12 @@ enum WorkerCommand {
         reference_images: Option<PathBuf>,
         #[arg(long)]
         write_safe: bool,
+        /// DevTools endpoint of the browser the web renderer runs in.
+        #[arg(long, requires = "harness")]
+        devtools: Option<String>,
+        /// URL of the web renderer's harness page.
+        #[arg(long, requires = "devtools")]
+        harness: Option<String>,
     },
 }
 
@@ -208,10 +232,6 @@ enum ReferenceKind {
     Pdfium,
 }
 
-fn default_jobs() -> usize {
-    std::thread::available_parallelism().map_or(4, |count| count.get().saturating_sub(1).max(1))
-}
-
 fn main() -> Result<ExitCode> {
     match Cli::parse().command {
         Command::Fetch {
@@ -221,6 +241,8 @@ fn main() -> Result<ExitCode> {
         } => fetch::run(corpus, root.as_deref(), links)?,
         Command::Run {
             corpus,
+            renderer,
+            chrome,
             root,
             filter,
             case,
@@ -240,9 +262,20 @@ fn main() -> Result<ExitCode> {
             if !(scale.is_finite() && scale > 0.0) {
                 bail!("--scale must be positive");
             }
-            let reference = reference.unwrap_or(match corpus {
-                CorpusKind::Pdfium => ReferenceKind::Goldens,
-                CorpusKind::Pdfjs => ReferenceKind::Pdfium,
+            if renderer == Renderer::Web {
+                if read_only {
+                    bail!("--read-only only reads documents; run it with the skia renderer");
+                }
+                if reference == Some(ReferenceKind::Goldens) {
+                    bail!(
+                        "the web renderer is compared with PDFium's render of annotations and \
+                         form fields; use --reference pdfium"
+                    );
+                }
+            }
+            let reference = reference.unwrap_or(match (corpus, renderer) {
+                (CorpusKind::Pdfium, Renderer::Skia) => ReferenceKind::Goldens,
+                (CorpusKind::Pdfjs, _) | (_, Renderer::Web) => ReferenceKind::Pdfium,
             });
             let pdfium = match reference {
                 _ if reference_images.is_some() => None,
@@ -254,6 +287,8 @@ fn main() -> Result<ExitCode> {
             };
             let options = run::RunOptions {
                 kind: corpus,
+                renderer,
+                chrome,
                 explicit_root: root.is_some(),
                 root: {
                     let root = root.unwrap_or_else(|| corpus::default_root(corpus));
@@ -277,8 +312,12 @@ fn main() -> Result<ExitCode> {
                 return Ok(ExitCode::FAILURE);
             }
         }
-        Command::Show { corpus, case } => {
-            let summary = corpus::output_dir(corpus)
+        Command::Show {
+            corpus,
+            renderer,
+            case,
+        } => {
+            let summary = corpus::output_dir(Target::new(corpus, renderer))
                 .join("cases")
                 .join(run::case_dir(&case))
                 .join("summary.md");
@@ -290,8 +329,16 @@ fn main() -> Result<ExitCode> {
                 ),
             }
         }
-        Command::ReadDiff { corpus, base } => read_diff::run(corpus, &base)?,
-        Command::Accept { corpus, case } => accept(corpus, case.as_deref())?,
+        Command::ReadDiff {
+            corpus,
+            renderer,
+            base,
+        } => read_diff::run(Target::new(corpus, renderer), &base)?,
+        Command::Accept {
+            corpus,
+            renderer,
+            case,
+        } => accept(Target::new(corpus, renderer), case.as_deref())?,
         Command::SetupPdfium => pdfium_build::run()?,
         Command::Issues {
             corpus,
@@ -339,6 +386,8 @@ fn main() -> Result<ExitCode> {
             out_dir,
             reference_images,
             write_safe,
+            devtools,
+            harness,
         }) => worker::page(&worker::PageJob {
             pdf: &pdf,
             password: password.as_deref(),
@@ -350,6 +399,10 @@ fn main() -> Result<ExitCode> {
             pdfium: pdfium.as_deref(),
             reference_images: reference_images.as_deref(),
             write_safe,
+            web: devtools
+                .zip(harness)
+                .map(|(devtools, harness)| web_render::WebEndpoints { devtools, harness })
+                .as_ref(),
         })?,
     }
     Ok(ExitCode::SUCCESS)
@@ -373,7 +426,7 @@ fn pdfium_library(explicit: Option<PathBuf>) -> Result<PathBuf> {
     Ok(library)
 }
 
-fn accept(kind: CorpusKind, case: Option<&str>) -> Result<()> {
+fn accept(kind: Target, case: Option<&str>) -> Result<()> {
     let results_path = corpus::output_dir(kind).join("results.json");
     let Ok(bytes) = fs::read(&results_path) else {
         bail!(

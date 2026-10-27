@@ -1,17 +1,20 @@
-//! Renders one page of a local PDF in a worker, without a corpus, and reports what happened.
+//! Renders pages of a local PDF in workers, without a corpus, and reports what happened.
 //!
-//! This is the quickest way to look at a single document: it times both Safe-PDF render
-//! steps, writes the Safe-PDF image and the page's content-stream graph, and compares against
-//! a reference image or PDFium when one is available.
+//! This is the quickest way to look at a single document: it times the Safe-PDF render steps
+//! of each page, writes the Safe-PDF images and the pages' content-stream graphs, and compares
+//! against a reference image or PDFium when one is available. Pages render in parallel.
 
 use crate::{
-    model::{PageOutput, PageResult, Status},
-    pdfium_build, process, report_case, run,
+    corpus::Renderer,
+    model::{PageOutput, PageResult, ReadOutput, Status},
+    pdfium_build, process, report_case, run, signature,
+    web_render::WebHost,
 };
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
 
@@ -20,13 +23,20 @@ use std::{
 pub struct RenderArgs {
     /// PDF file.
     pub pdf: PathBuf,
-    /// Zero-based page.
-    #[arg(long, default_value_t = 0)]
-    pub page: usize,
+    /// Zero-based page; repeat for several pages (default: the first page).
+    #[arg(long, conflicts_with = "all_pages")]
+    pub page: Vec<usize>,
+    /// Render every page of the document.
+    #[arg(long, conflicts_with = "reference")]
+    pub all_pages: bool,
+    /// Pages rendered in parallel.
+    #[arg(short, long, default_value_t = run::default_jobs())]
+    pub jobs: usize,
     /// Document password.
     #[arg(long)]
     pub password: Option<String>,
-    /// Reference image of the page, such as a PDFium render, to compare against.
+    /// Reference image of the page, such as a PDFium render, to compare against; only with a
+    /// single page.
     #[arg(long, conflicts_with = "pdfium")]
     pub reference: Option<PathBuf>,
     /// PDFium shared library to render the reference with (default: the one built by
@@ -45,6 +55,14 @@ pub struct RenderArgs {
     /// Output directory (default: target/conformance/render/<file name>).
     #[arg(long)]
     pub out: Option<PathBuf>,
+    /// Renderer: `skia` draws page content only; `web` is the browser stack with its
+    /// annotation layer, compared with PDFium's render of annotations and form fields.
+    #[arg(long, value_enum, default_value_t)]
+    pub renderer: Renderer,
+    /// Chrome executable for the web renderer (default: the installed Google Chrome or
+    /// Chromium).
+    #[arg(long, env = "CHROME_PATH")]
+    pub chrome: Option<PathBuf>,
 }
 
 /// Where the reference image of the page comes from.
@@ -80,10 +98,23 @@ impl Reference {
     }
 }
 
-/// Renders the page and prints its report; returns true when the page did not fail.
+/// One `render` invocation: the document, where its evidence goes, and what it is compared with.
+struct Render<'a> {
+    args: &'a RenderArgs,
+    pdf: PathBuf,
+    out: PathBuf,
+    reference: Reference,
+    /// The browser shared by every page of the web renderer.
+    web: Option<WebHost>,
+}
+
+/// Renders the pages and prints their report; returns true when no page failed.
 pub fn run(args: &RenderArgs) -> Result<bool> {
     if !(args.scale.is_finite() && args.scale > 0.0) {
         bail!("--scale must be positive");
+    }
+    if args.reference.is_some() && args.page.len() > 1 {
+        bail!("--reference is the image of one page; pass a single --page");
     }
     let pdf = std::path::absolute(&args.pdf)?;
     if !pdf.is_file() {
@@ -97,65 +128,218 @@ pub fn run(args: &RenderArgs) -> Result<bool> {
         fs::remove_dir_all(&out)?;
     }
     fs::create_dir_all(&out)?;
-    let reference = Reference::select(args)?;
-
-    let mut command = process::worker_command()?;
-    command
-        .arg("page")
-        .arg("--pdf")
-        .arg(&pdf)
-        .arg("--page")
-        .arg(args.page.to_string())
-        .arg("--scale")
-        .arg(args.scale.to_string())
-        .arg("--max-side")
-        .arg("3000")
-        .arg("--tolerance")
-        .arg(args.tolerance.to_string())
-        .arg("--out-dir")
-        .arg(&out)
-        .arg("--write-safe");
-    match &reference {
-        Reference::Image(image) => {
-            fs::copy(image, out.join(format!("p{}-ref.png", args.page)))?;
-            command.arg("--reference-images").arg(&out);
+    let mut render = Render {
+        args,
+        pdf,
+        out,
+        reference: Reference::select(args)?,
+        web: None,
+    };
+    let pages = render.pages()?;
+    if let Reference::Image(image) = &render.reference
+        && let Some(page) = pages.first()
+    {
+        fs::copy(image, render.out.join(format!("p{page}-ref.png")))?;
+    }
+    render.web = match args.renderer {
+        Renderer::Web => Some(WebHost::start(args.chrome.clone())?),
+        Renderer::Skia => None,
+    };
+    let finished = AtomicUsize::new(0);
+    let results = run::in_parallel(args.jobs, &pages, |_, &page| {
+        let result = render.page(page);
+        if pages.len() > 1 {
+            let done = finished.fetch_add(1, Ordering::SeqCst).saturating_add(1);
+            match &result {
+                Ok(result) => println!(
+                    "[{done}/{}] page {page}: {}",
+                    pages.len(),
+                    result.status.as_str()
+                ),
+                Err(error) => println!(
+                    "[{done}/{}] page {page}: harness error {error:#}",
+                    pages.len()
+                ),
+            }
         }
-        Reference::Pdfium(library) => run::add_pdfium(&mut command, library),
-        Reference::None => {}
-    }
-    if let Some(password) = &args.password {
-        command.arg("--password").arg(password);
-    }
-    let (output, process) = process::execute::<PageOutput>(
-        command,
-        process::Limits::new(
-            Duration::from_secs(args.timeout),
-            process::DEFAULT_MEMORY_LIMIT_MIB,
-        ),
+        result
+    })
+    .into_iter()
+    .collect::<Result<Vec<_>>>()?;
+    render.web = None;
+    fs::write(
+        render.out.join("report.json"),
+        serde_json::to_vec_pretty(&results)?,
     )?;
-    let (status, signature) = match &output {
-        None => {
-            let status = if process.timed_out {
-                Status::Timeout
-            } else {
-                Status::Crash
-            };
-            (status, Some(crate::signature::process(status, &process)))
-        }
-        Some(output) => run::page_verdict(output, args.tolerance, false),
-    };
-    let result = PageResult {
-        status,
-        output,
-        page: args.page,
-        process,
-        signature,
-    };
-    fs::write(out.join("report.json"), serde_json::to_vec_pretty(&result)?)?;
-    let report = report(&pdf, &reference, &result, &out);
-    fs::write(out.join("summary.md"), &report)?;
+    let report = render.report(&results);
+    fs::write(render.out.join("summary.md"), &report)?;
     print!("{report}");
-    Ok(!status.is_failure())
+    Ok(results.iter().all(|result| !result.status.is_failure()))
+}
+
+impl Render<'_> {
+    /// Returns the pages to render: `--page`, every page with `--all-pages`, or the first.
+    fn pages(&self) -> Result<Vec<usize>> {
+        if !self.args.all_pages {
+            return Ok(if self.args.page.is_empty() {
+                vec![0]
+            } else {
+                self.args.page.clone()
+            });
+        }
+        // Counted in a worker, so a document that crashes the reader cannot take this down.
+        let mut command = process::worker_command()?;
+        command.arg("read").arg("--pdf").arg(&self.pdf);
+        if let Reference::Pdfium(library) = &self.reference {
+            run::add_pdfium(&mut command, library);
+        }
+        if let Some(password) = &self.args.password {
+            command.arg("--password").arg(password);
+        }
+        let (read, process) = process::execute::<ReadOutput>(command, self.limits())?;
+        let read = read.ok_or_else(|| {
+            anyhow!(
+                "reading the document to count its pages {} after {} ms",
+                process.ending(),
+                process.elapsed_ms
+            )
+        })?;
+        match read.safe_pages.or(read.reference_pages) {
+            Some(count) if count > 0 => Ok((0..count).collect()),
+            _ => bail!(
+                "cannot count the pages: {}",
+                read.safe_error
+                    .map(|error| error.message)
+                    .or(read.reference_error)
+                    .unwrap_or_else(|| "the document has no pages".to_owned())
+            ),
+        }
+    }
+
+    fn limits(&self) -> process::Limits {
+        process::Limits::new(
+            Duration::from_secs(self.args.timeout),
+            process::DEFAULT_MEMORY_LIMIT_MIB,
+        )
+    }
+
+    /// Returns the worker command that renders and compares `page`.
+    fn page_command(&self, page: usize) -> Result<std::process::Command> {
+        let mut command = process::worker_command()?;
+        command
+            .arg("page")
+            .arg("--pdf")
+            .arg(&self.pdf)
+            .arg("--page")
+            .arg(page.to_string())
+            .arg("--scale")
+            .arg(self.args.scale.to_string())
+            .arg("--max-side")
+            .arg("3000")
+            .arg("--tolerance")
+            .arg(self.args.tolerance.to_string())
+            .arg("--out-dir")
+            .arg(&self.out)
+            .arg("--write-safe");
+        match &self.reference {
+            Reference::Image(_) => {
+                command.arg("--reference-images").arg(&self.out);
+            }
+            Reference::Pdfium(library) => run::add_pdfium(&mut command, library),
+            Reference::None => {}
+        }
+        if let Some(password) = &self.args.password {
+            command.arg("--password").arg(password);
+        }
+        if let Some(web) = &self.web {
+            run::add_web(&mut command, web)?;
+        }
+        Ok(command)
+    }
+
+    /// Renders `page` in a worker and derives its verdict.
+    fn page(&self, page: usize) -> Result<PageResult> {
+        let (output, process) =
+            process::execute::<PageOutput>(self.page_command(page)?, self.limits())?;
+        if let Some(web) = &self.web
+            && output.is_none()
+        {
+            web.close_tab(&process.stderr);
+        }
+        let (status, signature) = match &output {
+            None => {
+                let status = if process.timed_out {
+                    Status::Timeout
+                } else {
+                    Status::Crash
+                };
+                (status, Some(signature::process(status, &process)))
+            }
+            Some(output) => run::page_verdict(output, self.args.tolerance, false),
+        };
+        Ok(PageResult {
+            status,
+            output,
+            page,
+            process,
+            signature: signature.map(|signature| signature::tagged(signature, self.args.renderer)),
+        })
+    }
+
+    /// Formats the report printed to the terminal and written as `summary.md`.
+    fn report(&self, results: &[PageResult]) -> String {
+        let failed = results
+            .iter()
+            .filter(|result| result.status.is_failure())
+            .count();
+        let mut lines = vec![
+            match results {
+                [result] => format!(
+                    "# {} page {}: {}",
+                    self.pdf.display(),
+                    result.page,
+                    result.status.as_str()
+                ),
+                _ => format!(
+                    "# {}: {} pages, {failed} failed",
+                    self.pdf.display(),
+                    results.len()
+                ),
+            },
+            String::new(),
+            format!("- Reference: {}", self.reference.describe()),
+            format!("- Renderer: {:?}", self.args.renderer),
+        ];
+        match results {
+            [result] => lines.extend(page_lines(result)),
+            _ => {
+                for result in results {
+                    lines.push(String::new());
+                    lines.push(format!(
+                        "## Page {}: {}",
+                        result.page,
+                        result.status.as_str()
+                    ));
+                    lines.push(String::new());
+                    lines.extend(page_lines(result));
+                }
+                lines.push(String::new());
+            }
+        }
+        let mut files: Vec<String> = fs::read_dir(&self.out)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "summary.md")
+            .collect();
+        files.sort();
+        lines.push(format!("- Output in {}:", self.out.display()));
+        lines.extend(files.iter().map(|file| format!("  - {file}")));
+        let mut text = lines.join("\n");
+        text.push('\n');
+        text
+    }
 }
 
 /// Returns `target/conformance/render/<file name>` for a PDF.
@@ -168,18 +352,9 @@ fn default_out(pdf: &Path) -> PathBuf {
         .join(run::case_dir(&name))
 }
 
-/// Formats the page report printed to the terminal and written as `summary.md`.
-fn report(pdf: &Path, reference: &Reference, result: &PageResult, out: &Path) -> String {
-    let mut lines = vec![
-        format!(
-            "# {} page {}: {}",
-            pdf.display(),
-            result.page,
-            result.status.as_str()
-        ),
-        String::new(),
-        format!("- Reference: {}", reference.describe()),
-    ];
+/// Describes how one page went: signature, render times, mismatch and errors.
+fn page_lines(result: &PageResult) -> Vec<String> {
+    let mut lines = Vec::new();
     if let Some(signature) = &result.signature {
         lines.push(format!("- Signature: `{signature}`"));
     }
@@ -216,17 +391,5 @@ fn report(pdf: &Path, reference: &Reference, result: &PageResult, out: &Path) ->
             }
         }
     }
-    let mut files: Vec<String> = fs::read_dir(out)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name != "summary.md")
-        .collect();
-    files.sort();
-    lines.push(format!("- Output in {}:", out.display()));
-    lines.extend(files.iter().map(|file| format!("  - {file}")));
-    let mut text = lines.join("\n");
-    text.push('\n');
-    text
+    lines
 }

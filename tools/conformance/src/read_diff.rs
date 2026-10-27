@@ -2,7 +2,7 @@
 //! report what a pull request changes in how documents are read.
 
 use crate::{
-    corpus::{self, CorpusKind},
+    corpus::{self, Target},
     fetch,
     model::{CaseResult, Status},
 };
@@ -102,7 +102,7 @@ pub struct Reads {
 
 impl Reads {
     /// Collects the read outcomes of a run.
-    pub fn from_results(kind: CorpusKind, results: &[CaseResult]) -> Self {
+    pub fn from_results(kind: Target, results: &[CaseResult]) -> Self {
         Self {
             corpus: kind.as_str().to_owned(),
             commit: fetch::revision(&corpus::workspace_root()),
@@ -242,7 +242,7 @@ fn markdown(base: &Reads, head: &Reads, diff: &Diff<'_>) -> Result<String> {
 }
 
 /// Compares the last run of `kind` with the reads at `base_path` and writes the report.
-pub fn run(kind: CorpusKind, base_path: &Path) -> Result<()> {
+pub fn run(kind: Target, base_path: &Path) -> Result<()> {
     let out = corpus::output_dir(kind);
     let head = Reads::load(&out.join(READS_FILE))?;
     let base = Reads::load(base_path)?;
