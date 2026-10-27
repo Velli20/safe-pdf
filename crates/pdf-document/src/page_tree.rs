@@ -45,7 +45,8 @@ impl FromPdfObject for PageTree {
     }
 }
 
-/// A `/Kids` entry of a page-tree node, dispatched on its `/Type`.
+/// A `/Kids` entry of a page-tree node, dispatched on its `/Type`, or on whether it has
+/// `/Kids` when the type is missing.
 enum PageTreeNode {
     /// A leaf `/Page` object.
     Page(PdfPage),
@@ -57,12 +58,16 @@ impl FromPdfObject for PageTreeNode {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let object = context.object();
         let mut dictionary = context.dictionary()?;
-        let node_type: Arc<[u8]> = dictionary.required(b"Type")?;
+        let node_type: Option<Arc<[u8]>> = dictionary.optional(b"Type")?;
+        let has_kids = dictionary.contains(b"Kids");
         let context = ObjectContext::new(object, dictionary.access());
-        match &*node_type {
-            PdfPage::KEY => context.decode().map(Self::Page),
-            PageTree::KEY => context.decode().map(Self::Pages),
-            other => Err(PdfPagesError::InvalidKidsEntryType {
+        match node_type.as_deref() {
+            Some(PdfPage::KEY) => context.decode().map(Self::Page),
+            Some(PageTree::KEY) => context.decode().map(Self::Pages),
+            // A node without `/Type` is an intermediate node when it has kids and a page otherwise.
+            None if has_kids => context.decode().map(Self::Pages),
+            None => context.decode().map(Self::Page),
+            Some(other) => Err(PdfPagesError::InvalidKidsEntryType {
                 found_type: String::from_utf8_lossy(other).into_owned(),
             }
             .into()),

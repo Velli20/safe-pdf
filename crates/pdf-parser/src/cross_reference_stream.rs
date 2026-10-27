@@ -141,7 +141,7 @@ impl<'data> XrefStreamEntryDecoder<'data> {
         Some(match entry_type {
             0 => CrossReferenceEntryType::new_free(second_value, third_value),
             1 => CrossReferenceEntryType::new_normal(second_value, third_value),
-            2 => CrossReferenceEntryType::new_compressed(second_value, third_value),
+            2 => CrossReferenceEntryType::new_compressed(second_value),
             _ => CrossReferenceEntryType::new_free(0, 0),
         })
     }
@@ -249,10 +249,8 @@ mod tests {
         match e2 {
             CrossReferenceEntryType::Compressed {
                 object_stream_number,
-                index_within_stream,
             } => {
                 assert_eq!(*object_stream_number, 5);
-                assert_eq!(*index_within_stream, 0);
             }
             _ => panic!("Expected compressed entry"),
         }
@@ -439,10 +437,8 @@ mod tests {
         match e3 {
             CrossReferenceEntryType::Compressed {
                 object_stream_number,
-                index_within_stream,
             } => {
                 assert_eq!(*object_stream_number, 1);
-                assert_eq!(*index_within_stream, 0);
             }
             _ => panic!("Expected compressed entry"),
         }
