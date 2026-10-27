@@ -101,6 +101,11 @@ impl SurfacePool {
         Ok(BudgetedImage::new(image, reservation))
     }
 
+    /// Returns the configured maximum number of accounted pixel bytes.
+    pub(crate) fn limit(&self) -> usize {
+        self.budget.limit()
+    }
+
     /// Uploads validated straight RGBA pixels into a budgeted browser surface.
     ///
     /// Reserves temporary storage before conversion and propagates image, budget,
@@ -108,21 +113,45 @@ impl SurfacePool {
     pub(crate) fn upload(&self, image: &Image) -> WebResult<Surface> {
         let [w, h] = image.dimensions().ok_or(Error::ResourceLimit)?;
         let size = Size::new(w, h);
-        byte_size(size)?;
         pdf_image::raster::validate_image(image)?;
 
-        // Account for the Rust conversion buffer and browser ImageData copy before
-        // allocating either, and retain that reservation until upload has completed.
-        let _scratch = self.scratch(
-            byte_size(size)?
-                .checked_mul(2)
-                .ok_or(Error::ResourceLimit)?,
-        )?;
+        // Account for the browser ImageData copy, and the Rust conversion buffer of
+        // non-RGBA pixels, before allocating either; retain it until upload completes.
+        let _scratch = self.scratch(staging_bytes(size, image.pixel_format)?)?;
         let surface = self.acquire(size)?;
-        let data = pdf_image::raster::rgba(image)?;
-        let data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&data), w, h)?;
+        let data = match image.pixel_format {
+            PixelFormat::RGBA8888 => web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+                Clamped(image.data.as_ref()),
+                w,
+                h,
+            )?,
+            PixelFormat::Gray8 | PixelFormat::Alpha8 => {
+                let rgba = pdf_image::raster::rgba(image)?;
+                web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&rgba), w, h)?
+            }
+        };
         surface.context().put_image_data(&data, 0.0, 0.0)?;
         Ok(surface)
+    }
+}
+
+/// Returns the accounted bytes `upload` holds at its peak for pixels of this size and
+/// format: the destination surface and the staging copies made to fill it.
+pub(crate) fn upload_bytes(size: Size<u32>, format: PixelFormat) -> WebResult<usize> {
+    byte_size(size)?
+        .checked_add(staging_bytes(size, format)?)
+        .ok_or(Error::ResourceLimit)
+}
+
+/// Returns the bytes of the browser ImageData copy, plus the RGBA conversion buffer
+/// that non-RGBA pixels need before that copy.
+fn staging_bytes(size: Size<u32>, format: PixelFormat) -> WebResult<usize> {
+    let bytes = byte_size(size)?;
+    match format {
+        PixelFormat::RGBA8888 => Ok(bytes),
+        PixelFormat::Gray8 | PixelFormat::Alpha8 => {
+            bytes.checked_mul(2).ok_or(Error::ResourceLimit)
+        }
     }
 }
 
