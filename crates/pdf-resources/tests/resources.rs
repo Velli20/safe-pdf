@@ -37,7 +37,7 @@ fn array(values: Vec<ObjectVariant>) -> ObjectVariant {
 }
 
 fn type2_function(c0: Vec<ObjectVariant>, c1: Vec<ObjectVariant>) -> ObjectVariant {
-    ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
+    ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([
         (Vec::from(b"FunctionType"), integer(2)),
         (Vec::from(b"Domain"), array(vec![real(0.0), real(1.0)])),
         (Vec::from(b"C0"), array(c0)),
@@ -47,7 +47,7 @@ fn type2_function(c0: Vec<ObjectVariant>, c1: Vec<ObjectVariant>) -> ObjectVaria
 }
 
 fn inline_axial_shading() -> ObjectVariant {
-    ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
+    ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([
         (Vec::from(b"ShadingType"), integer(2)),
         (Vec::from(b"ColorSpace"), name("DeviceRGB")),
         (
@@ -65,7 +65,7 @@ fn inline_axial_shading() -> ObjectVariant {
 }
 
 fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
-    let dictionary = Dictionary::new(BTreeMap::from([
+    let dictionary = Dictionary::from_iter(BTreeMap::from([
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
@@ -95,7 +95,7 @@ fn recursive_form_xobject_stream(
     nested_object_number: usize,
     data: &[u8],
 ) -> ObjectVariant {
-    let dictionary = Dictionary::new(BTreeMap::from([
+    let dictionary = Dictionary::from_iter(BTreeMap::from([
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
@@ -111,9 +111,9 @@ fn recursive_form_xobject_stream(
         ),
         (
             Vec::from(b"Resources"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"XObject"),
-                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+                ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                     Vec::from(nested_name.as_bytes()),
                     ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(
                         nested_object_number,
@@ -138,11 +138,11 @@ fn xobject_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
         .map(|(name, value)| (Vec::from(name.as_bytes()), value))
         .collect::<BTreeMap<_, _>>();
 
-    Dictionary::new(BTreeMap::from([(
+    Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"XObject"),
-            ObjectVariant::Dictionary(Dictionary::new(xobjects)),
+            ObjectVariant::Dictionary(Dictionary::from_iter(xobjects)),
         )]))),
     )]))
 }
@@ -153,11 +153,11 @@ fn page_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
         .map(|(name, value)| (Vec::from(name.as_bytes()), value))
         .collect::<BTreeMap<_, _>>();
 
-    Dictionary::new(BTreeMap::from([(
+    Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"Shading"),
-            ObjectVariant::Dictionary(Dictionary::new(shading_entries)),
+            ObjectVariant::Dictionary(Dictionary::from_iter(shading_entries)),
         )]))),
     )]))
 }
@@ -166,13 +166,13 @@ fn type3_char_proc(data: &[u8]) -> ObjectVariant {
     ObjectVariant::Stream(StreamObject::new(
         0,
         0,
-        Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
+        Dictionary::default(),
         data.to_vec(),
     ))
 }
 
 fn self_referential_type3_font(object_number: usize) -> Dictionary {
-    Dictionary::new(BTreeMap::from([
+    Dictionary::from_iter(BTreeMap::from([
         (Vec::from(b"Type"), name("Font")),
         (Vec::from(b"Subtype"), name("Type3")),
         (Vec::from(b"Name"), name("Self")),
@@ -198,16 +198,16 @@ fn self_referential_type3_font(object_number: usize) -> Dictionary {
         ),
         (
             Vec::from(b"CharProcs"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"A"),
                 type3_char_proc(b"0 0 d0"),
             )]))),
         ),
         (
             Vec::from(b"Resources"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"Font"),
-                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+                ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                     Vec::from(b"Self"),
                     ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(
                         object_number,
@@ -223,7 +223,7 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
     ObjectVariant::Stream(StreamObject::new(
         object_number,
         0,
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"PatternType"), integer(1)),
             (Vec::from(b"PaintType"), integer(1)),
             (Vec::from(b"TilingType"), integer(1)),
@@ -237,9 +237,9 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
             (Vec::from(b"YStep"), real(10.0)),
             (
                 Vec::from(b"Resources"),
-                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+                ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                     Vec::from(b"Pattern"),
-                    ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+                    ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                         Vec::from(b"Self"),
                         ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(
                             object_number,
@@ -327,7 +327,7 @@ fn form_resources_accept_an_indirect_stream_dictionary() {
     let nested_resources = ObjectVariant::Stream(StreamObject::new(
         15,
         0,
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"Subtype"), name("Form")),
             (
                 Vec::from(b"BBox"),
@@ -339,7 +339,7 @@ fn form_resources_accept_an_indirect_stream_dictionary() {
     let form = ObjectVariant::Stream(StreamObject::new(
         14,
         0,
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"Subtype"), name("Form")),
             (
                 Vec::from(b"BBox"),
@@ -386,20 +386,20 @@ fn form_resources_accept_an_indirect_stream_dictionary() {
 
 #[test]
 fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
-    let page_dict = Dictionary::new(BTreeMap::from([(
+    let page_dict = Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"Resources"),
         ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(100, 0)),
     )]));
 
-    let resources_dict = Dictionary::new(BTreeMap::from([(
+    let resources_dict = Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"XObject"),
-        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"Meta6"),
             ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(101, 0)),
         )]))),
     )]));
 
-    let form_dict = Dictionary::new(BTreeMap::from([
+    let form_dict = Dictionary::from_iter(BTreeMap::from([
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
@@ -493,12 +493,12 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
         Vec::from(b"Self"),
         ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(11, 0)),
     )]);
-    let resource_dict = Dictionary::new(BTreeMap::from([(
+    let resource_dict = Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"XObject"),
-        ObjectVariant::Dictionary(Dictionary::new(xobject_entries)),
+        ObjectVariant::Dictionary(Dictionary::from_iter(xobject_entries)),
     )]));
 
-    let form_dict = Dictionary::new(BTreeMap::from([
+    let form_dict = Dictionary::from_iter(BTreeMap::from([
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
@@ -518,7 +518,7 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
         ),
     ]));
 
-    let page_dict = Dictionary::new(BTreeMap::from([(
+    let page_dict = Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"Resources"),
         ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(10, 0)),
     )]));
@@ -587,11 +587,11 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
 
 #[test]
 fn mutually_recursive_form_xobjects_resolve_lazily() {
-    let page_dict = Dictionary::new(BTreeMap::from([(
+    let page_dict = Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"XObject"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"First"),
                 ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(6, 0)),
             )]))),
@@ -648,11 +648,11 @@ fn mutually_recursive_form_xobjects_resolve_lazily() {
 
 #[test]
 fn self_referential_font_resources_resolve_lazily() {
-    let page_dict = Dictionary::new(BTreeMap::from([(
+    let page_dict = Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"Font"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"Self"),
                 ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(21, 0)),
             )]))),
@@ -699,7 +699,7 @@ fn self_referential_font_resources_resolve_lazily() {
 
 #[test]
 fn fallback_fonts_do_not_read_nested_type3_resources() {
-    let malformed_type3 = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
+    let malformed_type3 = ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
@@ -709,11 +709,11 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
         ),
         (Vec::from(b"Resources"), ObjectVariant::Integer(1)),
     ])));
-    let page_dict = Dictionary::new(BTreeMap::from([(
+    let page_dict = Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"Font"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"F1"),
                 malformed_type3,
             )]))),
@@ -734,11 +734,11 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
 
 #[test]
 fn self_referential_pattern_resources_resolve_lazily() {
-    let page_dict = Dictionary::new(BTreeMap::from([(
+    let page_dict = Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"Pattern"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"Self"),
                 ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(31, 0)),
             )]))),

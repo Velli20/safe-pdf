@@ -292,27 +292,19 @@ impl DocumentDecryptor {
     /// Decrypts dictionary values while preserving signature contents required by PDF rules.
     fn decrypt_dictionary(
         &self,
-        dictionary: Dictionary,
+        mut dictionary: Dictionary,
         object_number: usize,
         generation_number: usize,
     ) -> Result<Dictionary, DecryptionError> {
         let is_signature = is_signature_dictionary(&dictionary);
-        let entries = dictionary
-            .dictionary
-            .into_iter()
-            .map(|(key, value)| {
-                if is_signature && key == b"Contents" {
-                    Ok((key, value))
-                } else {
-                    self.decrypt_object_value(value, object_number, generation_number)
-                        .map(|value| (key, value))
-                }
-            })
-            .collect::<Result<_, _>>()?;
-        Ok(Dictionary {
-            dictionary: entries,
-            object_number: dictionary.object_number,
-        })
+        for (key, value) in dictionary.iter_mut() {
+            if is_signature && key == b"Contents" {
+                continue;
+            }
+            let encrypted = std::mem::replace(value, ObjectVariant::Null);
+            *value = self.decrypt_object_value(encrypted, object_number, generation_number)?;
+        }
+        Ok(dictionary)
     }
 
     /// Decrypts a stream's data and recursively transforms its dictionary values.
@@ -385,7 +377,7 @@ mod tests {
             );
         }
 
-        StreamObject::new(7, 0, Dictionary::new(entries), data)
+        StreamObject::new(7, 0, Dictionary::from_iter(entries), data)
     }
 
     fn encrypt_for_object(
@@ -473,7 +465,7 @@ mod tests {
             number: object_number,
             generation: generation_number,
         };
-        let object = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
+        let object = ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"Contents"),
                 pdf_object_reader::pdf_string::PdfString::from(
@@ -556,7 +548,7 @@ mod tests {
         let stream = StreamObject::new(
             99,
             1,
-            Dictionary::new(BTreeMap::from([(
+            Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"Label"),
                 pdf_object_reader::pdf_string::PdfString::from(
                     encrypt_for_object(
@@ -602,7 +594,7 @@ mod tests {
             number: 9,
             generation: 0,
         };
-        let object = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
+        let object = ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"Type"),
                 pdf_object_reader::pdf_string::PdfString::from(

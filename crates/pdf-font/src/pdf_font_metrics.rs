@@ -102,7 +102,7 @@ mod tests {
                 ),
             )])
             .collect();
-        Dictionary::new(map)
+        Dictionary::from_iter(map)
     }
 
     fn int(n: i64) -> ObjectVariant {

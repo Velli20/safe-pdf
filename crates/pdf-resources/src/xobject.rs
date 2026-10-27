@@ -178,7 +178,7 @@ mod tests {
     }
 
     fn image_dictionary(object_number: usize) -> Dictionary {
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
@@ -234,7 +234,7 @@ mod tests {
         let image_stream = StreamObject::new(
             1,
             0,
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (
                     Vec::from(b"Subtype"),
                     pdf_object_reader::pdf_string::PdfString::from(
@@ -262,7 +262,7 @@ mod tests {
         let mask_stream = StreamObject::new(
             2,
             0,
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (
                     Vec::from(b"Subtype"),
                     pdf_object_reader::pdf_string::PdfString::from(
@@ -316,7 +316,7 @@ mod tests {
         let mask_stream = StreamObject::new(
             2,
             0,
-            Dictionary::new(BTreeMap::from([(
+            Dictionary::from_iter(BTreeMap::from([(
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
                     b"Unsupported",
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn encoded_image_retries_filters_after_dependencies_are_resolved() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -383,9 +383,7 @@ mod tests {
         objects
             .insert(
                 object_id(2),
-                ObjectVariant::Dictionary(Dictionary::new(
-                    BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-                )),
+                ObjectVariant::Dictionary(Dictionary::default()),
             )
             .expect("decode parameters should be inserted");
 
@@ -412,7 +410,7 @@ mod tests {
         let stream = StreamObject::new(
             9,
             0,
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (
                     Vec::from(b"Subtype"),
                     pdf_object_reader::pdf_string::PdfString::from(

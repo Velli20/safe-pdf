@@ -48,14 +48,14 @@ fn color_space(value: &str) -> ObjectVariant {
 }
 
 fn resources_dictionary(entries: &[(&str, &str)]) -> Dictionary {
-    let color_spaces = Dictionary::new(
+    let color_spaces = Dictionary::from_iter(
         entries
             .iter()
             .map(|(name, value)| (Vec::from(name.as_bytes()), color_space(value)))
             .collect::<BTreeMap<_, _>>(),
     );
 
-    Dictionary::new(BTreeMap::from([(
+    Dictionary::from_iter(BTreeMap::from([(
         Vec::from(b"ColorSpace"),
         ObjectVariant::Dictionary(color_spaces),
     )]))
@@ -92,7 +92,7 @@ fn page_dictionary(
         );
     }
 
-    let mut dictionary = Dictionary::new(entries);
+    let mut dictionary = Dictionary::from_iter(entries);
     dictionary.object_number = Some(object_number);
     dictionary
 }
@@ -134,7 +134,7 @@ fn pages_dictionary(
         );
     }
 
-    let mut dictionary = Dictionary::new(entries);
+    let mut dictionary = Dictionary::from_iter(entries);
     dictionary.object_number = Some(object_number);
     dictionary
 }

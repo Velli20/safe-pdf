@@ -1,10 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use pdf_filter::{filter::Filters, image_payload::ImagePayload};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
+    dictionary::Dictionary, object_variant::ObjectVariant, pdf_name::PdfName, stream::StreamObject,
 };
 
 use crate::{error::PdfImageError, image_metadata::ImageMetadata};
@@ -94,7 +94,7 @@ impl InlineImageHeader {
         let dictionary = match self.0 {
             ObjectVariant::Dictionary(dictionary) => dictionary,
             // Unreachable: a header is only built from a dictionary.
-            _ => Dictionary::new(BTreeMap::new()),
+            _ => Dictionary::default(),
         };
         ObjectVariant::Stream(StreamObject::new_encoded(0, 0, dictionary, data))
     }
@@ -140,34 +140,35 @@ impl FromPdfObject for InlineDataLength {
 /// The parser preserves the abbreviated inline-image keys from the content stream. Where
 /// both spellings of a key are present, the abbreviation wins.
 fn normalize_inline_image_dictionary(dictionary: Dictionary) -> Dictionary {
-    let mut normalized = BTreeMap::new();
+    let mut normalized = Dictionary::default();
+    normalized.object_number = dictionary.object_number;
 
-    for (key, value) in dictionary.dictionary {
-        let canonical_key = match key.as_slice() {
-            b"W" => b"Width".to_vec(),
-            b"H" => b"Height".to_vec(),
-            b"BPC" => b"BitsPerComponent".to_vec(),
-            b"CS" => b"ColorSpace".to_vec(),
-            b"IM" => b"ImageMask".to_vec(),
-            b"I" => b"Interpolate".to_vec(),
-            b"F" => b"Filter".to_vec(),
-            b"D" => b"Decode".to_vec(),
-            b"DP" => b"DecodeParms".to_vec(),
+    // Entries arrive in key order, where each abbreviation sorts before its full name.
+    for (key, value) in dictionary {
+        let canonical_key = match key.as_bytes() {
+            b"W" => PdfName::from(b"Width"),
+            b"H" => PdfName::from(b"Height"),
+            b"BPC" => PdfName::from(b"BitsPerComponent"),
+            b"CS" => PdfName::from(b"ColorSpace"),
+            b"IM" => PdfName::from(b"ImageMask"),
+            b"I" => PdfName::from(b"Interpolate"),
+            b"F" => PdfName::from(b"Filter"),
+            b"D" => PdfName::from(b"Decode"),
+            b"DP" => PdfName::from(b"DecodeParms"),
             _ => key,
         };
+        if normalized.get(canonical_key.as_bytes()).is_some() {
+            continue;
+        }
 
-        let canonical_value = match canonical_key.as_slice() {
+        let canonical_value = match canonical_key.as_bytes() {
             b"ColorSpace" => normalize_inline_color_space(value),
             _ => value,
         };
-
-        normalized.entry(canonical_key).or_insert(canonical_value);
+        normalized.insert(canonical_key, canonical_value);
     }
 
-    Dictionary {
-        dictionary: normalized,
-        object_number: dictionary.object_number,
-    }
+    normalized
 }
 
 /// Expands abbreviated device colour-space names, including inside an array.
@@ -206,7 +207,7 @@ mod tests {
 
     #[test]
     fn normalize_inline_image_dictionary_expands_abbreviations() {
-        let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([
+        let dictionary = pdf_object_reader::dictionary::Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"CS"),
@@ -233,8 +234,8 @@ mod tests {
         let normalized = normalize_inline_image_dictionary(dictionary);
 
         assert_eq!(
-            normalized.dictionary,
-            BTreeMap::from([
+            normalized,
+            Dictionary::from_iter(BTreeMap::from([
                 (b"BitsPerComponent".to_vec(), ObjectVariant::Integer(8)),
                 (
                     b"ColorSpace".to_vec(),
@@ -256,7 +257,7 @@ mod tests {
                 (b"ImageMask".to_vec(), ObjectVariant::Boolean(true)),
                 (b"Interpolate".to_vec(), ObjectVariant::Boolean(false)),
                 (b"Width".to_vec(), ObjectVariant::Integer(1)),
-            ])
+            ]))
         );
     }
 
@@ -270,18 +271,19 @@ mod tests {
         ];
 
         for (abbreviated, canonical) in cases {
-            let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([(
-                Vec::from(b"CS"),
-                pdf_object_reader::pdf_string::PdfString::from(
-                    abbreviated.as_bytes(),
-                    pdf_object_reader::string_kind::StringKind::Name,
-                ),
-            )]));
+            let dictionary =
+                pdf_object_reader::dictionary::Dictionary::from_iter(BTreeMap::from([(
+                    Vec::from(b"CS"),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        abbreviated.as_bytes(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                )]));
 
             let normalized = normalize_inline_image_dictionary(dictionary);
 
             assert_eq!(
-                normalized.dictionary.get(b"ColorSpace".as_slice()),
+                normalized.get(b"ColorSpace".as_slice()),
                 Some(&pdf_object_reader::pdf_string::PdfString::from(
                     canonical.as_bytes(),
                     pdf_object_reader::string_kind::StringKind::Name
@@ -292,7 +294,7 @@ mod tests {
 
     #[test]
     fn normalize_inline_image_dictionary_expands_indexed_color_space_arrays() {
-        let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([(
+        let dictionary = pdf_object_reader::dictionary::Dictionary::from_iter(BTreeMap::from([(
             Vec::from(b"CS"),
             ObjectVariant::Array(
                 vec![
@@ -317,7 +319,7 @@ mod tests {
         let normalized = normalize_inline_image_dictionary(dictionary);
 
         assert_eq!(
-            normalized.dictionary.get(b"ColorSpace".as_slice()),
+            normalized.get(b"ColorSpace".as_slice()),
             Some(&ObjectVariant::Array(
                 vec![
                     pdf_object_reader::pdf_string::PdfString::from(
@@ -355,7 +357,7 @@ mod tests {
     #[test]
     fn inline_image_applies_filters_during_construction() {
         let mut dictionary = gray_dictionary();
-        dictionary.dictionary.insert(
+        dictionary.insert(
             b"F".to_vec(),
             pdf_object_reader::pdf_string::PdfString::from(
                 b"ASCIIHexDecode",
@@ -376,7 +378,7 @@ mod tests {
     #[test]
     fn invalid_metadata_is_rejected_during_construction() {
         let error = PdfImage::inline(
-            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
+            Dictionary::default(),
             vec![1],
             &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
@@ -389,7 +391,7 @@ mod tests {
     }
 
     fn gray_dictionary() -> Dictionary {
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"CS"),

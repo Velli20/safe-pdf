@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn image_mask_defaults_bits_per_component_to_one() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"ImageMask"), ObjectVariant::Boolean(true)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn image_mask_rejects_non_one_bit_components() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"ImageMask"), ObjectVariant::Boolean(true)),
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn image_mask_stores_filter_chain() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn jpx_images_default_bits_per_component_to_eight() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn stores_ordered_filter_chain() {
         let mut dictionary = direct_dictionary(1, 1, 8);
-        dictionary.dictionary.insert(
+        dictionary.insert(
             b"Filter".to_vec(),
             ObjectVariant::Array(
                 vec![
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn non_jpx_images_require_bits_per_component() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
@@ -347,7 +347,7 @@ mod tests {
     }
 
     fn direct_dictionary(width: i64, height: i64, bits_per_component: i64) -> Dictionary {
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"BitsPerComponent"),
                 ObjectVariant::Integer(bits_per_component),
@@ -365,7 +365,7 @@ mod tests {
     }
 
     fn indexed_dictionary(bits_per_component: i64) -> Dictionary {
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"BitsPerComponent"),
                 ObjectVariant::Integer(bits_per_component),

@@ -243,7 +243,7 @@ mod tests {
         ObjectVariant::Array(
             vec![
                 name("CalRGB"),
-                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
+                ObjectVariant::Dictionary(Dictionary::from_iter(BTreeMap::from([
                     (
                         Vec::from(b"WhitePoint"),
                         ObjectVariant::Array(
@@ -282,7 +282,7 @@ mod tests {
         let function = StreamObject::new(
             1,
             0,
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (Vec::from(b"FunctionType"), ObjectVariant::Integer(4)),
                 (
                     Vec::from(b"Domain"),
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_1bpc_gray_inverts_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
                 Vec::from(b"ColorSpace"),
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_8bpc_gray_remaps_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_indexed_image_applies_decode_before_lookup() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
                 Vec::from(b"ColorSpace"),
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn indexed_device_n_palette_is_converted_through_cal_rgb() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn direct_four_component_device_n_is_not_interpreted_as_cmyk() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (Vec::from(b"ColorSpace"), fixture_device_n()),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn indexed_device_cmyk_keeps_device_fast_path() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -529,7 +529,7 @@ mod tests {
         let tint_function = StreamObject::new(
             2,
             0,
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (Vec::from(b"FunctionType"), ObjectVariant::Integer(4)),
                 (
                     Vec::from(b"Domain"),
@@ -548,7 +548,7 @@ mod tests {
             ])),
             b"{ pop 1 1 1 }".to_vec(),
         );
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_image_rejects_invalid_decode_length() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -615,7 +615,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_image_without_decode_preserves_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_image_trims_trailing_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -668,7 +668,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_image_mask_defaults_bits_per_component_to_one() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"ImageMask"), ObjectVariant::Boolean(true)),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(4)),
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_non_mask_image_still_requires_bits_per_component() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"ColorSpace"),
                 pdf_object_reader::pdf_string::PdfString::from(
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_dct_cmyk_accepts_preconverted_rgb_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -741,7 +741,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_non_dct_cmyk_still_rejects_rgb_sized_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -771,7 +771,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_dct_single_pixel_expands_to_declared_size() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -806,7 +806,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_image_applies_resolved_soft_mask() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
@@ -842,7 +842,7 @@ mod tests {
     #[test]
     fn decode_inline_image_applies_filter_chain_before_samples() {
         let image = PdfImage::inline(
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
                 (
                     Vec::from(b"CS"),
@@ -875,7 +875,7 @@ mod tests {
     #[test]
     fn decode_inline_image_accepts_abbreviated_gray_color_space() {
         let image = PdfImage::inline(
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
                 (
                     Vec::from(b"CS"),
@@ -903,7 +903,7 @@ mod tests {
     #[test]
     fn decode_inline_image_preserves_unfiltered_shared_samples() {
         let image = PdfImage::inline(
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
                 (
                     Vec::from(b"CS"),
@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn decode_inline_image_accepts_abbreviated_indexed_color_space() {
         let image = PdfImage::inline(
-            Dictionary::new(BTreeMap::from([
+            Dictionary::from_iter(BTreeMap::from([
                 (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
                 (
                     Vec::from(b"CS"),
@@ -978,7 +978,7 @@ mod tests {
 
     #[test]
     fn decode_normalized_1bpc_image_expands_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
                 Vec::from(b"ColorSpace"),
@@ -1077,7 +1077,7 @@ mod tests {
     }
 
     fn indexed_dictionary(bits_per_component: i64) -> Dictionary {
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"BitsPerComponent"),
                 ObjectVariant::Integer(bits_per_component),
@@ -1109,7 +1109,7 @@ mod tests {
     }
 
     fn filtered_gray_dictionary() -> Dictionary {
-        Dictionary::new(BTreeMap::from([
+        Dictionary::from_iter(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),

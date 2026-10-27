@@ -141,7 +141,7 @@ mod tests {
         ObjectVariant::Stream(StreamObject::new(
             1,
             0,
-            Dictionary::new(dict),
+            Dictionary::from_iter(dict),
             code.as_bytes().to_vec(),
         ))
     }
@@ -173,8 +173,7 @@ mod tests {
 
     #[test]
     fn parses_five_element_device_n_array_with_attributes() {
-        let attrs =
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()));
+        let attrs = ObjectVariant::Dictionary(Dictionary::default());
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Spot")].into()),
             name("DeviceCMYK"),

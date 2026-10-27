@@ -53,7 +53,7 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
 }
 
 fn image_dictionary() -> Dictionary {
-    Dictionary::new(std::collections::BTreeMap::from([
+    Dictionary::from_iter(std::collections::BTreeMap::from([
         (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
         (
             Vec::from(b"ColorSpace"),
@@ -75,7 +75,7 @@ fn image_dictionary() -> Dictionary {
 
 fn inline_image() -> PdfImage {
     PdfImage::inline(
-        Dictionary::new(std::collections::BTreeMap::from([
+        Dictionary::from_iter(std::collections::BTreeMap::from([
             (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
             (
                 Vec::from(b"CS"),

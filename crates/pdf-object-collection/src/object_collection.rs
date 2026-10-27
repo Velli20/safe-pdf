@@ -217,7 +217,7 @@ impl ObjectCollection {
     #[cfg(feature = "json")]
     fn dictionary_to_json(dict: &pdf_object_reader::dictionary::Dictionary) -> JsonValue {
         let mut map = serde_json::Map::new();
-        for (key, value) in &dict.dictionary {
+        for (key, value) in dict.iter() {
             map.insert(
                 String::from_utf8_lossy(key).into_owned(),
                 Self::object_variant_to_json(value),
@@ -280,12 +280,7 @@ mod tests {
     fn inserting_unfiltered_stream_preserves_the_byte_allocation() {
         let data = vec![1, 2, 3, 4];
         let original = data.as_ptr();
-        let stream = StreamObject::new(
-            99,
-            4,
-            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
-            data,
-        );
+        let stream = StreamObject::new(99, 4, Dictionary::default(), data);
         let mut collection = ObjectCollection::default();
 
         collection
@@ -319,9 +314,7 @@ mod tests {
                     number: 7,
                     generation: 2,
                 },
-                ObjectVariant::Dictionary(Dictionary::new(
-                    BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-                )),
+                ObjectVariant::Dictionary(Dictionary::default()),
             )
             .expect("dictionary insert failed");
 
@@ -353,7 +346,7 @@ mod tests {
         decode_parms.insert(Vec::from(b"Colors"), ObjectVariant::Integer(1));
         decode_parms.insert(Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8));
 
-        let decode_parms_object = ObjectVariant::Dictionary(Dictionary::new(decode_parms));
+        let decode_parms_object = ObjectVariant::Dictionary(Dictionary::from_iter(decode_parms));
 
         let mut collection = ObjectCollection::default();
         collection
@@ -386,7 +379,7 @@ mod tests {
         let stream = ObjectVariant::Stream(StreamObject::new_encoded(
             1,
             0,
-            Dictionary::new(stream_dict),
+            Dictionary::from_iter(stream_dict),
             compressed,
         ));
 
@@ -410,7 +403,7 @@ mod tests {
 
     #[test]
     fn insert_preserves_encoded_state_when_filter_dependencies_are_unresolved() {
-        let stream_dictionary = Dictionary::new(BTreeMap::from([
+        let stream_dictionary = Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"DecodeParms"),
                 ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
@@ -451,9 +444,7 @@ mod tests {
                     number: 2,
                     generation: 0,
                 },
-                ObjectVariant::Dictionary(Dictionary::new(
-                    BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-                )),
+                ObjectVariant::Dictionary(Dictionary::default()),
             )
             .expect("decode parameters should be inserted");
 

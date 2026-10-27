@@ -144,7 +144,6 @@ impl IndexedColorSpace {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use std::collections::BTreeMap;
 
     use pdf_object_reader::{
         EmptySource, ObjectReader, dictionary::Dictionary, object_variant::ObjectVariant,
@@ -169,12 +168,7 @@ mod tests {
 
     #[test]
     fn stream_lookup_shares_decoded_stream_bytes() {
-        let stream = StreamObject::new(
-            1,
-            0,
-            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
-            vec![1, 2, 3, 4],
-        );
+        let stream = StreamObject::new(1, 0, Dictionary::default(), vec![1, 2, 3, 4]);
         let stream_data = stream.shared_data();
         let lookup = ObjectVariant::Stream(stream);
 

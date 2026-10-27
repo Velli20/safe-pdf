@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn read_xobject_normalizes_inverted_bbox() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"BBox"),
                 ObjectVariant::Array(
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn empty_from_dictionary_creates_empty_content_stream() {
-        let dictionary = Dictionary::new(BTreeMap::from([
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
             (
                 Vec::from(b"BBox"),
                 ObjectVariant::Array(

@@ -124,7 +124,7 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
     /// The names borrow the dictionary rather than the context, so entries can be read
     /// while iterating.
     pub fn keys(&self) -> impl Iterator<Item = &'read [u8]> + use<'read, A> {
-        self.dictionary.dictionary.keys().map(Vec::as_slice)
+        self.dictionary.keys()
     }
 
     /// Returns the number of the indirect object holding this dictionary, if it is one.
@@ -241,16 +241,16 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
         key: &[u8],
         mut decode: impl FnMut(&mut Self, &ObjectVariant) -> ReadResult<T>,
     ) -> ReadResult<HashMap<Vec<u8>, T>> {
-        let Some(dictionary) = self.optional::<Dictionary>(key)? else {
-            return Ok(HashMap::new());
-        };
-        let mut entries = HashMap::with_capacity(dictionary.dictionary.len());
-        for (name, value) in &dictionary.dictionary {
-            if !self.is_absent(value)? {
-                entries.insert(name.clone(), decode(self, value)?);
+        let entries = self.with_optional_dictionary(key, |context, dictionary| {
+            let mut entries = HashMap::with_capacity(dictionary.len());
+            for (name, value) in dictionary.iter() {
+                if !context.is_absent(value)? {
+                    entries.insert(name.to_vec(), decode(context, value)?);
+                }
             }
-        }
-        Ok(entries)
+            Ok(entries)
+        })?;
+        Ok(entries.unwrap_or_default())
     }
 
     /// Decodes each entry of an optional sub-dictionary as `T`, keyed by entry name, skipping
@@ -261,14 +261,36 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
         &mut self,
         key: &[u8],
     ) -> ReadResult<HashMap<Vec<u8>, T>> {
-        let Some(dictionary) = self.optional::<Dictionary>(key)? else {
-            return Ok(HashMap::new());
+        let entries = self.with_optional_dictionary(key, |context, dictionary| {
+            Ok(dictionary
+                .iter()
+                .filter_map(|(name, value)| Some((name.to_vec(), context.access.read(value).ok()?)))
+                .collect())
+        })?;
+        Ok(entries.unwrap_or_default())
+    }
+
+    /// Runs `visit` on an optional sub-dictionary, borrowed from its resolved object rather
+    /// than copied. A missing or null entry yields `None`.
+    fn with_optional_dictionary<R>(
+        &mut self,
+        key: &[u8],
+        visit: impl FnOnce(&mut Self, &Dictionary) -> ReadResult<R>,
+    ) -> ReadResult<Option<R>> {
+        let Some(object) = self.resolve_entry(key)? else {
+            return Ok(None);
         };
-        Ok(dictionary
-            .dictionary
-            .iter()
-            .filter_map(|(name, value)| Some((name.clone(), self.access.read(value).ok()?)))
-            .collect())
+        match object.value() {
+            ObjectVariant::Null => Ok(None),
+            ObjectVariant::Dictionary(dictionary) => visit(self, dictionary).map(Some),
+            other => Err(ObjectReadError::At {
+                location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+                source: Box::new(ObjectReadError::TypeMismatch {
+                    expected: ObjectKind::Dictionary,
+                    actual: other.kind(),
+                }),
+            }),
+        }
     }
 
     /// Reads an entry holding one value or an array of values, as a list.

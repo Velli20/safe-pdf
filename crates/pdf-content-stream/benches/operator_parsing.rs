@@ -16,12 +16,7 @@ fn repeated_stream(fragment: &[u8]) -> ObjectVariant {
         data.extend_from_slice(fragment);
     }
 
-    ObjectVariant::Stream(StreamObject::new(
-        1,
-        0,
-        Dictionary::new(Default::default()),
-        data,
-    ))
+    ObjectVariant::Stream(StreamObject::new(1, 0, Dictionary::default(), data))
 }
 
 fn benchmark_stream(

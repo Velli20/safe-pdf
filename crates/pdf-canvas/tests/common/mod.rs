@@ -157,7 +157,7 @@ pub fn content_stream(object_number: usize, data: &[u8]) -> ContentStream {
     let stream = StreamObject::new(
         object_number,
         0,
-        Dictionary::new(std::collections::BTreeMap::<
+        Dictionary::from_iter(std::collections::BTreeMap::<
             Vec<u8>,
             pdf_object_reader::object_variant::ObjectVariant,
         >::new()),
