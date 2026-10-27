@@ -367,7 +367,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
-      contents: read
+      # Writes the assets of the conformance-assets pre-release that issues show.
+      contents: write
       issues: write
     steps:
       - name: Checkout repository

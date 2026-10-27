@@ -6,8 +6,9 @@
 //! downloads their reference images, and reruns those cases against them.
 //!
 //! A corpus that is only read on `main` has no published report. For an issue key, `repro`
-//! then takes the cases from the issue's machine-readable summary and reruns them without
-//! reference images, which still shows whether a crash, timeout or error is gone.
+//! then takes the cases from the issue's machine-readable summary and reruns them against the
+//! reference image kept with the issue, if any. A case without one still shows whether a crash,
+//! timeout or error is gone.
 
 use crate::{
     corpus::{self, CorpusKind},
@@ -21,7 +22,7 @@ use anyhow::{Context, Result, bail};
 use clap::ValueEnum as _;
 use serde::Deserialize;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -66,6 +67,8 @@ struct Selection {
     /// Signatures whose key is the target; empty when the target is a case id.
     signatures: BTreeSet<String>,
     cases: Vec<String>,
+    /// Reference images kept with the issue: path under the reference directory and link.
+    reference_assets: Vec<(PathBuf, String)>,
 }
 
 /// The machine-readable summary at the end of a conformance issue.
@@ -74,6 +77,19 @@ struct IssueSummary {
     key: String,
     signature: String,
     cases: Vec<IssueCase>,
+    /// The example case, whose files are kept with the issue.
+    #[serde(default)]
+    example: Option<IssueExample>,
+}
+
+/// The example case of an issue summary.
+#[derive(Deserialize)]
+struct IssueExample {
+    corpus: String,
+    /// Directory of the case in a report.
+    dir: String,
+    /// Links of the files kept with the issue, by file name.
+    assets: BTreeMap<String, String>,
 }
 
 /// One case listed in an issue summary.
@@ -179,6 +195,7 @@ fn select(kind: CorpusKind, index: Index, target: &str, limit: usize) -> Option<
         index: Some(index),
         signatures,
         cases,
+        reference_assets: Vec::new(),
     })
 }
 
@@ -213,8 +230,7 @@ fn issue_selections(repo: &str, key: &str, limit: usize) -> Result<Vec<Selection
             continue;
         };
         println!(
-            "{}: no published report; taking the cases of issue #{number} and rerunning them \
-             without reference images",
+            "{}: no published report; taking the cases of issue #{number}",
             kind.as_str()
         );
         let selection = match selections
@@ -237,6 +253,7 @@ fn issue_selections(repo: &str, key: &str, limit: usize) -> Result<Vec<Selection
                     read_only: false,
                     signatures: BTreeSet::from([summary.signature.clone()]),
                     cases: Vec::new(),
+                    reference_assets: Vec::new(),
                 });
                 let Some(selection) = selections.last_mut() else {
                     continue;
@@ -247,6 +264,18 @@ fn issue_selections(repo: &str, key: &str, limit: usize) -> Result<Vec<Selection
         if selection.cases.len() < limit {
             selection.cases.push(case.id);
         }
+    }
+    if let Some(example) = summary.example
+        && let Some(selection) = selections.iter_mut().find(|selection| {
+            CorpusKind::from_str(&example.corpus, true).is_ok_and(|kind| kind == selection.kind)
+        })
+    {
+        selection.reference_assets = example
+            .assets
+            .into_iter()
+            .filter(|(file, _)| file.ends_with("-ref.png"))
+            .map(|(file, url)| (Path::new(&example.dir).join(file), url))
+            .collect();
     }
     Ok(selections)
 }
@@ -276,8 +305,10 @@ fn rerun(args: &ReproArgs, repo: &str, selection: &Selection) -> Result<bool> {
         selection.cases.join(", "),
         if selection.index.is_some() {
             " against the published PDFium images"
+        } else if !selection.reference_assets.is_empty() {
+            " against the PDFium image kept with the issue"
         } else {
-            ""
+            " without reference images"
         }
     );
     let dir = work_dir(kind);
@@ -307,6 +338,13 @@ fn rerun(args: &ReproArgs, repo: &str, selection: &Selection) -> Result<bool> {
             }
         }
     }
+    for (file, url) in &selection.reference_assets {
+        let path = references.join(file);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fetch::download(url, &path)?;
+    }
     let options = RunOptions {
         kind,
         root,
@@ -321,9 +359,10 @@ fn rerun(args: &ReproArgs, repo: &str, selection: &Selection) -> Result<bool> {
         limits: Limits::new(Duration::from_secs(60), DEFAULT_MEMORY_LIMIT_MIB),
         tolerance: selection.tolerance,
         pdfium: None,
-        // Without published images, the pdfium corpus falls back to its golden images and
-        // the pdf.js corpus has no reference at all.
-        reference_images: selection.index.is_some().then_some(references),
+        // Without published images or one kept with the issue, the pdfium corpus falls back
+        // to its golden images and the pdf.js corpus has no reference at all.
+        reference_images: (selection.index.is_some() || !selection.reference_assets.is_empty())
+            .then_some(references),
         read_only: selection.read_only,
     };
     run::run(&options)?;

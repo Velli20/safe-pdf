@@ -215,7 +215,7 @@ PDFs that have no goldens.
   the rendering job to fail pull requests on render regressions against the baselines.
 - **Published viewer:** runs on `main` deploy the viewers to GitHub Pages at
   <https://velli20.github.io/safe-pdf/conformance/>, next to the web-canvas demo. Issues
-  link straight into it (`#case=<id>&page=<n>`) and embed its images. Pages holds one site,
+  link straight into it (`#case=<id>&page=<n>`). Pages holds one site,
   so the `publish` job and `ci.yml`'s `deploy` job each fetch the other half from its newest
   `pages-conformance` / `pages-web-canvas` artifact (`.github/scripts/assemble-pages.sh`).
 - **Issues:**
@@ -224,9 +224,16 @@ PDFs that have no goldens.
     where they apply. At most 15 new issues per run; the rest follow in later runs, worst
     status first.
   - Each body opens with an alert and a table of facts, links the suspect source line (GitHub
-    shows it as a snippet), shows one case's images from Pages, lists the cases with viewer,
+    shows it as a snippet), shows one case's images, lists the cases with viewer,
     summary and PDF links, gives the `repro` and `verify` commands, and ends with a JSON
     block for agents.
+  - That case's images (`pN-ref.png`, `pN-safe.png`, `pN-diff.png`), `pN-content.txt`,
+    `pN-streams.txt` and `summary.md` are kept with the issue as assets of the
+    `conformance-assets` pre-release, named `<key>--<content hash>--<file>`, so they outlive
+    the Pages site and the 14-day run artifacts. An unchanged file is not uploaded again; a
+    changed one replaces the issue's earlier asset. Closing an issue, by the workflow or as
+    not planned, deletes its assets. When the pre-release cannot be written, bodies link the
+    images on Pages instead. `repro` uses the kept PDFium image when Pages has no report.
   - A hidden `conformance-state` comment holds the issue's key and, per corpus, its cluster
     size and how many full runs in a row it was absent:
     - **Open:** the body is refreshed silently. A comment is posted only when new documents
