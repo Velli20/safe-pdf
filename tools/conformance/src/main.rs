@@ -13,6 +13,7 @@ mod fetch;
 mod github;
 mod golden;
 mod inventory;
+mod issue_assets;
 mod issue_body;
 mod issue_state;
 mod issues;

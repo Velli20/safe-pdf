@@ -10,11 +10,16 @@
 //!
 //! Open issues whose cluster is absent from two full runs in a row are closed as completed.
 //! Read-only runs file and refresh issues but never count a cluster as absent.
+//!
+//! The example case's images and evidence are kept as assets of a pre-release, so an issue
+//! still shows them after the published report and the run artifacts are gone. Closing an
+//! issue (or closing it as not planned by hand) deletes them.
 
 use crate::{
     baseline::Delta,
     corpus::{self, CorpusKind},
     github::{self, Issue},
+    issue_assets::{self, AssetLinks, AssetStore},
     issue_body::{self, BodyContext},
     issue_state::{self, CorpusState, IssueState},
     model::{CaseResult, Status},
@@ -242,9 +247,20 @@ pub fn run(options: &IssueOptions<'_>) -> Result<()> {
     } else {
         github::issues(options.repo, LABEL)?
     };
+    // Without the asset store, bodies link the published report as before.
+    let assets = if options.dry_run {
+        None
+    } else {
+        AssetStore::open(options.repo)
+            .inspect_err(|error| {
+                println!("::warning ::issue images link the published report: {error:#}");
+            })
+            .ok()
+    };
     let mut sync = Sync {
         options,
         context: BodyContext::from_env(options.repo),
+        assets,
         existing: existing
             .into_iter()
             .filter_map(|issue| IssueState::parse(&issue.body).map(|state| (issue, state)))
@@ -281,6 +297,8 @@ pub fn run(options: &IssueOptions<'_>) -> Result<()> {
 struct Sync<'a> {
     options: &'a IssueOptions<'a>,
     context: BodyContext,
+    /// Keeps the example case's files with each issue; `None` in a dry run.
+    assets: Option<AssetStore>,
     existing: Vec<(Issue, IssueState)>,
     /// Corpora with a full run here, whose absent clusters count as missing.
     complete: BTreeSet<String>,
@@ -315,7 +333,8 @@ impl Sync<'_> {
             key: group.key.clone(),
             corpora: group.corpus_states(),
         };
-        let body = issue_body::render(group, &state, &self.context)?;
+        let assets = self.upload(group);
+        let body = issue_body::render(group, &state, &self.context, &assets)?;
         let title = issue_body::title(group);
         let labels = issue_body::labels(group);
         let file = self.body_file(&group.key, &body)?;
@@ -350,7 +369,7 @@ impl Sync<'_> {
 
     fn refresh(&mut self, group: &Group<'_>, issue: &Issue, old: &IssueState) -> Result<()> {
         if issue.is_not_planned() {
-            return Ok(());
+            return self.remove_assets(&old.key);
         }
         let mut state = old.clone();
         for (corpus, entry) in &mut state.corpora {
@@ -368,7 +387,7 @@ impl Sync<'_> {
             self.write(group, issue, &state)?;
             return self.reopen(issue);
         }
-        if state == *old {
+        if state == *old && !self.lacks_assets(group, issue) {
             return Ok(());
         }
         self.tally.updated = self.tally.updated.saturating_add(1);
@@ -426,6 +445,7 @@ impl Sync<'_> {
             .values()
             .all(|entry| entry.missing >= CLOSE_AFTER_MISSING)
         {
+            self.remove_assets(&old.key)?;
             return self.close(
                 issue,
                 "completed",
@@ -445,7 +465,8 @@ impl Sync<'_> {
     }
 
     fn write(&mut self, group: &Group<'_>, issue: &Issue, state: &IssueState) -> Result<()> {
-        let body = issue_body::render(group, state, &self.context)?;
+        let assets = self.upload(group);
+        let body = issue_body::render(group, state, &self.context, &assets)?;
         let title = issue_body::title(group);
         let labels = issue_body::labels(group);
         let file = self.body_file(&issue.number.to_string(), &body)?;
@@ -566,6 +587,42 @@ impl Sync<'_> {
             note,
         ])?;
         Ok(())
+    }
+
+    /// Keeps the example case's files with the group's issue and returns their links; none
+    /// without the asset store or when the upload fails, so the body links the published
+    /// report instead.
+    fn upload(&mut self, group: &Group<'_>) -> AssetLinks {
+        let (Some(store), Some((dir, files))) =
+            (self.assets.as_mut(), issue_body::example_files(group))
+        else {
+            return AssetLinks::new();
+        };
+        store
+            .upload(&group.key, &dir, &files)
+            .unwrap_or_else(|error| {
+                println!(
+                    "::warning ::cannot keep the files of `{}` with its issue: {error:#}",
+                    group.signature
+                );
+                AssetLinks::new()
+            })
+    }
+
+    /// Returns true when the issue could show kept files but its body does not link any yet.
+    fn lacks_assets(&self, group: &Group<'_>, issue: &Issue) -> bool {
+        self.assets.is_some()
+            && issue_body::example_files(group).is_some()
+            && !issue
+                .body
+                .contains(&issue_assets::asset_url(self.options.repo, ""))
+    }
+
+    fn remove_assets(&mut self, key: &str) -> Result<()> {
+        match self.assets.as_mut() {
+            Some(store) => store.remove(key),
+            None => Ok(()),
+        }
     }
 
     /// Writes a body to a file for `--body-file`; bodies exceed argument limits.
@@ -692,6 +749,7 @@ mod tests {
                 run_link: None,
                 sha: None,
             },
+            assets: None,
             existing: existing
                 .into_iter()
                 .filter_map(|issue| IssueState::parse(&issue.body).map(|state| (issue, state)))

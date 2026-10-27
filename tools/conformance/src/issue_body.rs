@@ -1,13 +1,15 @@
 //! Titles, labels and Markdown bodies of conformance issues.
 //!
 //! A body leads with an alert saying what fails, a table of facts, the suspect source
-//! (a permalink GitHub renders as a snippet), images of one case from the published report,
+//! (a permalink GitHub renders as a snippet), images of one case (from the issue's assets, or
+//! the published report when it has none),
 //! the case list, the commands to reproduce and verify a fix, and a JSON block for agents.
 //! Long detail sits in collapsed sections.
 
 use crate::{
     baseline::Delta,
-    corpus::CorpusKind,
+    corpus::{self, CorpusKind},
+    issue_assets::AssetLinks,
     issue_state::IssueState,
     issues::{Group, Part},
     model::{CaseResult, ErrorDetail, PageOutput, ProcessEvidence, Status},
@@ -18,12 +20,20 @@ use crate::{
 };
 use anyhow::Result;
 use serde_json::json;
-use std::fmt::Write as _;
+use std::{fmt::Write as _, path::PathBuf};
 
 /// GitHub rejects issue bodies above 65,536 characters.
 const BODY_LIMIT: usize = 60_000;
 /// Cases listed in the table, then in the JSON block.
 const CASE_LIMITS: [usize; 3] = [25, 10, 3];
+/// Page files of the example case kept with the issue, by suffix after `pN-`.
+const EXAMPLE_SUFFIXES: [&str; 5] = [
+    "ref.png",
+    "safe.png",
+    "diff.png",
+    "content.txt",
+    "streams.txt",
+];
 /// Width of each image in the side-by-side table.
 const IMAGE_WIDTH: u32 = 280;
 /// Workspace frames shown from a backtrace.
@@ -254,6 +264,22 @@ impl Entry<'_> {
         })
     }
 
+    /// Returns the files of the first page (and the case summary) worth keeping with the
+    /// issue.
+    fn evidence(&self) -> Vec<String> {
+        let mut files: Vec<String> = self.pages.first().map_or_else(Vec::new, |page| {
+            EXAMPLE_SUFFIXES
+                .iter()
+                .map(|suffix| format!("p{}-{suffix}", page.page))
+                .filter(|file| page.files.contains(file))
+                .collect()
+        });
+        if self.case.bundle {
+            files.push("summary.md".to_owned());
+        }
+        files
+    }
+
     fn delta(&self) -> &'static str {
         let deltas: Vec<Delta> = if self.pages.is_empty() {
             vec![self.case.delta]
@@ -332,11 +358,37 @@ fn entries<'a>(group: &'a Group<'a>) -> Vec<Entry<'a>> {
     entries
 }
 
-/// Renders the issue body, shortening lists until it fits GitHub's limit.
-pub fn render(group: &Group<'_>, state: &IssueState, context: &BodyContext) -> Result<String> {
+/// Returns the case shown as the example: the one with the most images.
+fn showcase<'a>(entries: &'a [Entry<'a>]) -> Option<&'a Entry<'a>> {
+    entries
+        .iter()
+        .max_by_key(|entry| (entry.images(), entry.result().is_some()))
+        .or_else(|| entries.first())
+}
+
+/// Returns the output directory of the example case and its files worth keeping with the
+/// issue; `None` when it has none.
+pub fn example_files(group: &Group<'_>) -> Option<(PathBuf, Vec<String>)> {
+    let entries = entries(group);
+    let entry = showcase(&entries)?;
+    let files = entry.evidence();
+    let dir = corpus::output_dir(entry.part.run.kind)
+        .join("cases")
+        .join(&entry.case.dir);
+    (!files.is_empty()).then_some((dir, files))
+}
+
+/// Renders the issue body, shortening lists until it fits GitHub's limit. `assets` links the
+/// example case's files kept with the issue; files without one link to the published report.
+pub fn render(
+    group: &Group<'_>,
+    state: &IssueState,
+    context: &BodyContext,
+    assets: &AssetLinks,
+) -> Result<String> {
     let mut body = String::new();
     for limit in CASE_LIMITS {
-        body = render_with(group, state, context, limit)?;
+        body = render_with(group, state, context, assets, limit)?;
         if body.len() <= BODY_LIMIT {
             break;
         }
@@ -348,13 +400,11 @@ fn render_with(
     group: &Group<'_>,
     state: &IssueState,
     context: &BodyContext,
+    assets: &AssetLinks,
     limit: usize,
 ) -> Result<String> {
     let entries = entries(group);
-    let showcase = entries
-        .iter()
-        .max_by_key(|entry| (entry.images(), entry.result().is_some()))
-        .or_else(|| entries.first());
+    let showcase = showcase(&entries);
     let mut text = String::new();
     writeln!(text, "{}\n", state.marker()?)?;
     headline(&mut text, group)?;
@@ -367,11 +417,22 @@ fn render_with(
         writeln!(text, "{}\n", context.source(path, *line))?;
     }
     if let Some(entry) = showcase {
-        example(&mut text, entry, group, context)?;
+        example(&mut text, entry, group, context, assets)?;
     }
     cases(&mut text, &entries, context, limit)?;
     reproduce(&mut text, group)?;
-    agents(&mut text, group, &entries, suspect.as_ref(), context, limit)?;
+    let example = showcase
+        .filter(|_| !assets.is_empty())
+        .map(|entry| (entry, assets));
+    agents(
+        &mut text,
+        group,
+        &entries,
+        example,
+        suspect.as_ref(),
+        context,
+        limit,
+    )?;
     writeln!(
         text,
         "---\n<sub>Filed by the conformance workflow. Key `{}`. Close as *not planned* to stop updates. \
@@ -550,6 +611,7 @@ fn example(
     entry: &Entry<'_>,
     group: &Group<'_>,
     context: &BodyContext,
+    assets: &AssetLinks,
 ) -> Result<()> {
     let base = context.pages(entry.part.run.kind);
     let page = entry.pages.first();
@@ -568,9 +630,12 @@ fn example(
             .filter_map(|(suffix, caption)| {
                 let file = format!("p{}-{suffix}.png", page.page);
                 page.files.contains(&file).then(|| {
+                    let src = assets
+                        .get(&file)
+                        .cloned()
+                        .unwrap_or_else(|| format!("{base}cases/{}/{file}", entry.case.dir));
                     format!(
-                        "<td align=\"center\"><a href=\"{viewer}\"><img src=\"{base}cases/{}/{file}\" width=\"{IMAGE_WIDTH}\" alt=\"{caption}\"></a><br><sub>{caption}</sub></td>",
-                        entry.case.dir
+                        "<td align=\"center\"><a href=\"{viewer}\"><img src=\"{src}\" width=\"{IMAGE_WIDTH}\" alt=\"{caption}\"></a><br><sub>{caption}</sub></td>"
                     )
                 })
             })
@@ -584,6 +649,18 @@ fn example(
                 )?;
             }
         }
+    }
+    let evidence: Vec<String> = assets
+        .iter()
+        .filter(|(file, _)| !file.ends_with(".png"))
+        .map(|(file, url)| format!("[{file}]({url})"))
+        .collect();
+    if !evidence.is_empty() {
+        writeln!(
+            text,
+            "Evidence kept with this issue: {}\n",
+            evidence.join(" · ")
+        )?;
     }
     let status = group.status();
     if let Some(error) = error_of(entry, status) {
@@ -823,6 +900,7 @@ fn agents(
     text: &mut String,
     group: &Group<'_>,
     entries: &[Entry<'_>],
+    example: Option<(&Entry<'_>, &AssetLinks)>,
     suspect: Option<&(String, usize, String)>,
     context: &BodyContext,
     limit: usize,
@@ -857,6 +935,12 @@ fn agents(
         "reproduce": format!("cargo conformance repro {}", group.key),
         "verify": format!("cargo conformance verify {}", group.key),
         "cases": cases,
+        "example": example.map(|(entry, assets)| json!({
+            "corpus": entry.part.run.kind.as_str(),
+            "id": entry.case.id,
+            "dir": entry.case.dir,
+            "assets": assets,
+        })),
     });
     writeln!(
         text,
@@ -979,7 +1063,7 @@ mod tests {
             key: group.key.clone(),
             corpora: group.corpus_states(),
         };
-        let body = render(group, &state, &context).unwrap();
+        let body = render(group, &state, &context, &AssetLinks::new()).unwrap();
         if std::env::var_os("SHOW_BODY").is_some() {
             println!("{}\n\n{body}", title(group));
         }
