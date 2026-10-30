@@ -7,7 +7,7 @@
 
 use pdf_document::page::PdfPage;
 use pdf_font::PdfFontSpec;
-use pdf_object_reader::ObjectHandle;
+use pdf_object_reader::{ObjectHandle, pdf_name::PdfName};
 use pdf_resources::{
     external_graphics_state::ExternalGraphicsStateKey, pattern::Pattern, resource::Resource,
     resources::Resources,
@@ -181,7 +181,7 @@ fn nodes(resources: &Resources) -> Vec<Result<Node, String>> {
 }
 
 /// Returns map entries ordered by their printable name.
-fn sorted<V>(map: &std::collections::HashMap<Vec<u8>, V>) -> Vec<(String, &V)> {
+fn sorted<V>(map: &std::collections::HashMap<PdfName, V>) -> Vec<(String, &V)> {
     let mut entries: Vec<(String, &V)> = map
         .iter()
         .map(|(name, value)| (String::from_utf8_lossy(name).into_owned(), value))

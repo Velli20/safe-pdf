@@ -2,7 +2,9 @@
 use crate::{external_graphics_state::ExternalGraphicsState, pattern::Pattern, resource::Resource};
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::PdfFontSpec;
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult};
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult, pdf_name::PdfName,
+};
 use pdf_optional_content::OptionalContentMembership;
 use pdf_shading::model::Shading;
 use std::{collections::HashMap, sync::Arc};
@@ -17,19 +19,19 @@ use std::{collections::HashMap, sync::Arc};
 #[derive(Default)]
 pub struct Resources {
     /// The /Font resource namespace.
-    pub fonts: HashMap<Vec<u8>, ObjectHandle<Resource>>,
+    pub fonts: HashMap<PdfName, ObjectHandle<Resource>>,
     /// The /ExtGState resource namespace.
-    pub ext_g_states: HashMap<Vec<u8>, Resource>,
+    pub ext_g_states: HashMap<PdfName, Resource>,
     /// The /Pattern resource namespace.
-    pub patterns: HashMap<Vec<u8>, Resource>,
+    pub patterns: HashMap<PdfName, Resource>,
     /// The /XObject resource namespace.
-    pub xobjects: HashMap<Vec<u8>, ObjectHandle<Resource>>,
+    pub xobjects: HashMap<PdfName, ObjectHandle<Resource>>,
     /// The /Shading resource namespace.
-    pub shadings: HashMap<Vec<u8>, Resource>,
+    pub shadings: HashMap<PdfName, Resource>,
     /// The /ColorSpace resource namespace.
-    pub color_spaces: HashMap<Vec<u8>, Resource>,
+    pub color_spaces: HashMap<PdfName, Resource>,
     /// The optional content group and membership entries of the /Properties namespace.
-    pub optional_content: HashMap<Vec<u8>, OptionalContentMembership>,
+    pub optional_content: HashMap<PdfName, OptionalContentMembership>,
 }
 
 /// Decodes the resource categories of a resource dictionary (PDF spec §7.8.3), or of a
@@ -207,7 +209,7 @@ trait ResourceCategory {
     fn merged_with(&self, parent: &Self) -> Self;
 }
 
-impl<T: Clone> ResourceCategory for HashMap<Vec<u8>, T> {
+impl<T: Clone> ResourceCategory for HashMap<PdfName, T> {
     fn lacks_any_of(&self, parent: &Self) -> bool {
         parent.keys().any(|name| !self.contains_key(name))
     }
