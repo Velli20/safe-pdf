@@ -20,13 +20,14 @@ use pdf_document::page::PdfPage;
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec};
 use pdf_graphics::{
-    BlendMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect, size::Size,
-    transform::Transform,
+    BlendMode, Image, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    size::Size, transform::Transform,
 };
 use pdf_optional_content::OptionalContentState;
 
 use crate::optional_content_filter::OptionalContentFilter;
 use pdf_resources::{
+    image_xobject::ImageXObject,
     pattern::{PaintType, Pattern},
     resources::Resources,
 };
@@ -48,6 +49,10 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) font_system: Arc<FontSystem>,
     /// Loaded font handles keyed by the stable address of a page resource specification.
     font_cache: HashMap<*const PdfFontSpec, PdfFontHandle>,
+    /// Image XObjects decoded during this render, keyed by the address of the resource,
+    /// which each entry keeps alive. `None` marks an image whose data cannot be decoded.
+    /// The rasters are released with the canvas.
+    image_cache: HashMap<*const ImageXObject, (Arc<ImageXObject>, Option<Arc<Image>>)>,
     /// Scalable outlines reused by repeated glyphs during this page render.
     glyph_cache: HashMap<(FontFaceId, GlyphId, u32), Arc<PdfPath>>,
     /// The last shading-pattern shader, reused while the same pattern fills at the same
@@ -114,6 +119,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             page,
             font_system,
             font_cache: HashMap::new(),
+            image_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             pattern_shading_cache: None,
             canvas_stack,
@@ -237,6 +243,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             page: self.page,
             font_system: Arc::clone(&self.font_system),
             font_cache: HashMap::new(),
+            image_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             pattern_shading_cache: None,
             canvas_stack,
@@ -281,6 +288,24 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let handle = self.font_system.load_pdf_font(spec.clone())?;
         self.font_cache.insert(key, handle.clone());
         Ok(handle)
+    }
+
+    /// Decodes an image XObject once for each resource drawn by this canvas.
+    pub(crate) fn decode_image_xobject(
+        &mut self,
+        image: &Arc<ImageXObject>,
+    ) -> Result<Option<Arc<Image>>, PdfCanvasError> {
+        let key = Arc::as_ptr(image);
+        if let Some((_, decoded)) = self.image_cache.get(&key) {
+            return Ok(decoded.clone());
+        }
+        let decoded = image
+            .decode()
+            .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?
+            .map(Arc::new);
+        self.image_cache
+            .insert(key, (Arc::clone(image), decoded.clone()));
+        Ok(decoded)
     }
 
     /// Returns a page-scoped cached scalable outline.

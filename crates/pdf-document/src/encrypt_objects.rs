@@ -7,6 +7,8 @@
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
+
 use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::encryption::EncryptDictionary;
 use crate::error::PdfReaderError;
@@ -25,18 +27,18 @@ use pdf_parser::{error::ParserError, indirect_object::IndirectValue, parser::Pdf
 const MAX_ENCRYPT_OBJECTS: usize = 32;
 
 /// Parses the encryption dictionary and the indirect objects it references.
-pub(crate) struct EncryptObjectLoader<'a, 'input> {
+pub(crate) struct EncryptObjectLoader<'a> {
     entries: &'a BTreeMap<usize, CrossReferenceEntryType>,
-    parser: &'a PdfParser<'input>,
+    input: &'a Bytes,
 }
 
-impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
+impl<'a> EncryptObjectLoader<'a> {
     /// Creates a loader over the document's cross-reference entries.
     pub(crate) fn new(
         entries: &'a BTreeMap<usize, CrossReferenceEntryType>,
-        parser: &'a PdfParser<'input>,
+        input: &'a Bytes,
     ) -> Self {
-        Self { entries, parser }
+        Self { entries, input }
     }
 
     /// Resolves the trailer's `/Encrypt` value and parses it without decrypting it.
@@ -135,7 +137,7 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
             .get(&number)
             .and_then(CrossReferenceEntryType::byte_offset)
             .ok_or(ObjectError::FailedResolveObjectReference { obj_num: number })?;
-        let mut parser = self.parser.at_offset(byte_offset)?;
+        let mut parser = PdfParser::from(self.input.as_ref()).at_offset(byte_offset)?;
         let identifier = parser.parse_indirect_object_id().ok_or(
             ParserError::ExpectedIndirectObjectDeclaration {
                 position: byte_offset,
@@ -148,7 +150,8 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
                     .loaded()
                     .required::<usize>(header.dictionary(), b"Length")
                     .map_err(ParserError::from)?;
-                parser.parse_stream_body(header, length)?
+                let body = parser.parse_stream_body(length)?;
+                header.into_stream_in(self.input, body)?
             }
         })
     }

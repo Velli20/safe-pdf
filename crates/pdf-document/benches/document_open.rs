@@ -2,6 +2,7 @@
 
 use std::hint::black_box;
 
+use bytes::Bytes;
 use criterion::{Criterion, criterion_group, criterion_main};
 use pdf_document::reader::PdfReader;
 
@@ -25,11 +26,11 @@ fn document_open(criterion: &mut Criterion) {
             "{}/../../examples/assets/{name}",
             env!("CARGO_MANIFEST_DIR")
         );
-        let input = std::fs::read(&path).expect("example document should be readable");
+        let input = Bytes::from(std::fs::read(&path).expect("example document should be readable"));
         group.bench_function(*name, |bencher| {
             bencher.iter(|| {
                 let document = PdfReader
-                    .read_from_bytes(black_box(&input), None)
+                    .read_from_bytes(black_box(input.clone()), None)
                     .expect("example document should open");
                 black_box(document.page_count())
             });

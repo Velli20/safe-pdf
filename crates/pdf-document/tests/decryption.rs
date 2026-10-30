@@ -174,7 +174,7 @@ fn revision_6_authenticates_real_world_empty_password_dictionary() {
     };
 
     let document = PdfReader
-        .read_from_bytes(&build_encrypted_pdf(&fixture, None), None)
+        .read_from_bytes(build_encrypted_pdf(&fixture, None), None)
         .expect("real-world revision 6 dictionary authenticates");
 
     assert_eq!(document.page_count(), 0);
@@ -207,7 +207,7 @@ fn revision_5_authenticates_and_decrypts_aes_256_content() {
     let pdf = build_encrypted_pdf(&fixture, Some(&content));
 
     let document = PdfReader
-        .read_from_bytes(&pdf, Some("pässword".as_bytes()))
+        .read_from_bytes(pdf.clone(), Some("pässword".as_bytes()))
         .expect("revision 5 user password authenticates");
     let page = document.get_page(0).expect("encrypted PDF contains a page");
     assert_eq!(
@@ -227,7 +227,7 @@ fn revision_5_authenticates_and_decrypts_aes_256_content() {
     );
 
     assert!(matches!(
-        PdfReader.read_from_bytes(&pdf, Some(b"wrong")),
+        PdfReader.read_from_bytes(pdf, Some(b"wrong")),
         Err(PdfReaderError::IncorrectPassword)
     ));
 
@@ -237,7 +237,7 @@ fn revision_5_authenticates_and_decrypts_aes_256_content() {
     };
     assert!(matches!(
         PdfReader.read_from_bytes(
-            &build_encrypted_pdf(&malformed_fixture, Some(&content)),
+            build_encrypted_pdf(&malformed_fixture, Some(&content)),
             Some("pässword".as_bytes())
         ),
         Err(PdfReaderError::DecryptionSetup(message))
@@ -269,7 +269,7 @@ fn revision_6_authenticates_owner_and_rejects_corrupt_permissions() {
     };
 
     let document = PdfReader
-        .read_from_bytes(&build_encrypted_pdf(&fixture, None), Some(b"owner"))
+        .read_from_bytes(build_encrypted_pdf(&fixture, None), Some(b"owner"))
         .expect("revision 6 owner password authenticates");
     assert_eq!(document.page_count(), 0);
 
@@ -278,7 +278,7 @@ fn revision_6_authenticates_owner_and_rejects_corrupt_permissions() {
         ..fixture
     };
     assert!(matches!(
-        PdfReader.read_from_bytes(&build_encrypted_pdf(&corrupt_fixture, None), Some(b"owner")),
+        PdfReader.read_from_bytes(build_encrypted_pdf(&corrupt_fixture, None), Some(b"owner")),
         Err(PdfReaderError::DecryptionSetup(message))
             if message == "invalid encrypted data: V=5 permissions validation failed"
     ));

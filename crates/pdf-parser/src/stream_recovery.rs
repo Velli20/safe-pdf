@@ -57,19 +57,6 @@ impl PdfParser<'_> {
         self.tokenizer.position = terminator.end;
         Ok(data_start..trim_line_ending(input, data_start, terminator.start))
     }
-
-    /// Recovers a stream body and copies it out of the parser's input.
-    pub(crate) fn recovered_stream_bytes(
-        &mut self,
-        length: Option<usize>,
-    ) -> Result<Vec<u8>, ParserError> {
-        let range = self.recover_stream_range(length)?;
-        self.tokenizer
-            .input
-            .get(range)
-            .map(<[u8]>::to_vec)
-            .ok_or(ParserError::UnexpectedEndOfFile)
-    }
 }
 
 /// The byte span of an `endstream` keyword that is followed by `endobj`.

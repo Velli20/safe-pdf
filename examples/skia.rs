@@ -81,7 +81,7 @@ fn main() -> Result<(), AppError> {
         source: e,
     })?;
 
-    let document = PdfReader.read_from_bytes(&bytes, None)?;
+    let document = PdfReader.read_from_bytes(bytes, None)?;
     eprintln!(
         "PDF annotations are unsupported in the Skia viewer; use web-canvas for annotation presentation and interaction."
     );

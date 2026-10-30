@@ -2148,6 +2148,7 @@ name = "pdf-conformance"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
  "image",
  "md-5",
@@ -2424,6 +2425,7 @@ dependencies = [
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "criterion",
  "flate2",
  "pdf-filter",

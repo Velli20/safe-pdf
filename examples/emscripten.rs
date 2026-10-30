@@ -147,7 +147,7 @@ pub unsafe extern "C" fn sk_load_pdf(data_ptr: *const u8, data_len: usize) -> i3
 
     let reader = PdfReader;
 
-    match reader.read_from_bytes(pdf_bytes, None) {
+    match reader.read_from_bytes(pdf_bytes.to_vec(), None) {
         Ok(document) => {
             // Clear the page cache when loading a new document
             PAGE_CACHE.with(|cache| {
