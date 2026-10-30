@@ -86,6 +86,16 @@ impl Color {
         Self { r, g, b, a: 1.0 }
     }
 
+    /// Returns the same color channels with alpha replaced by `a`.
+    pub const fn with_alpha(self, a: f32) -> Self {
+        Self { a, ..self }
+    }
+
+    /// Returns the same color channels at full opacity.
+    pub const fn opaque(self) -> Self {
+        self.with_alpha(1.0)
+    }
+
     /// Converts the color to 8-bit RGBA channel values.
     ///
     /// Each channel is clamped to `[0.0, 1.0]`, scaled to `[0, 255]`, and

@@ -63,6 +63,21 @@ impl<T> Polyline<T> {
     }
 }
 
+impl<T: Copy> From<&Rect<T>> for Polyline<T> {
+    /// The four corners as a closed outline: left-top, right-top, right-bottom, left-bottom.
+    fn from(rect: &Rect<T>) -> Self {
+        Self::new(
+            vec![
+                Point::new(rect.left, rect.top),
+                Point::new(rect.right, rect.top),
+                Point::new(rect.right, rect.bottom),
+                Point::new(rect.left, rect.bottom),
+            ],
+            true,
+        )
+    }
+}
+
 impl Polyline<f32> {
     /// Moves every vertex by `delta` in the current coordinate space.
     pub fn translate(&mut self, delta: Point) {

@@ -144,14 +144,8 @@ impl ResolvedStyle {
     /// and leaves caps and joins at the host default. This does not validate the style.
     pub fn outline(&self, fill: bool) -> ShapePaint {
         ShapePaint {
-            stroke: Some(Color {
-                a: 1.0,
-                ..self.color
-            }),
-            fill: self
-                .background
-                .filter(|_| fill)
-                .map(|color| Color { a: 1.0, ..color }),
+            stroke: Some(self.color.opaque()),
+            fill: self.background.filter(|_| fill).map(Color::opaque),
             width: self.stroke_width(),
             dash: self.dash.clone(),
             round: false,
