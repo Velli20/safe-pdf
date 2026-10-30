@@ -1,6 +1,7 @@
 //! Page text hit testing, selection geometry, and Unicode copying.
 
 use pdf_graphics::{point::Point, rect::Rect};
+use std::sync::OnceLock;
 
 pub use crate::document_text_selection::{
     DocumentTextSelection, SelectionBatch, SelectionPoint, SelectionSpan, TextSelectionError,
@@ -12,6 +13,22 @@ pub use pdf_canvas::text::TextGlyph;
 #[derive(Debug, Clone, Default)]
 pub struct PageTextLayout {
     glyphs: Vec<TextGlyph>,
+    /// Built on the first hit test; most recorded layouts are never hit-tested.
+    index: OnceLock<SpatialIndex>,
+}
+
+/// A spatial acceleration structure over valid glyph bounds.
+#[derive(Debug, Clone, Default)]
+struct SpatialIndex {
+    nodes: Vec<IndexNode>,
+}
+
+/// An internal spatial-index node containing either a glyph or two children.
+#[derive(Debug, Clone)]
+struct IndexNode {
+    bounds: Rect,
+    children: Option<(usize, usize)>,
+    glyph: usize,
 }
 
 /// A hit-testable text position.
@@ -30,7 +47,10 @@ pub struct TextSelection {
 impl PageTextLayout {
     /// Creates a page text layout from ordered glyph spans.
     pub fn new(glyphs: Vec<TextGlyph>) -> Self {
-        Self { glyphs }
+        Self {
+            glyphs,
+            index: OnceLock::new(),
+        }
     }
 
     /// Returns all glyph spans in content-stream order.
@@ -38,27 +58,12 @@ impl PageTextLayout {
         &self.glyphs
     }
 
-    /// Finds the nearest glyph hit for a device-space point.
-    pub fn hit_test(&self, x: f32, y: f32) -> Option<TextHit> {
-        let direct = self.glyphs.iter().enumerate().find_map(|(index, glyph)| {
-            glyph
-                .bounds
-                .contains_point(x, y)
-                .then_some(TextHit { index })
-        });
-        if direct.is_some() {
-            return direct;
-        }
-
-        self.glyphs
-            .iter()
-            .enumerate()
-            .filter_map(|(index, glyph)| {
-                let distance = glyph.bounds.normalized().distance(Point::new(x, y));
-                distance.is_finite().then_some((index, distance))
-            })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(index, _)| TextHit { index })
+    /// Finds the containing or nearest glyph hit for a device-space point.
+    pub fn hit_test(&self, point: Point) -> Option<TextHit> {
+        self.index
+            .get_or_init(|| SpatialIndex::new(&self.glyphs))
+            .hit(point)
+            .map(|index| TextHit { index })
     }
 
     /// Builds a normalized inclusive selection between two hits.
@@ -128,6 +133,85 @@ impl PageTextLayout {
     }
 }
 
+impl SpatialIndex {
+    /// Builds an index over the valid glyph rectangles.
+    fn new(glyphs: &[TextGlyph]) -> Self {
+        let mut entries: Vec<_> = glyphs
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.bounds.is_valid())
+            .map(|(i, g)| (i, g.bounds))
+            .collect();
+        let mut result = Self { nodes: Vec::new() };
+        if !entries.is_empty() {
+            result.build(&mut entries);
+        }
+        result
+    }
+
+    /// Recursively builds a balanced binary index and returns the root node.
+    fn build(&mut self, entries: &mut [(usize, Rect)]) -> usize {
+        let bounds = entries.iter().fold(
+            Rect {
+                left: f32::INFINITY,
+                top: f32::INFINITY,
+                right: f32::NEG_INFINITY,
+                bottom: f32::NEG_INFINITY,
+            },
+            |a, (_, b)| Rect {
+                left: a.left.min(b.left),
+                top: a.top.min(b.top),
+                right: a.right.max(b.right),
+                bottom: a.bottom.max(b.bottom),
+            },
+        );
+        let index = self.nodes.len();
+        self.nodes.push(IndexNode {
+            bounds,
+            children: None,
+            glyph: entries.first().map(|v| v.0).unwrap_or_default(),
+        });
+        if entries.len() > 1 {
+            entries.sort_by(|a, b| {
+                if bounds.width() > bounds.height() {
+                    a.1.left.total_cmp(&b.1.left)
+                } else {
+                    a.1.top.total_cmp(&b.1.top)
+                }
+            });
+            let mid = entries.len() / 2;
+            let (left, right) = entries.split_at_mut(mid);
+            let children = (self.build(left), self.build(right));
+            if let Some(node) = self.nodes.get_mut(index) {
+                node.children = Some(children);
+            }
+        }
+        index
+    }
+
+    /// Returns the containing or nearest indexed glyph for a device-space point.
+    fn hit(&self, point: Point) -> Option<usize> {
+        let mut stack = vec![0];
+        let mut best: Option<(f32, usize)> = None;
+        while let Some(index) = stack.pop() {
+            let Some(node) = self.nodes.get(index) else {
+                continue;
+            };
+            let distance = node.bounds.distance(point);
+            if best.is_some_and(|(d, _)| distance > d) {
+                continue;
+            }
+            if let Some((a, b)) = node.children {
+                stack.push(b);
+                stack.push(a);
+            } else if best.is_none_or(|(d, i)| distance < d || (distance == d && node.glyph < i)) {
+                best = Some((distance, node.glyph));
+            }
+        }
+        best.map(|(_, i)| i)
+    }
+}
+
 impl TextHit {
     /// Returns the underlying glyph index in content-stream order.
     pub fn index(self) -> usize {
@@ -179,7 +263,10 @@ mod tests {
             glyph("b", 12.0, 0.0, 20.0, 10.0),
         ]);
 
-        assert_eq!(layout.hit_test(13.0, 5.0).map(TextHit::index), Some(1));
+        assert_eq!(
+            layout.hit_test(Point::new(13.0, 5.0)).map(TextHit::index),
+            Some(1)
+        );
     }
 
     #[test]

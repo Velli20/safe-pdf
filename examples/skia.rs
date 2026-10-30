@@ -11,7 +11,9 @@ use glutin::{
 };
 use glutin_winit::DisplayBuilder;
 use pdf_canvas::canvas_backend::{CanvasBackend, Shader};
-use pdf_graphics::{BlendMode, PathFillType, color::Color, pdf_path::PdfPath, size::Size};
+use pdf_graphics::{
+    BlendMode, PathFillType, color::Color, pdf_path::PdfPath, point::Point, size::Size,
+};
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use raw_window_handle::HasWindowHandle;
 use skia_safe::{Color as SkiaColor, Surface};
@@ -197,7 +199,7 @@ impl Application {
             self.clear_selection();
             return;
         };
-        let Some(hit) = layout.hit_test(x, y) else {
+        let Some(hit) = layout.hit_test(Point::new(x, y)) else {
             self.clear_selection();
             return;
         };
@@ -211,7 +213,7 @@ impl Application {
         let (Some(layout), Some(anchor)) = (&self.text_layout, self.selection_anchor) else {
             return;
         };
-        let Some(focus) = layout.hit_test(x, y) else {
+        let Some(focus) = layout.hit_test(Point::new(x, y)) else {
             return;
         };
         self.selection_focus = Some(focus);
