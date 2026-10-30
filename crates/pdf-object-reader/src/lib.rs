@@ -150,6 +150,8 @@ pub mod diagnostic;
 pub mod error;
 /// Typed deferred handles for reader-owned resource graphs.
 pub mod handle;
+/// Immutable byte sequences stored inline when short.
+pub mod inline_bytes;
 /// Indirect PDF object identifiers.
 pub mod object_id;
 /// Runtime classifications of PDF objects.

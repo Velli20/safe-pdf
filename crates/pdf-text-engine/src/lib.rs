@@ -40,9 +40,7 @@ pub fn measure_encoded_text_width(
     let Ok(font) = system.load_pdf_font(spec.clone()) else {
         return 0.0;
     };
-    let items = [pdf_content_stream_operators::PdfTextItem::Text(
-        std::sync::Arc::from(text),
-    )];
+    let items = [pdf_content_stream_operators::PdfTextItem::Text(text.into())];
     let run = text::PdfTextRun {
         font: &font,
         items: &items,

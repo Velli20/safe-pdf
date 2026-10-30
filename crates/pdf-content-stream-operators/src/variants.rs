@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use pdf_graphics::{LineCap, LineJoin, TextRenderingMode, transform::Transform};
 use pdf_image::PdfImage;
-use pdf_object_reader::{ReadResult, pdf_string::PdfString};
+use pdf_object_reader::{ReadResult, pdf_name::PdfName};
 
 use crate::{
     OperandContext, PdfTextItem, color_operators::ColorOperands,
@@ -211,7 +211,7 @@ pub enum PdfOperatorVariant {
     /// The dictionary is expected to be in the resource dictionary. (PDF operator `gs`)
     SetGraphicsStateFromDict {
         /// The name of the graphics state parameter dictionary.
-        dict_name: Arc<[u8]>,
+        dict_name: PdfName,
     },
     /// Saves the current graphics state on the graphics state stack.
     SaveGraphicsState,
@@ -226,7 +226,7 @@ pub enum PdfOperatorVariant {
     /// Marked-content sequences associate a tag with a sequence of content stream operations.
     BeginMarkedContent {
         /// The tag indicating the role or nature of the marked-content sequence.
-        tag: Arc<[u8]>,
+        tag: PdfName,
     },
     BeginMarkedContentWithProps(BeginMarkedContentWithProps),
     /// Ends a marked-content sequence begun by a `BMC` or `BDC` operator.
@@ -320,7 +320,7 @@ pub enum PdfOperatorVariant {
     /// font size, `Tfs`, in unscaled text space units.
     SetFont {
         /// The name of the font resource.
-        name: Arc<[u8]>,
+        name: PdfName,
         /// The font size.
         size: f32,
     },
@@ -340,7 +340,7 @@ pub enum PdfOperatorVariant {
     /// XObjects are external objects such as images or self-contained page descriptions (Form XObjects).
     InvokeXObject {
         /// The name of the XObject resource to invoke, as defined in the resource dictionary.
-        name: Arc<[u8]>,
+        name: PdfName,
     },
     /// Begins a compatibility section (BX).
     ///
@@ -359,7 +359,7 @@ pub enum PdfOperatorVariant {
     PaintShading {
         /// The name of the shading dictionary resource from the Shading subdictionary
         /// of the current resource dictionary.
-        name: Arc<[u8]>,
+        name: PdfName,
     },
     SetCharWidthAndBoundingBox {
         /// The x-component of the character width vector.
@@ -386,17 +386,17 @@ pub enum PdfOperatorVariant {
     /// The operand is a name object indicating the intent, e.g.,
     /// /AbsoluteColorimetric, /RelativeColorimetric, /Saturation, /Perceptual.
     SetRenderingIntent {
-        intent: Arc<[u8]>,
+        intent: PdfName,
     },
     /// Sets the stroke color space value.
     SetStrokeColorSpace {
         /// The name of the color space.
-        name: Arc<[u8]>,
+        name: PdfName,
     },
     /// Sets the non-stroking (fill) color space value.
     SetNonStrokingColorSpace {
         /// The name of the color space.
-        name: Arc<[u8]>,
+        name: PdfName,
     },
     /// Sets the stroking color when the color space requires
     /// multiple color components.
@@ -417,10 +417,10 @@ impl PdfOperatorVariant {
             (b"\"", 3) => Self::SetSpacingMoveShowText {
                 word_spacing: operands.at(0)?,
                 char_spacing: operands.at(1)?,
-                text: PdfTextItem::Text(operands.at::<PdfString>(2)?.bytes),
+                text: PdfTextItem::Text(operands.at(2)?),
             },
             (b"'", 1) => Self::MoveNextLineShowText {
-                text: PdfTextItem::Text(operands.at::<PdfString>(0)?.bytes),
+                text: PdfTextItem::Text(operands.at(0)?),
             },
             (b"B", 0) => Self::FillAndStrokePathNonZero,
             (b"B*", 0) => Self::FillAndStrokePathEvenOdd,
@@ -428,15 +428,15 @@ impl PdfOperatorVariant {
                 Self::BeginMarkedContentWithProps(BeginMarkedContentWithProps::read(operands)?)
             }
             (b"BMC", 1) => Self::BeginMarkedContent {
-                tag: operands.at::<PdfString>(0)?.bytes,
+                tag: operands.at(0)?,
             },
             (b"BT", 0) => Self::BeginText,
             (b"BX", 0) => Self::BeginCompatibility,
             (b"CS", 1) => Self::SetStrokeColorSpace {
-                name: operands.at::<PdfString>(0)?.bytes,
+                name: operands.at(0)?,
             },
             (b"Do", 1) => Self::InvokeXObject {
-                name: operands.at::<PdfString>(0)?.bytes,
+                name: operands.at(0)?,
             },
             (b"EMC", 0) => Self::EndMarkedContent,
             (b"ET", 0) => Self::EndText,
@@ -480,11 +480,11 @@ impl PdfOperatorVariant {
                 .read_array()
                 .map(|[tx, ty]| Self::MoveTextPosition { tx, ty })?,
             (b"Tf", 2) => Self::SetFont {
-                name: operands.at::<PdfString>(0)?.bytes,
+                name: operands.at(0)?,
                 size: operands.at(1)?,
             },
             (b"Tj", 1) => Self::ShowText {
-                text: PdfTextItem::Text(operands.at::<PdfString>(0)?.bytes),
+                text: PdfTextItem::Text(operands.at(0)?),
             },
             (b"Tm", 6) => Self::SetTextMatrix {
                 matrix: Transform::from(operands.read_array::<f32, 6>()?),
@@ -519,7 +519,7 @@ impl PdfOperatorVariant {
                 matrix: Transform::from(operands.read_array::<f32, 6>()?),
             },
             (b"cs", 1) => Self::SetNonStrokingColorSpace {
-                name: operands.at::<PdfString>(0)?.bytes,
+                name: operands.at(0)?,
             },
             (b"d", 2) => Self::SetDashPattern {
                 array: operands.at(0)?,
@@ -544,7 +544,7 @@ impl PdfOperatorVariant {
                 gray: operands.at(0)?,
             },
             (b"gs", 1) => Self::SetGraphicsStateFromDict {
-                dict_name: operands.at::<PdfString>(0)?.bytes,
+                dict_name: operands.at(0)?,
             },
             (b"h", 0) => Self::ClosePath,
             (b"i", 1) => Self::SetFlatnessTolerance {
@@ -572,7 +572,7 @@ impl PdfOperatorVariant {
                 .read_array()
                 .map(|[r, g, b]| Self::SetRGBFill { r, g, b })?,
             (b"ri", 1) => Self::SetRenderingIntent {
-                intent: operands.at::<PdfString>(0)?.bytes,
+                intent: operands.at(0)?,
             },
             (b"s", 0) => Self::CloseStrokePath,
             (b"sc", _) => {
@@ -580,7 +580,7 @@ impl PdfOperatorVariant {
             }
             (b"scn", _) => Self::SetNonStrokingColor(ColorOperands::read(operands)?),
             (b"sh", 1) => Self::PaintShading {
-                name: operands.at::<PdfString>(0)?.bytes,
+                name: operands.at(0)?,
             },
             (b"v", 4) => operands
                 .read_array()
@@ -608,13 +608,13 @@ mod tests {
 
     #[test]
     fn show_text_moves_the_operand_byte_allocation() {
-        let text: Arc<[u8]> = Arc::from(b"text without a copy".to_vec());
+        let text: Arc<[u8]> = Arc::from(b"text longer than the inline capacity".to_vec());
 
         let original_pointer = text.as_ptr();
 
         let operands = [ObjectVariant::String(
             pdf_object_reader::pdf_string::PdfString {
-                bytes: text,
+                bytes: pdf_object_reader::inline_bytes::InlineBytes::from(text),
                 kind: pdf_object_reader::string_kind::StringKind::Literal,
             },
         )];
@@ -630,7 +630,7 @@ mod tests {
         else {
             panic!("expected a ShowText text item");
         };
-        assert_eq!(&*text, b"text without a copy");
+        assert_eq!(&*text, b"text longer than the inline capacity");
         assert_eq!(text.as_ptr(), original_pointer);
     }
 
@@ -660,6 +660,6 @@ mod tests {
         };
         assert_eq!(word_spacing, 1.5);
         assert_eq!(char_spacing, 2.0);
-        assert_eq!(text, PdfTextItem::Text(Arc::from(&b"text"[..])));
+        assert_eq!(text, PdfTextItem::Text(b"text".into()));
     }
 }

@@ -68,6 +68,12 @@ fn benchmark_operator_parsing(criterion: &mut Criterion) {
         b"q /F1 12 Tf BT 1 0 0 1 10 20 Tm (Hello) Tj [(A) -20 <42> 5] TJ ET /DeviceRGB cs 0.1 0.2 0.3 sc 0.1 0.2 0.3 /P1 scn /X1 Do Q\n",
         12,
     );
+    benchmark_stream(
+        criterion,
+        "operator_parsing/name_and_text_heavy",
+        b"BT /F1 12 Tf [(A) -20 (bc) 15 (d) -5 (efg)] TJ (Hello) Tj ET /GS0 gs /Im0 Do /Span << /MCID 0 >> BDC EMC\n",
+        9,
+    );
 }
 
 criterion_group!(benches, benchmark_operator_parsing);

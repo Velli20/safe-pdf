@@ -1,4 +1,5 @@
-use crate::{error::ParserError, parser::PdfParser};
+use crate::{error::ParserError, name::hex_digit_value, parser::PdfParser};
+use pdf_object_reader::inline_bytes::InlineBytes;
 use pdf_tokenizer::PdfToken;
 
 impl PdfParser<'_> {
@@ -6,47 +7,31 @@ impl PdfParser<'_> {
     ///
     /// # Returns
     ///
-    /// `String` containing the decoded string value or an error if invalid format
-    /// or characters are encountered.
-    pub fn parse_hex_string(&mut self) -> Result<Vec<u8>, ParserError> {
+    /// The decoded bytes, or an error if the string is unterminated or contains a
+    /// character that is neither a hex digit nor whitespace.
+    pub fn parse_hex_string(&mut self) -> Result<InlineBytes, ParserError> {
         self.tokenizer.expect(PdfToken::LeftAngleBracket)?;
 
-        // 1. Read until the closing `>` of the hex string.
+        // Read until the closing `>` of the hex string; whitespace between digits is ignored.
         let hex_string = self.tokenizer.read_while_u8(|c| c != b'>');
-
-        let mut filtered = Vec::new();
-        // 2. Filter out whitespace characters.
-        for b in hex_string {
-            if Self::is_pdf_whitespace(*b) {
-                continue;
-            }
-
-            // 2. Check if the character is a valid hex digit (0-9, a-f, A-F)
-            if !b.is_ascii_hexdigit() {
-                return Err(ParserError::NotHexDecimal(char::from(*b)));
-            }
-            // 3. Append hex digits to the hex string.
-            filtered.push(*b);
-        }
-
-        // If the string contains an odd number of hex digits, the last digit is assumed to be 0.
-        if filtered.len() % 2 != 0 {
-            filtered.push(b'0');
+        let mut digits = hex_string
+            .iter()
+            .copied()
+            .filter(|&byte| !Self::is_pdf_whitespace(byte));
+        if let Some(invalid) = digits.clone().find(|byte| !byte.is_ascii_hexdigit()) {
+            return Err(ParserError::NotHexDecimal(char::from(invalid)));
         }
 
         // Consume the closing `>` of the hex string.
         self.tokenizer.expect(PdfToken::RightAngleBracket)?;
 
-        // Convert hex string to bytes
-        let bytes = filtered
-            .chunks(2)
-            .map(|chunk| {
-                let hex = String::from_utf8_lossy(chunk);
-                u8::from_str_radix(&hex, 16).unwrap_or(0)
-            })
-            .collect::<Vec<u8>>();
-
-        Ok(bytes)
+        // If the string contains an odd number of hex digits, the last digit is assumed to be 0.
+        Ok(std::iter::from_fn(|| {
+            let high = digits.next()?;
+            let low = digits.next().unwrap_or(b'0');
+            Some((hex_digit_value(high) << 4) | hex_digit_value(low))
+        })
+        .collect())
     }
 }
 
@@ -90,7 +75,7 @@ mod tests {
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
             let result = parser.parse_hex_string().unwrap();
-            let result = String::from_utf8(result).unwrap();
+            let result = String::from_utf8(result.to_vec()).unwrap();
             assert_eq!(result, expected);
         }
     }

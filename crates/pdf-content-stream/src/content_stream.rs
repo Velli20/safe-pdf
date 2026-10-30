@@ -70,7 +70,6 @@ impl ContentStream {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::sync::Arc;
 
     use pdf_content_stream_operators::{
         PdfTextItem,
@@ -156,27 +155,27 @@ mod tests {
             Some(PdfOperatorVariant::ShowTextArray { elements })
                 if elements
                     == &vec![
-                        PdfTextItem::Text(Arc::from(&b"e"[..])),
+                        PdfTextItem::Text(b"e".into()),
                         PdfTextItem::Adjustment(-4.0),
-                        PdfTextItem::Text(Arc::from(&b"x"[..])),
+                        PdfTextItem::Text(b"x".into()),
                         PdfTextItem::Adjustment(12.0),
-                        PdfTextItem::Text(Arc::from(&b"t"[..])),
+                        PdfTextItem::Text(b"t".into()),
                         PdfTextItem::Adjustment(-3.0),
-                        PdfTextItem::Text(Arc::from(&b"e"[..])),
+                        PdfTextItem::Text(b"e".into()),
                         PdfTextItem::Adjustment(-4.0),
-                        PdfTextItem::Text(Arc::from(&b"n"[..])),
+                        PdfTextItem::Text(b"n".into()),
                         PdfTextItem::Adjustment(-4.0),
-                        PdfTextItem::Text(Arc::from(&b"s"[..])),
+                        PdfTextItem::Text(b"s".into()),
                         PdfTextItem::Adjustment(3.0),
-                        PdfTextItem::Text(Arc::from(&b"i"[..])),
+                        PdfTextItem::Text(b"i".into()),
                         PdfTextItem::Adjustment(3.0),
-                        PdfTextItem::Text(Arc::from(&b"v"[..])),
+                        PdfTextItem::Text(b"v".into()),
                         PdfTextItem::Adjustment(0.0),
-                        PdfTextItem::Text(Arc::from(&b"e"[..])),
+                        PdfTextItem::Text(b"e".into()),
                         PdfTextItem::Adjustment(-4.0),
-                        PdfTextItem::Text(Arc::from(&b"l"[..])),
+                        PdfTextItem::Text(b"l".into()),
                         PdfTextItem::Adjustment(3.0),
-                        PdfTextItem::Text(Arc::from(&b"y"[..])),
+                        PdfTextItem::Text(b"y".into()),
                     ]
         ));
     }

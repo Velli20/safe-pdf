@@ -332,10 +332,14 @@ impl<'a> PdfParser<'a> {
                 }
             }
             PdfToken::DoubleLeftAngleBracket => ObjectVariant::Dictionary(self.parse_dictionary()?),
-            PdfToken::LeftAngleBracket => {
-                PdfString::from(self.parse_hex_string()?, StringKind::Hexadecimal)
-            }
-            PdfToken::Solidus => PdfString::from(self.parse_name()?, StringKind::Name),
+            PdfToken::LeftAngleBracket => ObjectVariant::String(PdfString {
+                bytes: self.parse_hex_string()?,
+                kind: StringKind::Hexadecimal,
+            }),
+            PdfToken::Solidus => ObjectVariant::String(PdfString {
+                bytes: self.parse_name()?.into(),
+                kind: StringKind::Name,
+            }),
             PdfToken::Number(_) => self.parse_number_or_reference()?,
             PdfToken::Minus => self.parse_number()?,
             PdfToken::Plus => self.parse_number()?,

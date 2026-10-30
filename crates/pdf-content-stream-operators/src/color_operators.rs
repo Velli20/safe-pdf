@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
 use crate::{OperandContext, error::PdfOperatorError};
-use pdf_object_reader::{ReadResult, pdf_string::PdfString};
+use pdf_object_reader::{ReadResult, pdf_name::PdfName};
 
 /// The operands of a color-setting operator whose color space takes any number
 /// of components (`SC`, `SCN`, `sc`, `scn`).
@@ -10,7 +8,7 @@ pub struct ColorOperands {
     /// Color component values.
     pub components: Vec<f32>,
     /// An optional name of a pattern.
-    pub pattern: Option<Arc<[u8]>>,
+    pub pattern: Option<PdfName>,
 }
 
 impl ColorOperands {
@@ -24,7 +22,7 @@ impl ColorOperands {
             if object.is_name() {
                 return Ok(Self {
                     components,
-                    pattern: Some(operands.at::<PdfString>(index)?.bytes),
+                    pattern: Some(operands.at(index)?),
                 });
             }
             components.push(operands.at(index)?);
