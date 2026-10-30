@@ -11,6 +11,7 @@ use crate::pdf_data::{
 };
 use crate::source_decode::DecodeResult;
 use pdf_graphics::polyline::Polyline;
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 /// Dispatches on `/Subtype`; unrecognized names retain their bytes unparsed.
@@ -18,7 +19,7 @@ impl FromPdfObject for NativeAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let object = context.object();
         let mut dictionary = context.dictionary()?;
-        let subtype = dictionary.required::<Arc<[u8]>>(b"Subtype")?;
+        let subtype = dictionary.required::<PdfName>(b"Subtype")?;
         Ok(match subtype.as_ref() {
             b"Text" => Self::Text(Box::new(dictionary.read(object)?)),
             b"Link" => Self::Link(Box::new(dictionary.read(object)?)),
@@ -284,7 +285,7 @@ impl FromPdfObject for PopupAnnotation {
 /// Reads a `/Sy` caret symbol name, preserving unknown names.
 impl FromPdfObject for CaretSymbolStyle {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         Ok(match &*name {
             b"P" => Self::P,
             b"None" => Self::None,
@@ -296,7 +297,7 @@ impl FromPdfObject for CaretSymbolStyle {
 /// Reads a link's `/H` highlight mode name, preserving unknown names.
 impl FromPdfObject for LinkHighlightMode {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         Ok(match &*name {
             b"I" => Self::Invert,
             b"O" => Self::Outline,
@@ -311,7 +312,7 @@ impl FromPdfObject for LinkHighlightMode {
 /// Reads one `/LE` line ending name, preserving unknown names.
 impl FromPdfObject for LineEndingStyle {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         Ok(match &*name {
             b"S" => Self::Slash,
             b"B" | b"Square" => Self::Square,

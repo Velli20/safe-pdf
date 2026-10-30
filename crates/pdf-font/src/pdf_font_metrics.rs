@@ -6,8 +6,8 @@ use crate::{
     pdf::{FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding},
     standard14::Standard14Font,
 };
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
-use std::sync::Arc;
 
 impl FromPdfObject for PdfMetrics {
     /// Reads a simple, Type 3, or descendant CID font dictionary.
@@ -30,7 +30,7 @@ impl FromPdfObject for PdfMetrics {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let value = context.object();
         let mut context = context.dictionary()?;
-        let subtype: Arc<[u8]> = context.required(b"Subtype")?;
+        let subtype: PdfName = context.required(b"Subtype")?;
         let default_width = match subtype.as_ref() {
             // Decode metadata only; font program loading belongs to the font spec.
             b"Type1" | b"MMType1" | b"TrueType" => context

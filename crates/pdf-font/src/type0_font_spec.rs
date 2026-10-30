@@ -8,6 +8,7 @@ use crate::{
     standard14::{Standard14Font, from_base_font_name},
 };
 use pdf_cmap::{Cid, PdfCMap, Type0EncodingCMap};
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
@@ -120,7 +121,7 @@ impl FromPdfObject for CidToGidMap {
 impl FromPdfObject for CidFontKind {
     /// Decodes the descendant dictionary's Subtype name into a supported CID kind.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         match &*name {
             b"CIDFontType0" => Ok(Self::Type0),
             b"CIDFontType2" => Ok(Self::Type2),
@@ -138,7 +139,7 @@ impl FromPdfObject for CidFontSpec {
         let value = context.object();
         let mut context = context.dictionary()?;
         let kind: CidFontKind = context.required(b"Subtype")?;
-        let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");
+        let base_font: Option<PdfName> = context.lenient(b"BaseFont");
         // A bad program must not discard an otherwise usable font.
         let program: Option<FontSource> = match kind {
             CidFontKind::Type0 => context
