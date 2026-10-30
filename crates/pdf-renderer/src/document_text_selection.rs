@@ -101,27 +101,14 @@ impl SelectionBatch {
 }
 
 /// A retained page layout and its revision-dependent selection state.
-struct IndexedLayout {
+struct RetainedLayout {
     page: u32,
     revision: u32,
     device_size: Size,
     layout: Arc<PageTextLayout>,
-    index: SpatialIndex,
     selection: Option<TextSelection>,
     last_changed_revision: u32,
     available: bool,
-}
-
-/// A spatial acceleration structure over valid glyph bounds.
-struct SpatialIndex {
-    nodes: Vec<IndexNode>,
-}
-
-/// An internal spatial-index node containing either a glyph or two children.
-struct IndexNode {
-    bounds: Rect,
-    children: Option<(usize, usize)>,
-    glyph: usize,
 }
 
 /// Cached custom selection, preserving existing glyph bounds and Unicode copy behavior.
@@ -132,7 +119,7 @@ struct IndexNode {
 /// PageTextLayout rather than defining another extraction/selection implementation.
 pub struct DocumentTextSelection {
     pages: Vec<u32>,
-    layouts: Vec<IndexedLayout>,
+    layouts: Vec<RetainedLayout>,
     selected: Option<SelectionSpan>,
     stale: bool,
     revision: u32,
@@ -179,15 +166,13 @@ impl DocumentTextSelection {
             }
         }
         let next = self.next_revision()?;
-        let index = SpatialIndex::new(&layout);
         self.invalidate_page(page, next);
         self.layouts.retain(|v| v.page != page);
-        self.layouts.push(IndexedLayout {
+        self.layouts.push(RetainedLayout {
             page,
             revision,
             device_size,
             layout,
-            index,
             selection: None,
             last_changed_revision: next,
             available: true,
@@ -202,10 +187,10 @@ impl DocumentTextSelection {
             return Err(TextSelectionError::InvalidInput("selection point"));
         }
         let layout = self.layout(page)?;
-        Ok(layout.index.hit(point).map(|glyph_index| SelectionPoint {
+        Ok(layout.layout.hit_test(point).map(|hit| SelectionPoint {
             page,
             layout_revision: layout.revision,
-            glyph_index,
+            glyph_index: hit.index(),
         }))
     }
 
@@ -305,7 +290,6 @@ impl DocumentTextSelection {
         self.invalidate_page(page, next);
         if let Some(layout) = self.layouts.iter_mut().find(|v| v.page == page) {
             layout.layout = Arc::new(PageTextLayout::default());
-            layout.index = SpatialIndex { nodes: Vec::new() };
             layout.available = false;
             layout.last_changed_revision = next;
         }
@@ -322,7 +306,7 @@ impl DocumentTextSelection {
     }
 
     /// Returns the available retained layout for a known page.
-    fn layout(&self, page: u32) -> TextSelectionResult<&IndexedLayout> {
+    fn layout(&self, page: u32) -> TextSelectionResult<&RetainedLayout> {
         self.page_position(page)?;
         self.layouts
             .iter()
@@ -398,86 +382,6 @@ impl DocumentTextSelection {
                 }
             }
         }
-    }
-}
-
-impl SpatialIndex {
-    /// Builds an index over the layout's valid glyph rectangles.
-    fn new(layout: &PageTextLayout) -> Self {
-        let mut entries: Vec<_> = layout
-            .glyphs()
-            .iter()
-            .enumerate()
-            .filter(|(_, g)| g.bounds.is_valid())
-            .map(|(i, g)| (i, g.bounds))
-            .collect();
-        let mut result = Self { nodes: Vec::new() };
-        if !entries.is_empty() {
-            result.build(&mut entries);
-        }
-        result
-    }
-
-    /// Recursively builds a balanced binary index and returns the root node.
-    fn build(&mut self, entries: &mut [(usize, Rect)]) -> usize {
-        let bounds = entries.iter().fold(
-            Rect {
-                left: f32::INFINITY,
-                top: f32::INFINITY,
-                right: f32::NEG_INFINITY,
-                bottom: f32::NEG_INFINITY,
-            },
-            |a, (_, b)| Rect {
-                left: a.left.min(b.left),
-                top: a.top.min(b.top),
-                right: a.right.max(b.right),
-                bottom: a.bottom.max(b.bottom),
-            },
-        );
-        let index = self.nodes.len();
-        self.nodes.push(IndexNode {
-            bounds,
-            children: None,
-            glyph: entries.first().map(|v| v.0).unwrap_or_default(),
-        });
-        if entries.len() > 1 {
-            entries.sort_by(|a, b| {
-                if bounds.width() > bounds.height() {
-                    a.1.left.total_cmp(&b.1.left)
-                } else {
-                    a.1.top.total_cmp(&b.1.top)
-                }
-            });
-            let mid = entries.len() / 2;
-            let (left, right) = entries.split_at_mut(mid);
-            let children = (self.build(left), self.build(right));
-            if let Some(node) = self.nodes.get_mut(index) {
-                node.children = Some(children);
-            }
-        }
-        index
-    }
-
-    /// Returns the containing or nearest indexed glyph for a device-space point.
-    fn hit(&self, point: Point) -> Option<usize> {
-        let mut stack = vec![0];
-        let mut best: Option<(f32, usize)> = None;
-        while let Some(index) = stack.pop() {
-            let Some(node) = self.nodes.get(index) else {
-                continue;
-            };
-            let distance = node.bounds.distance(point);
-            if best.is_some_and(|(d, _)| distance > d) {
-                continue;
-            }
-            if let Some((a, b)) = node.children {
-                stack.push(b);
-                stack.push(a);
-            } else if best.is_none_or(|(d, i)| distance < d || (distance == d && node.glyph < i)) {
-                best = Some((distance, node.glyph));
-            }
-        }
-        best.map(|(_, i)| i)
     }
 }
 
@@ -590,21 +494,6 @@ mod tests {
                 }))
                 .is_err()
         );
-    }
-
-    #[test]
-    /// Checks indexed hits against linear page hit testing across nearby points.
-    fn indexed_hits_match_upstream_nearest_glyphs() {
-        let layout = layout("abcdefghijk");
-        let index = SpatialIndex::new(&layout);
-        for x in -20_i16..150 {
-            for y in [-10.0, 5.0, 20.0] {
-                assert_eq!(
-                    index.hit(Point::new(f32::from(x), y)),
-                    layout.hit_test(f32::from(x), y).map(|h| h.index())
-                );
-            }
-        }
     }
 
     #[test]
