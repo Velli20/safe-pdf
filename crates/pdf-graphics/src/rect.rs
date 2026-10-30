@@ -141,6 +141,23 @@ impl Rect<f32> {
             .hypot((self.top - p.y).max(0.0).max(p.y - self.bottom))
     }
 
+    /// Converts a point into local top-left units of this rectangle: the origin is
+    /// `(left, bottom)` and y grows towards `top`.
+    pub fn to_local(&self, point: Point) -> Point {
+        Point::new(point.x - self.left, self.bottom - point.y)
+    }
+
+    /// Local box `[0, width] × [0, height]` shrunk by `inset` on each side; the far
+    /// edges never cross the near ones.
+    pub fn local_inset(&self, inset: f32) -> Self {
+        Self {
+            left: inset,
+            top: inset,
+            right: (self.width() - inset).max(inset),
+            bottom: (self.height() - inset).max(inset),
+        }
+    }
+
     /// Returns the scale transform produced by dividing this rectangle's size by another.
     pub fn scale(&self, other: &Self) -> Transform {
         Transform::from_scale(self.width() / other.width(), self.height() / other.height())
