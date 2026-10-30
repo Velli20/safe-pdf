@@ -51,7 +51,11 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         })?;
 
         match xobj.as_ref() {
-            Resource::Image(image) => self.render_image_xobject(image)?,
+            Resource::Image(image) => {
+                if let Some(image) = self.decode_image_xobject(image)? {
+                    self.render_image_xobject(&image)?;
+                }
+            }
             Resource::UnavailableImage => {}
             Resource::Form(form) => {
                 let form = form.get()?;

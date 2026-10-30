@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use pdf_filter::{filter::Filters, image_payload::ImagePayload};
+use pdf_filter::{
+    filter::Filters,
+    image_payload::{EncodedPayload, ImagePayload},
+};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     dictionary::Dictionary, object_variant::ObjectVariant, pdf_name::PdfName, stream::StreamObject,
@@ -9,14 +12,15 @@ use pdf_object_reader::{
 
 use crate::{error::PdfImageError, image_metadata::ImageMetadata};
 
-/// An image stream's metadata and filtered payload, ready to decode into a raster.
+/// An image stream's metadata and payload, ready to decode into a raster.
 ///
-/// Image XObjects are read from their stream; inline images from their dictionary
-/// and data, see [`PdfImage::inline`].
+/// Image XObjects are read from their stream and keep their payload encoded until
+/// [`PdfImage::decode`]; inline images are read from their dictionary and data and
+/// decoded at once, see [`PdfImage::inline`].
 #[derive(Debug)]
 pub struct PdfImage {
     pub(crate) metadata: ImageMetadata,
-    pub(crate) payload: ImagePayload,
+    pub(crate) payload: EncodedPayload,
 }
 
 impl FromPdfObject for PdfImage {
@@ -34,6 +38,9 @@ impl FromPdfObject for PdfImage {
 impl PdfImage {
     /// Reads an inline image from its header and encoded payload bytes.
     ///
+    /// The filters are applied here, with the content stream holding the image, so a
+    /// malformed image is rejected while that stream is read rather than when it is drawn.
+    ///
     /// ISO 32000 restricts inline images to the filters that need no out-of-band
     /// metadata; JPXDecode is not among them. The filter chain stops at JPXDecode,
     /// so such an image is rejected without decoding its codestream.
@@ -43,9 +50,12 @@ impl PdfImage {
         access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, PdfImageError> {
         let image = access.read::<Self>(&header.into().into_stream(data))?;
-        match image.payload {
+        match image.payload.decode()? {
             ImagePayload::Jpx(_) => Err(PdfImageError::InlineJpxFilter),
-            ImagePayload::Samples(_) => Ok(image),
+            samples @ ImagePayload::Samples(_) => Ok(Self {
+                payload: EncodedPayload::from(samples),
+                ..image
+            }),
         }
     }
 
@@ -62,11 +72,10 @@ impl PdfImage {
             )
     }
 
-    /// Returns shared ownership of the filtered payload bytes.
+    /// Returns shared ownership of the payload bytes: filtered for an inline image,
+    /// still encoded for an image XObject.
     pub fn shared_data(&self) -> Bytes {
-        match &self.payload {
-            ImagePayload::Samples(data) | ImagePayload::Jpx(data) => data.clone(),
-        }
+        self.payload.shared_data()
     }
 }
 

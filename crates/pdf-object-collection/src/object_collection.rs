@@ -1,6 +1,7 @@
 use pdf_filter::image_payload::ImagePayload;
 use pdf_object_reader::{
     ObjectReader, object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant,
+    pdf_name::PdfName,
 };
 use std::collections::HashMap;
 
@@ -53,14 +54,24 @@ impl ObjectCollection {
             _ => {}
         }
 
-        // A JPXDecode stream stays encoded: its codestream carries the component,
-        // precision, colour, and opacity metadata that a flat byte buffer would lose,
-        // so the image path decodes it. A stream whose chain fails stays encoded too.
-        if matches!(&obj, ObjectVariant::Stream(stream) if !stream.filters_applied())
-            && let Ok(ImagePayload::Samples(data)) = self.loaded().read::<ImagePayload>(&obj)
-            && let ObjectVariant::Stream(stream) = &mut obj
+        // An image XObject stays encoded: the image path decodes it when a page draws
+        // it, so a document holds no image samples until then. A JPXDecode stream stays
+        // encoded too: its codestream carries the component, precision, colour, and
+        // opacity metadata that a flat byte buffer would lose. A stream whose chain
+        // fails stays encoded as well.
+        if let ObjectVariant::Stream(stream) = &obj
+            && !stream.filters_applied()
         {
-            stream.set_filtered_data(data);
+            let loaded = self.loaded();
+            let is_image = loaded
+                .required::<PdfName>(&stream.dictionary, b"Subtype")
+                .is_ok_and(|subtype| subtype.as_bytes() == b"Image");
+            if !is_image
+                && let Ok(ImagePayload::Samples(data)) = loaded.read::<ImagePayload>(&obj)
+                && let ObjectVariant::Stream(stream) = &mut obj
+            {
+                stream.set_filtered_data(data);
+            }
         }
 
         if self.map.insert(identifier.number, obj).is_some() {
