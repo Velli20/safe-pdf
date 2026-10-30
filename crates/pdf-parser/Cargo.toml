@@ -8,6 +8,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+bytes = "1.10.1"
 pdf-tokenizer = { path = "../pdf-tokenizer" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-filter = { path = "../pdf-filter" }

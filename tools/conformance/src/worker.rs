@@ -8,6 +8,7 @@ use crate::{
     stream_graph::StreamGraph,
 };
 use anyhow::{Result, anyhow};
+use bytes::Bytes;
 use image::{DynamicImage, GenericImage, Rgba, RgbaImage, imageops::FilterType};
 use num_traits::ToPrimitive;
 use pdf_canvas::{PageViewport, ViewportError};
@@ -61,7 +62,7 @@ fn report_stats(stats: &RenderStats) -> Result<()> {
     Ok(())
 }
 
-fn read_safe(bytes: &[u8], password: Option<&str>) -> Result<pdf_document::report::PdfReadReport> {
+fn read_safe(bytes: Bytes, password: Option<&str>) -> Result<pdf_document::report::PdfReadReport> {
     Ok(PdfReader.read_with_report(bytes, password.map(str::as_bytes))?)
 }
 
@@ -90,10 +91,10 @@ pub fn read(
     pdfium: Option<&Path>,
     reference_images: Option<&Path>,
 ) -> Result<()> {
-    let bytes = fs::read(pdf)?;
+    let bytes = Bytes::from(fs::read(pdf)?);
     let mut output = ReadOutput::default();
     stage("safe-read");
-    match read_safe(&bytes, password) {
+    match read_safe(bytes.clone(), password) {
         Ok(report) => {
             output.diagnostics = report
                 .diagnostics()
@@ -224,13 +225,13 @@ fn glyph_boxes(layout: &PageTextLayout, width: u32, height: u32) -> Vec<[u32; 4]
 
 /// Renders one page with Safe-PDF, compares it with the reference, and writes evidence files.
 pub fn page(job: &PageJob<'_>) -> Result<()> {
-    let bytes = fs::read(job.pdf)?;
+    let bytes = Bytes::from(fs::read(job.pdf)?);
     let mut output = PageOutput {
         page: job.page,
         ..PageOutput::default()
     };
     stage("safe-read");
-    let safe_document = read_safe(&bytes, job.password).map(|report| report.into_document());
+    let safe_document = read_safe(bytes.clone(), job.password).map(|report| report.into_document());
     let safe_points = match &safe_document {
         Ok(document) => document
             .get_page(job.page)

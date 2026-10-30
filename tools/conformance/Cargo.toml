@@ -9,6 +9,7 @@ description = "Render PDF test corpora with Safe-PDF and PDFium and report diffe
 workspace = true
 
 [dependencies]
+bytes = "1.10.1"
 pdf-canvas = { path = "../../crates/pdf-canvas" }
 pdf-document = { path = "../../crates/pdf-document", features = ["error-backtrace"] }
 pdf-font = { path = "../../crates/pdf-font" }

@@ -28,7 +28,7 @@ pub struct WebDocument {
 impl WebDocument {
     /// Parses user-provided bytes entirely within WebAssembly.
     #[wasm_bindgen(constructor)]
-    pub fn new(bytes: &[u8]) -> Result<WebDocument, JsValue> {
+    pub fn new(bytes: Vec<u8>) -> Result<WebDocument, JsValue> {
         let document = PdfReader.read_from_bytes(bytes, None).map_err(error)?;
         let count = u32::try_from(document.pages.len()).map_err(error)?;
         let overlay = WebAnnotationOverlay::new(&document).map_err(error)?;

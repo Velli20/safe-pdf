@@ -11,6 +11,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
 };
 
+use bytes::Bytes;
 use pdf_object_reader::{
     EmptySource, ObjectReader,
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
@@ -133,8 +134,13 @@ impl<'input> XrefRecovery<'input> {
         let length = self
             .objects
             .required::<usize>(header.dictionary(), b"Length")?;
-        let stream = parser.parse_stream_body(header, length)?;
-        self.parse_stream_section(&stream)
+        let body = parser.parse_stream_body(length)?;
+        let body = parser
+            .tokenizer
+            .input
+            .get(body)
+            .ok_or(ParserError::UnexpectedEndOfFile)?;
+        self.parse_stream_section(&header.into_stream(Bytes::copy_from_slice(body)))
     }
 
     /// Decodes one parsed stream as a cross-reference stream section.
@@ -207,8 +213,13 @@ impl<'input> XrefRecovery<'input> {
             return Err(ParserError::InvalidXrefAtOffset { offset });
         };
         let length = self.direct_length(&header);
-        let stream = parser.recover_stream_body(header, length)?;
-        self.parse_stream_section(&stream)
+        let body = parser.recover_stream_body(length)?;
+        let body = parser
+            .tokenizer
+            .input
+            .get(body)
+            .ok_or(ParserError::UnexpectedEndOfFile)?;
+        self.parse_stream_section(&header.into_stream(Bytes::copy_from_slice(body)))
     }
 
     /// Attempts to parse malformed xref rows at or near a declared offset.
