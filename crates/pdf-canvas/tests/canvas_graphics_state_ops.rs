@@ -9,6 +9,7 @@ use pdf_canvas::{error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas:
 use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
 use pdf_graphics::{DashPattern, MaskMode, rect::Rect};
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
     form::FormXObject,
@@ -34,7 +35,7 @@ fn render(
 fn graphics_state_resource(params: Vec<ExternalGraphicsStateKey>) -> Resources {
     Resources {
         ext_g_states: HashMap::from([(
-            b"GS0".to_vec(),
+            PdfName::from(b"GS0"),
             Resource::ExternalGraphicsState(pdf_object_reader::ObjectHandle::from(
                 ExternalGraphicsState { params },
             )),

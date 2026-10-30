@@ -9,7 +9,8 @@ use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
 use pdf_font::{FontProgramFormat, FontSource, PdfFontSpec};
 use pdf_object_reader::{
-    EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
+    EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, pdf_name::PdfName,
+    stream::StreamObject,
 };
 use pdf_resources::{resource::Resource, resources::Resources};
 use pdf_text_engine::bundled_font_system;
@@ -42,7 +43,7 @@ fn benchmark(c: &mut Criterion) {
     let font_system = bundled_font_system();
     let resources = Arc::new(Resources {
         fonts: HashMap::from([(
-            b"F1".to_vec(),
+            PdfName::from(b"F1"),
             Resource::Font {
                 font: Arc::new(font),
                 resources: None,

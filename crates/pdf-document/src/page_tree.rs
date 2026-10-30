@@ -224,6 +224,7 @@ mod tests {
     use std::sync::Arc;
 
     use pdf_color_space::color_space::ColorSpace;
+    use pdf_object_reader::pdf_name::PdfName;
     use pdf_resources::{resource::Resource, resources::Resources};
 
     use super::*;
@@ -234,7 +235,7 @@ mod tests {
     fn resources_with_color_space(name: &str) -> Resources {
         let mut res = Resources::default();
         res.color_spaces.insert(
-            name.as_bytes().to_vec(),
+            PdfName::from_bytes(name),
             Resource::ColorSpace(Arc::new(ColorSpace::DeviceGray)),
         );
         res
@@ -280,11 +281,11 @@ mod tests {
         // Child already defines "CS1" (DeviceRGB) and also has "CS2".
         let mut child_res = Resources::default();
         child_res.color_spaces.insert(
-            b"CS1".to_vec(),
+            PdfName::from(b"CS1"),
             Resource::ColorSpace(Arc::new(ColorSpace::DeviceRGB)),
         );
         child_res.color_spaces.insert(
-            b"CS2".to_vec(),
+            PdfName::from(b"CS2"),
             Resource::ColorSpace(Arc::new(ColorSpace::DeviceGray)),
         );
 
@@ -333,7 +334,7 @@ mod tests {
         // Parent defines two color spaces: "CS1" and "CS2".
         let mut parent = resources_with_color_space("CS1");
         parent.color_spaces.insert(
-            b"CS2".to_vec(),
+            PdfName::from(b"CS2"),
             Resource::ColorSpace(Arc::new(ColorSpace::DeviceRGB)),
         );
         let parent = Arc::new(parent);
@@ -341,7 +342,7 @@ mod tests {
         // Child only defines "CS1" (DeviceRGB); it is missing "CS2".
         let mut child_res = Resources::default();
         child_res.color_spaces.insert(
-            b"CS1".to_vec(),
+            PdfName::from(b"CS1"),
             Resource::ColorSpace(Arc::new(ColorSpace::DeviceRGB)),
         );
 
