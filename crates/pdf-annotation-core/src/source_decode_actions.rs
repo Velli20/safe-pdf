@@ -6,6 +6,7 @@ use crate::pdf_data::{
     AnnotationAction, AnnotationDestination, DestinationTarget, ExplicitDestination,
     FileSpecification, FileSpecificationDictionary,
 };
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
     ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     object_kind::ObjectKind, object_variant::ObjectVariant, pdf_array::PdfArray,
@@ -16,7 +17,7 @@ use pdf_optional_content::{OcgStateEntry, OcgTarget};
 impl FromPdfObject for AnnotationAction {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut action = context.dictionary()?;
-        let action_type = action.required::<Arc<[u8]>>(b"S")?;
+        let action_type = action.required::<PdfName>(b"S")?;
         Ok(match action_type.as_ref() {
             b"GoTo" => Self::GoTo {
                 destination: action.required(b"D")?,
@@ -111,7 +112,7 @@ impl FromPdfObject for ExplicitDestination {
             true => DestinationTarget::Null,
             false => DestinationTarget::try_from(page)?,
         };
-        let mode = items.at::<Arc<[u8]>>(1)?;
+        let mode = items.at::<PdfName>(1)?;
         Ok(match mode.as_ref() {
             b"XYZ" => Self::Xyz {
                 page,

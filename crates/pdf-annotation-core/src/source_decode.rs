@@ -12,6 +12,7 @@ use crate::pdf_data::{
     SourceAnnotation,
 };
 use pdf_graphics::{DashPattern, rect::Rect};
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
     ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
     object_variant::ObjectVariant,
@@ -27,12 +28,12 @@ impl FromPdfObject for SourceAnnotation {
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
-        if let Some(annotation_type) = dictionary.optional::<Arc<[u8]>>(b"Type")?
+        if let Some(annotation_type) = dictionary.optional::<PdfName>(b"Type")?
             && annotation_type.as_ref() != b"Annot"
         {
             return Err(SourceDecodeError::InvalidEntry {
                 entry: b"Type",
-                reason: format!("expected /Annot, found /{annotation_type:?}"),
+                reason: format!("expected /Annot, found {annotation_type:?}"),
             }
             .into());
         }
@@ -253,7 +254,7 @@ impl FromPdfObject for BorderEffect {
 /// Reads a `/BS` `/S` border style name, preserving unknown names.
 impl FromPdfObject for BorderStyleName {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         Ok(match &*name {
             b"S" => Self::Solid,
             b"D" => Self::Dashed,
@@ -268,7 +269,7 @@ impl FromPdfObject for BorderStyleName {
 /// Reads a `/BE` `/S` border effect name, preserving unknown names.
 impl FromPdfObject for BorderEffectStyle {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         Ok(match &*name {
             b"S" => Self::None,
             b"C" => Self::Cloudy,

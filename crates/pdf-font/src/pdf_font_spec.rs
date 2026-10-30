@@ -1,5 +1,6 @@
 //! Complete normalized PDF font resource specifications.
 
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
@@ -45,7 +46,7 @@ impl FromPdfObject for PdfFontSpec {
         let mut context = context.dictionary()?;
         // Keep recovery at the resource boundary: a missing or unsupported subtype, or a
         // concrete font that fails to parse, falls back to a Standard 14 font.
-        let subtype = context.required::<Arc<[u8]>>(b"Subtype").ok();
+        let subtype = context.required::<PdfName>(b"Subtype").ok();
         let spec = match subtype.as_deref() {
             Some(b"Type0") => context.read(value).map(Self::Type0).ok(),
             Some(b"Type1") => context.read(value).map(Self::Type1).ok(),
@@ -56,7 +57,7 @@ impl FromPdfObject for PdfFontSpec {
         };
         // The whole-font fallback follows BaseFont alone, without descriptor flags.
         Ok(spec.unwrap_or_else(|| {
-            let base_font = context.lenient::<Arc<[u8]>>(b"BaseFont");
+            let base_font = context.lenient::<PdfName>(b"BaseFont");
             Self::from(standard14::select(base_font.as_deref(), FontFlags::empty()))
         }))
     }

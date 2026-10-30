@@ -2,9 +2,9 @@
 use crate::error::OptionalContentError;
 use crate::optional_content::{OptionalContentGroupId, OptionalContentState};
 use pdf_object_reader::object_variant::ObjectVariant;
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 /// An `/OCMD` `/VE` visibility expression combining group states with boolean operators.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -65,7 +65,7 @@ impl FromPdfObject for VisibilityExpression {
             }
             .into());
         };
-        let operator = context.read::<Arc<[u8]>>(operator)?;
+        let operator = context.read::<PdfName>(operator)?;
         let operands = ArrayContext::new(operands, context.access()).read_all::<Self>()?;
         match &*operator {
             b"And" => Ok(Self::And(operands)),
