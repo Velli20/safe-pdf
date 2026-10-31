@@ -2358,6 +2358,7 @@ name = "pdf-jbig2"
 version = "0.1.0"
 dependencies = [
  "pdf-ccitt",
+ "pdf-mq-coder",
  "pdf-utils",
  "thiserror 2.0.12",
 ]

@@ -201,7 +201,6 @@ impl GenericRegionDecoder {
                     ArithmeticContexts::new(template.id().context_count(), context.budget)?;
                 let mut decoder = ArithmeticDecoder::new(region.data, context.location)?;
                 let bitmap = plane.decode(&mut decoder, &mut states, context.budget)?;
-                let _consumed = decoder.consumed_bytes();
                 Ok(bitmap)
             }
         }
@@ -630,7 +629,6 @@ impl RefinementRegionDecoder {
         let mut states = ArithmeticContexts::new(8192, context.budget)?;
         let mut decoder = ArithmeticDecoder::new(region.data, context.location)?;
         let bitmap = procedure.decode(reference, &mut decoder, &mut states, context.budget)?;
-        let _consumed = decoder.consumed_bytes();
         Ok(bitmap)
     }
 }
@@ -956,7 +954,6 @@ fn decode_gray_planes(
         xor_plane(&mut decoded, planes.last())?;
         planes.push(decoded);
     }
-    let _consumed = decoder.consumed_bytes();
     Ok(planes)
 }
 

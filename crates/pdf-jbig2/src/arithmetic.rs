@@ -1,59 +1,10 @@
+use pdf_mq_coder::{MqContext, MqRegisters, SliceSource};
+
 use crate::{
     Jbig2Error, Result,
     document::DecodeBudget,
     error::{LimitKind, SourceLocation},
 };
-
-// T.88 Annex A.1: Qe, next MPS state, next LPS state, and MPS switch.
-const PROBABILITIES: [(u16, u8, u8, bool); 47] = [
-    (0x5601, 1, 1, true),
-    (0x3401, 2, 6, false),
-    (0x1801, 3, 9, false),
-    (0x0ac1, 4, 12, false),
-    (0x0521, 5, 29, false),
-    (0x0221, 38, 33, false),
-    (0x5601, 7, 6, true),
-    (0x5401, 8, 14, false),
-    (0x4801, 9, 14, false),
-    (0x3801, 10, 14, false),
-    (0x3001, 11, 17, false),
-    (0x2401, 12, 18, false),
-    (0x1c01, 13, 20, false),
-    (0x1601, 29, 21, false),
-    (0x5601, 15, 14, true),
-    (0x5401, 16, 14, false),
-    (0x5101, 17, 15, false),
-    (0x4801, 18, 16, false),
-    (0x3801, 19, 17, false),
-    (0x3401, 20, 18, false),
-    (0x3001, 21, 19, false),
-    (0x2801, 22, 19, false),
-    (0x2401, 23, 20, false),
-    (0x2201, 24, 21, false),
-    (0x1c01, 25, 22, false),
-    (0x1801, 26, 23, false),
-    (0x1601, 27, 24, false),
-    (0x1401, 28, 25, false),
-    (0x1201, 29, 26, false),
-    (0x1101, 30, 27, false),
-    (0x0ac1, 31, 28, false),
-    (0x09c1, 32, 29, false),
-    (0x08a1, 33, 30, false),
-    (0x0521, 34, 31, false),
-    (0x0441, 35, 32, false),
-    (0x02a1, 36, 33, false),
-    (0x0221, 37, 34, false),
-    (0x0141, 38, 35, false),
-    (0x0111, 39, 36, false),
-    (0x0085, 40, 37, false),
-    (0x0049, 41, 38, false),
-    (0x0025, 42, 39, false),
-    (0x0015, 43, 40, false),
-    (0x0009, 44, 41, false),
-    (0x0005, 45, 42, false),
-    (0x0001, 45, 43, false),
-    (0x5601, 46, 46, false),
-];
 
 /// Result of integer entropy decoding, preserving T.88 out-of-band semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,7 +144,7 @@ impl IntegerContexts {
 /// to their retain/use flags. This storage contains no input pointers.
 #[derive(Debug)]
 pub struct ArithmeticContexts {
-    states: Vec<u8>,
+    states: Vec<MqContext>,
 }
 
 impl ArithmeticContexts {
@@ -205,7 +156,7 @@ impl ArithmeticContexts {
         )?;
         let mut states = Vec::new();
         states.try_reserve_exact(count)?;
-        states.resize(count, 0);
+        states.resize(count, MqContext::default());
         Ok(Self { states })
     }
 
@@ -246,35 +197,27 @@ impl ArithmeticContexts {
 /// adapter must retain input storage until this decoder is dropped.
 #[derive(Debug)]
 pub struct ArithmeticDecoder<'a> {
-    input: &'a [u8],
+    source: SliceSource<'a>,
+    registers: MqRegisters,
     location: SourceLocation,
-    position: usize,
-    interval: u32,
-    code: u32,
-    current_byte: u8,
-    bit_count: u32,
 }
 
 impl<'a> ArithmeticDecoder<'a> {
     /// Initialize from bounded bytes; report truncation or invalid coding data.
     pub fn new(input: &'a [u8], location: SourceLocation) -> Result<Self> {
-        let current_byte = *input.first().ok_or(Jbig2Error::Truncated {
+        let mut source = SliceSource::new(input);
+        let registers = MqRegisters::new(&mut source);
+        if registers.is_exhausted() {
+            return Err(Jbig2Error::Truncated {
+                location,
+                needed: 1,
+            });
+        }
+        Ok(Self {
+            source,
+            registers,
             location,
-            needed: 1,
-        })?;
-        let mut decoder = Self {
-            input,
-            location,
-            position: 0,
-            interval: 0x8000,
-            code: u32::from(current_byte ^ 0xff) << 16,
-            current_byte,
-            bit_count: 0,
-        };
-        decoder.byte_in();
-        decoder.code = decoder.code.wrapping_shl(7);
-        decoder.bit_count = decoder.bit_count.saturating_sub(7);
-        Ok(decoder)
+        })
     }
 
     /// Decode one context-selected decision and charge entropy work.
@@ -285,57 +228,19 @@ impl<'a> ArithmeticDecoder<'a> {
         budget: &mut DecodeBudget,
     ) -> Result<bool> {
         budget.charge(LimitKind::Work, 1)?;
-        let state = *contexts
+        let context = contexts
             .states
-            .get(index)
+            .get_mut(index)
             .ok_or(Jbig2Error::InvalidCodingData {
                 location: self.location,
                 reason: "arithmetic context index",
             })?;
-        let index_in_table = usize::from(state & 0x7f);
-        let (qe, nmps, nlps, switch) =
-            *PROBABILITIES
-                .get(index_in_table)
-                .ok_or(Jbig2Error::InvalidCodingData {
-                    location: self.location,
-                    reason: "arithmetic probability state",
-                })?;
-        let mps = state & 0x80 != 0;
-        self.interval = self.interval.wrapping_sub(u32::from(qe));
-        let (decoded, lps, renorm) = if (self.code >> 16) < self.interval {
-            if self.interval & 0x8000 != 0 {
-                (mps, false, false)
-            } else {
-                let lps = self.interval < u32::from(qe);
-                (mps ^ lps, lps, true)
-            }
-        } else {
-            self.code = self.code.wrapping_sub(self.interval << 16);
-            let lps = self.interval >= u32::from(qe);
-            self.interval = u32::from(qe);
-            (mps ^ lps, lps, true)
-        };
-        if renorm {
-            let next_mps = mps ^ (lps && switch);
-            let next_state = if lps { nlps } else { nmps };
-            let slot = contexts
-                .states
-                .get_mut(index)
-                .ok_or(Jbig2Error::InvalidCodingData {
-                    location: self.location,
-                    reason: "arithmetic context index",
-                })?;
-            *slot = next_state | if next_mps { 0x80 } else { 0 };
-            while self.interval & 0x8000 == 0 {
-                if self.bit_count == 0 {
-                    self.byte_in();
-                }
-                self.interval = self.interval.wrapping_shl(1);
-                self.code = self.code.wrapping_shl(1);
-                self.bit_count = self.bit_count.saturating_sub(1);
-            }
-        }
-        Ok(decoded)
+        self.registers
+            .decode(&mut self.source, context)
+            .map_err(|source| Jbig2Error::Arithmetic {
+                location: self.location,
+                source,
+            })
     }
 
     /// Decode an arithmetic integer with its own procedure-specific contexts.
@@ -430,15 +335,6 @@ impl<'a> ArithmeticDecoder<'a> {
         u32::try_from(previous & mask).map_err(|_| Jbig2Error::Overflow("IAID identifier"))
     }
 
-    /// Return how many input bytes this decoder has read.
-    ///
-    /// Arithmetic coding terminates on a decision count rather than a marker,
-    /// so a caller that must resume at an exact boundary derives it from its own
-    /// declared payload length, not from this count.
-    pub fn consumed_bytes(&self) -> usize {
-        self.position.saturating_add(1).min(self.input.len())
-    }
-
     fn integer_bit(
         &mut self,
         contexts: &mut ArithmeticContexts,
@@ -456,36 +352,6 @@ impl<'a> ArithmeticDecoder<'a> {
             (next & 511) | 256
         };
         Ok(bit)
-    }
-
-    fn byte_in(&mut self) {
-        if self.current_byte == 0xff {
-            let next = self
-                .input
-                .get(self.position.saturating_add(1))
-                .copied()
-                .unwrap_or(0xff);
-            if next > 0x8f {
-                self.bit_count = 8;
-            } else {
-                self.position = self.position.saturating_add(1).min(self.input.len());
-                self.current_byte = next;
-                self.code = self
-                    .code
-                    .wrapping_add(0xfe00)
-                    .wrapping_sub(u32::from(next) << 9);
-                self.bit_count = 7;
-            }
-        } else {
-            self.position = self.position.saturating_add(1).min(self.input.len());
-            let next = self.input.get(self.position).copied().unwrap_or(0xff);
-            self.current_byte = next;
-            self.code = self
-                .code
-                .wrapping_add(0xff00)
-                .wrapping_sub(u32::from(next) << 8);
-            self.bit_count = 8;
-        }
     }
 }
 
@@ -530,8 +396,6 @@ mod tests {
             bits,
             vec![false, true, true, false, true, false, true, false]
         );
-        assert!(contexts.states.first().is_some_and(|state| *state < 47));
-        assert!(decoder.consumed_bytes() <= 3);
         Ok(())
     }
 

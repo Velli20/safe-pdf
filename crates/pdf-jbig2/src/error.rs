@@ -1,3 +1,5 @@
+use pdf_mq_coder::MqError;
+
 use crate::segment::SegmentNumber;
 
 /// Result returned by fallible JBIG2 operations; errors own their diagnostics.
@@ -97,6 +99,14 @@ pub enum Jbig2Error {
         location: SourceLocation,
         /// Static description of the violated invariant.
         reason: &'static str,
+    },
+    /// The MQ arithmetic coder could not produce a decision.
+    #[error("arithmetic decoding failed at {location:?}: {source}")]
+    Arithmetic {
+        /// Position of the arithmetic-coded payload.
+        location: SourceLocation,
+        /// The coder's failure.
+        source: MqError,
     },
     /// A symbol refers to another that its dictionary has not decoded yet.
     #[error("symbol {0} is not decoded yet")]

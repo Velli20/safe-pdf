@@ -354,7 +354,6 @@ fn decode_collective_bitmap(
     let mut states = ArithmeticContexts::new(descriptor.template.context_count(), context.budget)?;
     let mut decoder = ArithmeticDecoder::new(descriptor.data, context.location)?;
     let bitmap = plane.decode(&mut decoder, &mut states, context.budget)?;
-    let _consumed = decoder.consumed_bytes();
     Ok(bitmap)
 }
 
