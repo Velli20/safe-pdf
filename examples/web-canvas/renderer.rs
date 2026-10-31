@@ -1,6 +1,7 @@
 //! A small document owner demonstrating the browser crate's host-facing APIs.
 use pdf_annotation_core::pdf_data::AnnotationAction;
 use pdf_document::{document::PdfDocument, reader::PdfReader};
+use pdf_graphics::{size::Size, transform::Transform};
 use pdf_graphics_web::{WebCanvasBackend, WebCanvasOptions};
 use pdf_renderer::{DocumentTextSelection, PdfRenderer};
 use pdf_web::{
@@ -26,10 +27,13 @@ pub struct WebDocument {
 
 #[wasm_bindgen]
 impl WebDocument {
-    /// Parses user-provided bytes entirely within WebAssembly.
+    /// Parses user-provided bytes entirely within WebAssembly, decrypting them with
+    /// `password` when given.
     #[wasm_bindgen(constructor)]
-    pub fn new(bytes: Vec<u8>) -> Result<WebDocument, JsValue> {
-        let document = PdfReader.read_from_bytes(bytes, None).map_err(error)?;
+    pub fn new(bytes: Vec<u8>, password: Option<String>) -> Result<WebDocument, JsValue> {
+        let document = PdfReader
+            .read_from_bytes(bytes, password.as_deref().map(str::as_bytes))
+            .map_err(error)?;
         let count = u32::try_from(document.pages.len()).map_err(error)?;
         let overlay = WebAnnotationOverlay::new(&document).map_err(error)?;
         Ok(Self {
@@ -74,40 +78,35 @@ impl WebDocument {
         dpr: f32,
         rotation: u32,
     ) -> Result<WebAnnotationSnapshot, JsValue> {
-        self.viewport_revision = self
-            .viewport_revision
-            .checked_add(1)
-            .ok_or_else(|| error("viewport revision overflow"))?;
+        let revision = self.next_viewport_revision()?;
         let page = page_of(self.renderer.document(), page_index)?;
-        let viewport = WebViewport::for_page(page, zoom, dpr, rotation, self.viewport_revision)
-            .map_err(error)?;
-        let size = viewport.page().device_size();
-        let mut backend =
-            WebCanvasBackend::new(canvas, *viewport.canvas(), WebCanvasOptions::default())
-                .map_err(error)?;
-        let output = self
-            .renderer
-            .render(
-                page_index,
-                self.content_revision,
-                &mut backend,
-                &viewport,
-                &mut self.overlay,
-            )
-            .map_err(error)?;
-        if self.layouts.get(&page_index) != Some(&self.content_revision) {
-            self.selection
-                .install_layout(
-                    page_index,
-                    self.content_revision,
-                    size,
-                    Arc::clone(&output.text_layout),
-                )
-                .map_err(error)?;
-            self.layouts.insert(page_index, self.content_revision);
-        }
-        self.viewports.insert(page_index, viewport);
-        Ok(WebAnnotationSnapshot::from_snapshot(output.annotations))
+        let viewport = WebViewport::for_page(page, zoom, dpr, rotation, revision).map_err(error)?;
+        self.render_viewport(page_index, canvas, viewport)
+    }
+
+    /// Renders the page fitted to exactly `width` x `height` canvas pixels, one CSS pixel
+    /// each, unrotated; the annotations are placed in the same pixels.
+    pub fn render_fitted(
+        &mut self,
+        page_index: u32,
+        canvas: web_sys::HtmlCanvasElement,
+        width: u32,
+        height: u32,
+    ) -> Result<WebAnnotationSnapshot, JsValue> {
+        let revision = self.next_viewport_revision()?;
+        let page = page_of(self.renderer.document(), page_index)?;
+        let device = Size::new(
+            num_traits::ToPrimitive::to_f32(&width).ok_or_else(|| error("canvas width"))?,
+            num_traits::ToPrimitive::to_f32(&height).ok_or_else(|| error("canvas height"))?,
+        );
+        let viewport = WebViewport::new(
+            page.viewport(None, device).map_err(error)?,
+            Size::new(width, height),
+            Transform::identity(),
+            revision,
+        )
+        .map_err(error)?;
+        self.render_viewport(page_index, canvas, viewport)
     }
 
     /// Finds a glyph from container-local CSS coordinates.
@@ -219,6 +218,53 @@ impl WebDocument {
         self.layouts.remove(&page);
         self.viewports.remove(&page);
         Ok(())
+    }
+}
+
+impl WebDocument {
+    /// Advances the viewport revision that tags annotation snapshots.
+    fn next_viewport_revision(&mut self) -> Result<u32, JsValue> {
+        self.viewport_revision = self
+            .viewport_revision
+            .checked_add(1)
+            .ok_or_else(|| error("viewport revision overflow"))?;
+        Ok(self.viewport_revision)
+    }
+
+    /// Renders page pixels through `viewport` and returns its prepared annotations.
+    fn render_viewport(
+        &mut self,
+        page_index: u32,
+        canvas: web_sys::HtmlCanvasElement,
+        viewport: WebViewport,
+    ) -> Result<WebAnnotationSnapshot, JsValue> {
+        let size = viewport.page().device_size();
+        let mut backend =
+            WebCanvasBackend::new(canvas, *viewport.canvas(), WebCanvasOptions::default())
+                .map_err(error)?;
+        let output = self
+            .renderer
+            .render(
+                page_index,
+                self.content_revision,
+                &mut backend,
+                &viewport,
+                &mut self.overlay,
+            )
+            .map_err(error)?;
+        if self.layouts.get(&page_index) != Some(&self.content_revision) {
+            self.selection
+                .install_layout(
+                    page_index,
+                    self.content_revision,
+                    size,
+                    Arc::clone(&output.text_layout),
+                )
+                .map_err(error)?;
+            self.layouts.insert(page_index, self.content_revision);
+        }
+        self.viewports.insert(page_index, viewport);
+        Ok(WebAnnotationSnapshot::from_snapshot(output.annotations))
     }
 }
 

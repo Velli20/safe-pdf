@@ -210,7 +210,7 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
             .then_with(|| a.signature.cmp(&b.signature))
     });
     Index {
-        corpus: options.kind.as_str().to_owned(),
+        corpus: options.target().as_str().to_owned(),
         corpus_root: options.root.display().to_string(),
         corpus_revision: fetch::revision(&options.root),
         pdfium: options.pdfium.as_ref().map_or_else(

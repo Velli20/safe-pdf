@@ -13,7 +13,7 @@
 
 use crate::{
     baseline::Delta,
-    corpus::{self, CorpusKind},
+    corpus::{self, Target},
     github::{self, Issue},
     issue_body::{self, BodyContext},
     issue_state::{self, CorpusState, IssueState},
@@ -35,8 +35,8 @@ const CLOSE_AFTER_MISSING: u32 = 2;
 
 /// Settings of an issue run.
 pub struct IssueOptions<'a> {
-    /// Corpora whose last runs are reported together.
-    pub kinds: &'a [CorpusKind],
+    /// Reports whose last runs are reported together.
+    pub kinds: &'a [Target],
     /// `owner/name` of the repository.
     pub repo: &'a str,
     /// Issues created at most per run.
@@ -47,8 +47,8 @@ pub struct IssueOptions<'a> {
 
 /// The last run of one corpus.
 pub struct CorpusRun {
-    /// Corpus.
-    pub kind: CorpusKind,
+    /// Corpus and renderer of the run.
+    pub kind: Target,
     /// Run index.
     pub index: Index,
     /// Full case results by id; empty when `results.json` is not available.
@@ -57,7 +57,7 @@ pub struct CorpusRun {
 
 impl CorpusRun {
     /// Loads the last run of a corpus from its output directory.
-    pub fn load(kind: CorpusKind, with_results: bool) -> Result<Self> {
+    pub fn load(kind: Target, with_results: bool) -> Result<Self> {
         let out = corpus::output_dir(kind);
         let index: Index = serde_json::from_slice(
             &fs::read(out.join("index.json"))
@@ -629,10 +629,12 @@ fn change_note(old: &IssueState, new: &IssueState) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::corpus::{CorpusKind, Renderer};
 
     const CURRENT: &str = "render_error: Shading type 'LatticeFormTriangleMesh' not implemented @ pdf-canvas::UnsupportedFeature";
 
-    fn corpus_run(kind: CorpusKind) -> CorpusRun {
+    fn corpus_run(corpus: CorpusKind) -> CorpusRun {
+        let kind = Target::new(corpus, Renderer::Skia);
         CorpusRun {
             kind,
             index: Index {
@@ -674,7 +676,10 @@ mod tests {
             corpus_run(CorpusKind::Pdfjs),
         ];
         let options = IssueOptions {
-            kinds: &[CorpusKind::Pdfium, CorpusKind::Pdfjs],
+            kinds: &[
+                Target::new(CorpusKind::Pdfium, Renderer::Skia),
+                Target::new(CorpusKind::Pdfjs, Renderer::Skia),
+            ],
             repo: "owner/repo",
             max_new: 15,
             dry_run: true,

@@ -62,6 +62,63 @@ impl CorpusKind {
     }
 }
 
+/// The Safe-PDF stack whose render a run compares with the reference.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum Renderer {
+    /// Page content through `PdfRenderer` onto a Skia raster; annotations are not drawn.
+    #[default]
+    Skia,
+    /// The browser stack (`pdf-web`): page content on a Canvas 2D plus the annotation layer,
+    /// rendered in headless Chrome.
+    Web,
+}
+
+/// One kind of report: a corpus rendered by one renderer. Each has its own output
+/// directory, baseline, published viewer and issue label.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Target {
+    /// Corpus the cases come from.
+    pub corpus: CorpusKind,
+    /// Renderer compared with the reference.
+    pub renderer: Renderer,
+}
+
+impl Target {
+    /// Every target, in the order reports are listed.
+    pub const ALL: [Self; 4] = [
+        Self::new(CorpusKind::Pdfium, Renderer::Skia),
+        Self::new(CorpusKind::Pdfjs, Renderer::Skia),
+        Self::new(CorpusKind::Pdfium, Renderer::Web),
+        Self::new(CorpusKind::Pdfjs, Renderer::Web),
+    ];
+
+    /// Returns the target of `corpus` rendered by `renderer`.
+    pub const fn new(corpus: CorpusKind, renderer: Renderer) -> Self {
+        Self { corpus, renderer }
+    }
+
+    /// Returns the name used in paths, labels and commands: the corpus name, suffixed with
+    /// `-web` for the web renderer.
+    pub fn as_str(self) -> &'static str {
+        match (self.corpus, self.renderer) {
+            (CorpusKind::Pdfium, Renderer::Skia) => "pdfium",
+            (CorpusKind::Pdfjs, Renderer::Skia) => "pdfjs",
+            (CorpusKind::Pdfium, Renderer::Web) => "pdfium-web",
+            (CorpusKind::Pdfjs, Renderer::Web) => "pdfjs-web",
+        }
+    }
+}
+
+impl clap::ValueEnum for Target {
+    fn value_variants<'a>() -> &'a [Self] {
+        &Self::ALL
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.as_str()))
+    }
+}
+
 /// Returns the workspace root, fixed at compile time.
 pub fn workspace_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -78,16 +135,16 @@ pub fn default_root(kind: CorpusKind) -> PathBuf {
     state_dir().join("corpora").join(kind.as_str())
 }
 
-/// Returns the run output directory of a corpus.
-pub fn output_dir(kind: CorpusKind) -> PathBuf {
-    state_dir().join(kind.as_str())
+/// Returns the run output directory of a target.
+pub fn output_dir(target: Target) -> PathBuf {
+    state_dir().join(target.as_str())
 }
 
-/// Returns the checked-in baseline of a corpus.
-pub fn baseline_path(kind: CorpusKind) -> PathBuf {
+/// Returns the checked-in baseline of a target.
+pub fn baseline_path(target: Target) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("baselines")
-        .join(format!("{}.json", kind.as_str()))
+        .join(format!("{}.json", target.as_str()))
 }
 
 /// Keeps cases whose id contains `filter` and, when `ids` is not empty, equals one of `ids`.

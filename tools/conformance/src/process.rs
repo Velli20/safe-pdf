@@ -18,6 +18,10 @@ pub const STAGE_MARKER: &str = "conformance-stage: ";
 /// Prefix of the stderr lines carrying a JSON [`RenderStats`] update from a page worker.
 pub const STATS_MARKER: &str = "conformance-stats: ";
 
+/// Prefix of the stderr line naming the browser target a web page worker opened, so the
+/// harness can close it when the worker is killed.
+pub const TARGET_MARKER: &str = "conformance-target: ";
+
 /// Keeps the tail of stderr; panics and backtraces end there.
 const STDERR_LIMIT: usize = 64 * 1024;
 
@@ -115,7 +119,9 @@ fn render_stats(stderr: &str) -> Option<RenderStats> {
 
 /// Returns true for the progress lines workers print for the harness rather than for readers.
 pub fn is_marker(line: &str) -> bool {
-    line.starts_with(STAGE_MARKER) || line.starts_with(STATS_MARKER)
+    line.starts_with(STAGE_MARKER)
+        || line.starts_with(STATS_MARKER)
+        || line.starts_with(TARGET_MARKER)
 }
 
 fn tail(text: &str, limit: usize) -> String {

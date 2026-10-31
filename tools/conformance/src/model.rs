@@ -193,6 +193,9 @@ pub struct RenderStats {
     pub nesting: Option<usize>,
     /// Milliseconds spent replaying the recording onto the Skia raster.
     pub replay_ms: Option<u128>,
+    /// Milliseconds the web renderer spent in the browser, from opening the document to
+    /// the settled page with its annotation layer.
+    pub web_ms: Option<u128>,
 }
 
 impl RenderStats {
@@ -202,11 +205,13 @@ impl RenderStats {
         self.replay_cost = other.replay_cost.or(self.replay_cost);
         self.nesting = other.nesting.or(self.nesting);
         self.replay_ms = other.replay_ms.or(self.replay_ms);
+        self.web_ms = other.web_ms.or(self.web_ms);
     }
 
-    /// Returns the Safe-PDF render time in milliseconds, when both steps finished.
+    /// Returns the Safe-PDF render time in milliseconds, when every step finished.
     pub fn total_ms(&self) -> Option<u128> {
-        self.record_ms?.checked_add(self.replay_ms?)
+        self.web_ms
+            .or_else(|| self.record_ms?.checked_add(self.replay_ms?))
     }
 }
 

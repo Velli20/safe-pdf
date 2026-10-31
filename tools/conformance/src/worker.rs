@@ -6,6 +6,7 @@ use crate::{
     process::{STAGE_MARKER, STATS_MARKER},
     reference, regions, safe_render,
     stream_graph::StreamGraph,
+    web_render::{self, WebEndpoints},
 };
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
@@ -50,6 +51,8 @@ pub struct PageJob<'a> {
     pub reference_images: Option<&'a Path>,
     /// Writes the Safe-PDF image even when the page matches or has no reference.
     pub write_safe: bool,
+    /// Renders with the web renderer in this browser, annotations included, instead of Skia.
+    pub web: Option<&'a WebEndpoints>,
 }
 
 fn stage(name: &str) {
@@ -303,7 +306,7 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
     output.size = [width, height];
 
     stage("reference-render");
-    let config = reference::config(width, height)?;
+    let config = reference::config(width, height, job.web.is_some())?;
     let reference_image = match (golden, &reference_page) {
         (Some(golden), _) => golden,
         (None, Some(Ok(page))) => reference::render(page, &config)
@@ -323,44 +326,28 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
         (None, None) => Err("no reference renderer".to_owned()),
     };
 
-    stage("safe-record");
     let renderer = safe_document.map(PdfRenderer::new);
-    let started = Instant::now();
-    let recorded = renderer
-        .as_ref()
-        .map_err(|error| anyhow!("{error}"))
-        .and_then(|renderer| safe_render::record(renderer, job.page, width, height));
-    let recording = recorded.as_ref().ok().map(|recorded| recorded.recording());
-    report_stats(&RenderStats {
-        record_ms: Some(started.elapsed().as_millis()),
-        replay_cost: recording.map(|recording| recording.replay_cost()),
-        nesting: recording.map(|recording| recording.nesting()),
-        replay_ms: None,
-    })?;
-
-    stage("safe-replay");
-    let started = Instant::now();
-    let safe_image = recorded.and_then(|recorded| safe_render::replay(&recorded, width, height));
-    report_stats(&RenderStats {
-        replay_ms: Some(started.elapsed().as_millis()),
-        ..RenderStats::default()
-    })?;
+    let safe_image = match job.web {
+        Some(endpoints) => render_web(job, endpoints, &renderer, &bytes, width, height)?,
+        None => render_skia(&renderer, job.page, width, height)?,
+    };
 
     let prefix = format!("p{}", job.page);
     match (&reference_image, &safe_image) {
         (Ok(reference_image), Ok(safe_image)) => {
             stage("compare");
-            // Golden images draw annotations and form fields; Safe-PDF's render does not.
-            let ignore = if job.pdfium.is_none() && job.reference_images.is_none() {
-                renderer
-                    .as_ref()
-                    .ok()
-                    .and_then(|renderer| renderer.document().get_page(job.page))
-                    .map(|page| annotation_boxes(page, width, height))
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
+            // Golden images draw annotations and form fields; the Skia render does not.
+            let ignore =
+                if job.pdfium.is_none() && job.reference_images.is_none() && job.web.is_none() {
+                    renderer
+                        .as_ref()
+                        .ok()
+                        .and_then(|renderer| renderer.document().get_page(job.page))
+                        .map(|page| annotation_boxes(page, width, height))
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
             let mut comparison = compare::compare(reference_image, safe_image, &ignore)?;
             let mut traced = None;
             if comparison.metrics.mismatch > job.tolerance {
@@ -470,6 +457,62 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
     }
     println!("{}", serde_json::to_string(&output)?);
     Ok(())
+}
+
+/// Records the page and replays it onto a Skia raster, reporting each step's cost as it
+/// finishes. The outer error is the harness's; the inner one is Safe-PDF's.
+fn render_skia(
+    renderer: &Result<PdfRenderer>,
+    page: usize,
+    width: u32,
+    height: u32,
+) -> Result<Result<RgbaImage>> {
+    stage("safe-record");
+    let started = Instant::now();
+    let recorded = renderer
+        .as_ref()
+        .map_err(|error| anyhow!("{error}"))
+        .and_then(|renderer| safe_render::record(renderer, page, width, height));
+    let recording = recorded.as_ref().ok().map(|recorded| recorded.recording());
+    report_stats(&RenderStats {
+        record_ms: Some(started.elapsed().as_millis()),
+        replay_cost: recording.map(|recording| recording.replay_cost()),
+        nesting: recording.map(|recording| recording.nesting()),
+        ..RenderStats::default()
+    })?;
+
+    stage("safe-replay");
+    let started = Instant::now();
+    let image = recorded.and_then(|recorded| safe_render::replay(&recorded, width, height));
+    report_stats(&RenderStats {
+        replay_ms: Some(started.elapsed().as_millis()),
+        ..RenderStats::default()
+    })?;
+    Ok(image)
+}
+
+/// Renders the page with the web renderer in the browser, annotations included. A document
+/// Safe-PDF could not read keeps its read error. The outer error is the harness's; the inner
+/// one is Safe-PDF's.
+fn render_web(
+    job: &PageJob<'_>,
+    endpoints: &WebEndpoints,
+    renderer: &Result<PdfRenderer>,
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<Result<RgbaImage>> {
+    if let Err(error) = renderer {
+        return Ok(Err(anyhow!("{error}")));
+    }
+    let captured = web_render::capture(endpoints, bytes, job.password, job.page, width, height);
+    if let Ok((_, web_ms)) = &captured {
+        report_stats(&RenderStats {
+            web_ms: Some(*web_ms),
+            ..RenderStats::default()
+        })?;
+    }
+    Ok(captured.map(|(image, _)| image))
 }
 
 /// Returns the name of the content-stream graph written for a page.

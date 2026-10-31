@@ -46,6 +46,38 @@ when its revision differs from the pinned one.
   command line tools.
 - **No prebuilt downloads.** The harness never downloads prebuilt PDFium binaries.
 
+## Web renderer
+
+`--renderer web` checks the browser stack instead of the Skia renderer: `pdf-web` draws
+the page content on a Canvas 2D (`pdf-graphics-web`), and its annotation layer
+(`crates/pdf-web/js`) draws annotations and form fields over it, as in the web viewer. The
+reference is PDFium's render of page content, annotations and form fields, so annotation areas
+are compared too.
+
+```sh
+cargo conformance run --corpus pdfium --renderer web --reference pdfium
+cargo conformance render <pdf> --renderer web            # one page
+```
+
+- **Needs.** A Chrome or Chromium installed on the machine (found in the usual places, or
+  `--chrome <path>` / `CHROME_PATH`), the `wasm32-unknown-unknown` target and
+  `wasm-bindgen-cli 0.2.100`. Nothing is downloaded. Set `CONFORMANCE_CHROME_NO_SANDBOX=1`
+  where Chrome's sandbox cannot start, such as CI containers.
+- **How it runs.** The run builds `examples/web-canvas` with
+  `cargo xtask web-canvas --profile release`, serves it with a harness page on a loopback
+  port, and starts one headless Chrome. Each page worker opens its own tab, renders the page
+  fitted to the reference size (one CSS pixel per reference pixel), and screenshots it over the
+  DevTools protocol. The worker's time limit covers the tab; a killed worker's tab is closed, and
+  Chrome is relaunched when it stops answering.
+- **Reports.** The web renderer writes its own report to `target/conformance/<corpus>-web/`
+  with its own baseline (`baselines/<corpus>-web.json`), viewer (`/conformance/pdfium-web/` on
+  Pages) and issues. Its signatures carry `[web]` after the status (`mismatch: [web] …`), so
+  they never merge with the Skia renderer's clusters. `show`, `accept` and `read-diff` take
+  `--renderer web`. `issues` and `repro` take report names such as `--corpus pdfium-web`.
+- **Evidence.** Draw lists, glyph bounds and content-stream listings come from the Skia
+  pipeline's trace of the same page content; annotation differences have no draws.
+- **CI.** On `main`, the PDFium corpus is rendered by both renderers.
+
 ## Text rasterization
 
 PDFium and Safe-PDF rasterize text differently, so glyph edges differ on almost every page
@@ -82,14 +114,21 @@ cargo conformance accept --corpus pdfjs                    # record the last run
 cargo conformance repro <issue key or case id>             # rerun an issue's cases, no setup needed
 cargo conformance verify <issue key>                       # exits 0 once no case fails that way
 cargo conformance render <pdf> [--page N]                  # one local PDF, no corpus needed
+cargo conformance render <pdf> --all-pages                 # every page, in parallel (--jobs)
+cargo conformance run --corpus pdfium --renderer web       # browser stack with annotations
 ```
 
-`render` runs one page of any PDF through the same worker as `run`. It writes the Safe-PDF
-image, the page's content-stream graph and `summary.md` to
-`target/conformance/render/<file>/`, prints how long each Safe-PDF step took, and exits
-non-zero when the page fails. Pass `--reference <png>` to compare against an image such as a
-PDFium render. Otherwise it compares against `--pdfium <lib>`, `PDFIUM_LIBRARY` or the
-`setup-pdfium` build when one exists.
+`render` runs pages of any PDF through the same worker as `run`: the first page, each
+`--page N` (the flag repeats) or every page with `--all-pages`, `--jobs` at a time. It writes
+each page's Safe-PDF image and content-stream graph, one `summary.md` covering every page and a
+`report.json` array to `target/conformance/render/<file>/`. It prints how long each Safe-PDF
+step took and exits non-zero when any page fails. Pass `--reference <png>` to compare a single
+page against an image such as a PDFium render. Otherwise it compares against
+`--pdfium <lib>`, `PDFIUM_LIBRARY` or the `setup-pdfium` build when one exists.
+
+`run` schedules every page as its own job: it first reads each document, then renders the
+selected pages of all documents on `--jobs` workers, so the pages of a long document render
+side by side.
 
 ## Fixing an issue
 

@@ -10,8 +10,11 @@ name: Conformance
 #   at the base commit when the cache has none), and `read-comment` posts one comment on the
 #   pull request when a document reads worse or better, updating it on later pushes.
 # - `conformance` (main and manual runs only): renders the PDFium corpus and compares every
-#   page with PDFium. The pdf.js corpus is not rendered; only its reads are reported.
-# - On main, `issues` files, updates and closes GitHub issues from the PDFium render and the
+#   page with PDFium. The pdf.js corpus is not rendered; only its reads are reported. The
+#   `web` renderer renders the PDFium corpus again with the browser stack (pdf-web, Canvas 2D
+#   plus its annotation layer) in the runner's preinstalled Chrome, and compares it with
+#   PDFium's render of page content, annotations and form fields.
+# - On main, `issues` files, updates and closes GitHub issues from the PDFium renders and the
 #   pdf.js reads together, and the viewers are published to GitHub Pages under /conformance/.
 #
 # Pull requests are never failed by these jobs. See tools/conformance/README.md.
@@ -238,7 +241,7 @@ jobs:
         run: .github/scripts/conformance-read-comment.sh diffs
 
   conformance:
-    name: Conformance (${{ matrix.corpus }})
+    name: Conformance (${{ matrix.corpus }}, ${{ matrix.renderer }})
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 150
@@ -249,6 +252,12 @@ jobs:
       matrix:
         # pdf.js pages are not rendered; the `reads` job covers that corpus.
         corpus: [pdfium]
+        renderer: [skia, web]
+    env:
+      # Report name: target/conformance/<report>/, baselines/<report>.json, Pages path.
+      REPORT: ${{ matrix.corpus }}${{ matrix.renderer == 'web' && '-web' || '' }}
+      # Chrome's sandbox cannot start on the runner.
+      CONFORMANCE_CHROME_NO_SANDBOX: "1"
 
     steps:
       - name: Checkout repository
@@ -256,6 +265,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.renderer == 'web' && 'wasm32-unknown-unknown' || '' }}
 
       - name: Install system dependencies (Skia)
         run: |
@@ -268,10 +279,24 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
             target/regression
-          key: ${{ runner.os }}-conformance-${{ hashFiles('**/Cargo.lock') }}
+            target/release
+            target/wasm32-unknown-unknown
+          key: ${{ runner.os }}-conformance-${{ matrix.renderer }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-conformance-
+            ${{ runner.os }}-conformance-${{ matrix.renderer }}-
+
+      # Must match the `wasm-bindgen = "=0.2.100"` pin in the workspace; the web renderer
+      # builds examples/web-canvas with `cargo xtask web-canvas`, which refuses other versions.
+      - name: Install wasm-bindgen-cli
+        if: matrix.renderer == 'web'
+        run: |
+          if ! command -v wasm-bindgen >/dev/null || [ "$(wasm-bindgen --version)" != "wasm-bindgen 0.2.100" ]; then
+            cargo install wasm-bindgen-cli --version 0.2.100 --locked --force
+          fi
+          wasm-bindgen --version
+          google-chrome --version
 
       # Pinned corpus revisions live in corpus.rs; the pdf.js cache also keeps downloaded
       # linked files so their (often slow or dead) hosts are only contacted on a miss.
@@ -307,23 +332,23 @@ jobs:
         id: run
         run: |
           set +e
-          cargo conformance run --corpus ${{ matrix.corpus }} --reference pdfium --jobs 4
+          cargo conformance run --corpus ${{ matrix.corpus }} --renderer ${{ matrix.renderer }} --reference pdfium --jobs 4
           status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
           if [ "$status" != 0 ]; then
-            echo "::warning ::Conformance regressions against tools/conformance/baselines/${{ matrix.corpus }}.json; see the job summary and the conformance-${{ matrix.corpus }} artifact."
+            echo "::warning ::Conformance regressions against tools/conformance/baselines/${REPORT}.json; see the job summary and the conformance-${REPORT} artifact."
           fi
 
       - name: Job summary
         if: always()
         run: |
-          triage="target/conformance/${{ matrix.corpus }}/TRIAGE.md"
+          triage="target/conformance/${REPORT}/TRIAGE.md"
           if [ -f "$triage" ]; then
             {
               sed '/^## Failure clusters/,$d' "$triage"
               if [ "${{ github.ref }}" = refs/heads/main ]; then
                 owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-                echo "Viewer (published when the run finishes): https://${owner}.github.io/${{ github.event.repository.name }}/conformance/${{ matrix.corpus }}/"
+                echo "Viewer (published when the run finishes): https://${owner}.github.io/${{ github.event.repository.name }}/conformance/${REPORT}/"
                 echo
               fi
               echo "## Largest failure clusters"
@@ -335,26 +360,26 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: conformance-${{ matrix.corpus }}
-          path: target/conformance/${{ matrix.corpus }}
+          name: conformance-${{ env.REPORT }}
+          path: target/conformance/${{ env.REPORT }}
           retention-days: 14
           if-no-files-found: warn
 
       - name: Record baseline
         if: github.event_name == 'workflow_dispatch' && inputs.accept
-        run: cargo conformance accept --corpus ${{ matrix.corpus }}
+        run: cargo conformance accept --corpus ${{ matrix.corpus }} --renderer ${{ matrix.renderer }}
 
       - name: Upload baseline
         if: github.event_name == 'workflow_dispatch' && inputs.accept
         uses: actions/upload-artifact@v4
         with:
-          name: conformance-baseline-${{ matrix.corpus }}
-          path: tools/conformance/baselines/${{ matrix.corpus }}.json
+          name: conformance-baseline-${{ env.REPORT }}
+          path: tools/conformance/baselines/${{ env.REPORT }}.json
 
       - name: Fail on regressions
         if: steps.run.outputs.status != '0' && env.FAIL_ON_EVENTS != '' && contains(env.FAIL_ON_EVENTS, github.event_name)
         run: |
-          echo "::error ::Conformance regressions against tools/conformance/baselines/${{ matrix.corpus }}.json (exit ${{ steps.run.outputs.status }}); see the job summary and the conformance-${{ matrix.corpus }} artifact."
+          echo "::error ::Conformance regressions against tools/conformance/baselines/${REPORT}.json (exit ${{ steps.run.outputs.status }}); see the job summary and the conformance-${REPORT} artifact."
           exit 1
 
   # Both corpora are reported together, so one cause found in both is one issue and an issue
@@ -402,8 +427,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           args=""
-          # The PDFium corpus is rendered; the pdf.js corpus is only read.
-          for report in conformance-pdfium reads-pdfjs; do
+          # The PDFium corpus is rendered by both renderers; the pdf.js corpus is only read.
+          for report in conformance-pdfium reads-pdfjs conformance-pdfium-web; do
             corpus=${report#*-}
             if [ -f "reports/$report/index.json" ]; then
               mkdir -p target/conformance
@@ -456,8 +481,8 @@ jobs:
         run: |
           mkdir -p site/conformance
           items=""
-          # The PDFium corpus is rendered; the pdf.js corpus is only read.
-          for report in conformance-pdfium reads-pdfjs; do
+          # The PDFium corpus is rendered by both renderers; the pdf.js corpus is only read.
+          for report in conformance-pdfium reads-pdfjs conformance-pdfium-web; do
             corpus=${report#*-}
             src="reports/$report"
             if [ ! -f "$src/index.html" ]; then
@@ -487,7 +512,7 @@ jobs:
           </head>
           <body>
           <h1>Safe-PDF conformance</h1>
-          <p>Safe-PDF compared with PDFium, both rendering page content without annotations or form fields.</p>
+          <p>Safe-PDF compared with PDFium. <code>pdfium</code> and <code>pdfjs</code> render page content without annotations or form fields; <code>pdfium-web</code> renders the browser stack with its annotation layer, compared with PDFium's render of annotations and form fields.</p>
           <ul>$items</ul>
           <p>Commit <a href="$commit_url">${GITHUB_SHA::7}</a> · <a href="$run_url">workflow run</a> · $(date -u '+%Y-%m-%d %H:%M UTC')</p>
           <p><a href="../">Safe-PDF web viewer</a></p>

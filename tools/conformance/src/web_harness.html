@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Safe-PDF web renderer conformance</title>
+<link rel="stylesheet" href="./pkg/annotation_layer.css">
+<style>
+  html, body { margin: 0; background: #fff; overflow: hidden; }
+  #page { position: relative; background: #fff; }
+  #page > * { position: absolute; top: 0; left: 0; }
+  #content { z-index: 0; }
+  #annotations { z-index: 1; }
+</style>
+</head>
+<body>
+<div id="page"><canvas id="content"></canvas><div id="annotations"></div></div>
+<script type="module">
+// Renders one page the way the web viewer does, page content on the canvas and the
+// annotation layer over it, sized so one CSS pixel is one reference pixel. The harness
+// screenshots the page once `conformanceRender` resolves.
+import init, { WebDocument } from './pkg/web_canvas_example.js';
+import { NativeAnnotationLayer } from './pkg/annotation_layer.js';
+
+const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+
+window.conformanceReady = init();
+
+// Resolves to `{ entries }` once the page has settled, or `{ error }` when Safe-PDF fails.
+window.conformanceRender = async (base64, password, pageIndex, width, height) => {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  let snapshot;
+  try {
+    const pdf = new WebDocument(bytes, password ?? undefined);
+    snapshot = pdf.render_fitted(pageIndex, document.getElementById('content'), width, height);
+  } catch (error) {
+    return { error: String(error) };
+  }
+  const page = document.getElementById('page');
+  Object.assign(page.style, { width: `${width}px`, height: `${height}px` });
+  const canvas = document.getElementById('content');
+  Object.assign(canvas.style, { width: `${width}px`, height: `${height}px` });
+  const root = document.getElementById('annotations');
+  Object.assign(root.style, { width: `${width}px`, height: `${height}px` });
+  const entries = JSON.parse(snapshot.entries_json());
+  new NativeAnnotationLayer(root, {
+    onCommand: () => Promise.reject(new Error('read-only')),
+    toPageDelta: () => [0, 0],
+  }).reconcile({
+    entries,
+    annotationRevision: snapshot.content_revision(),
+    viewportRevision: snapshot.viewport_revision(),
+  });
+  snapshot.free();
+  await document.fonts.ready;
+  await frame();
+  await frame();
+  return { entries: entries.length };
+};
+</script>
+</body>
+</html>

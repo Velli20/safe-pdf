@@ -8,6 +8,7 @@ use crate::{
     report_index::{self, Index, IndexCase},
     run::RunOptions,
     signature, source_hints,
+    web_render::WEB_RENDER_STAGE,
 };
 use anyhow::Result;
 use std::{fmt::Write as _, fs, path::Path};
@@ -360,6 +361,7 @@ pub fn render_line(process: &ProcessEvidence) -> Option<String> {
         (Some(stats), _) => Some(render_text(stats)),
         // Stopped while recording, before reporting anything.
         (None, Some("safe-record")) => Some(render_text(&RenderStats::default())),
+        (None, Some(WEB_RENDER_STAGE)) => Some("web render did not finish".to_owned()),
         (None, _) => None,
     }
 }
@@ -372,6 +374,9 @@ pub fn render_text(stats: &RenderStats) -> String {
         Some(ms) => format!("{name} {ms} ms"),
         None => format!("{name} did not finish"),
     };
+    if stats.web_ms.is_some() {
+        return step("web render", stats.web_ms);
+    }
     let mut parts = vec![step("record", stats.record_ms)];
     if stats.record_ms.is_some() {
         parts.push(step("replay", stats.replay_ms));

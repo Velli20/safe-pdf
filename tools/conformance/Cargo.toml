@@ -22,6 +22,7 @@ pdf-renderer = { path = "../../crates/pdf-renderer", features = ["error-backtrac
 pdf-resources = { path = "../../crates/pdf-resources" }
 pdf-utils = { path = "../../crates/pdf-utils", features = ["error-backtrace"] }
 anyhow = "1"
+base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 md-5 = "0.10"
@@ -31,4 +32,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 skia-safe = { version = "0.91.1", default-features = false, features = ["binary-cache"] }
+tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
 walkdir = "2"

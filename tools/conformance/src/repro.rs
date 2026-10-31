@@ -10,7 +10,7 @@
 //! reference images, which still shows whether a crash, timeout or error is gone.
 
 use crate::{
-    corpus::{self, CorpusKind},
+    corpus::{self, CorpusKind, Target},
     fetch, github, issue_body, issue_state,
     model::Status,
     process::{DEFAULT_MEMORY_LIMIT_MIB, Limits},
@@ -33,9 +33,9 @@ use std::{
 pub struct ReproArgs {
     /// Issue key (`conf2-…`) or a case id.
     pub target: String,
-    /// Corpora to look in (default: all).
+    /// Reports to look in, such as `pdfium` or `pdfium-web` (default: all).
     #[arg(long, value_enum)]
-    pub corpus: Vec<CorpusKind>,
+    pub corpus: Vec<Target>,
     /// Cases rerun at most per corpus.
     #[arg(long, default_value_t = 10)]
     pub max_cases: usize,
@@ -52,7 +52,7 @@ pub struct ReproArgs {
 
 /// What the target selects in one corpus.
 struct Selection {
-    kind: CorpusKind,
+    kind: Target,
     /// Published report the cases come from; `None` when they come from the issue itself.
     index: Option<Index>,
     /// Corpus revision the cases were checked at.
@@ -93,7 +93,7 @@ pub fn run(args: &ReproArgs) -> Result<bool> {
         None => origin_repo()?,
     };
     let kinds = if args.corpus.is_empty() {
-        vec![CorpusKind::Pdfium, CorpusKind::Pdfjs]
+        Target::ALL.to_vec()
     } else {
         args.corpus.clone()
     };
@@ -141,11 +141,11 @@ pub fn run(args: &ReproArgs) -> Result<bool> {
     Ok(fixed)
 }
 
-fn work_dir(kind: CorpusKind) -> PathBuf {
+fn work_dir(kind: Target) -> PathBuf {
     corpus::state_dir().join("repro").join(kind.as_str())
 }
 
-fn select(kind: CorpusKind, index: Index, target: &str, limit: usize) -> Option<Selection> {
+fn select(kind: Target, index: Index, target: &str, limit: usize) -> Option<Selection> {
     let clusters: Vec<_> = index
         .clusters
         .iter()
@@ -172,7 +172,7 @@ fn select(kind: CorpusKind, index: Index, target: &str, limit: usize) -> Option<
         revision: index
             .corpus_revision
             .clone()
-            .unwrap_or_else(|| kind.source().1.to_owned()),
+            .unwrap_or_else(|| kind.corpus.source().1.to_owned()),
         scale: index.scale,
         tolerance: index.tolerance,
         read_only: index.read_only,
@@ -209,7 +209,7 @@ fn issue_selections(repo: &str, key: &str, limit: usize) -> Result<Vec<Selection
     };
     let mut selections: Vec<Selection> = Vec::new();
     for case in summary.cases {
-        let Ok(kind) = CorpusKind::from_str(&case.corpus, true) else {
+        let Ok(kind) = Target::from_str(&case.corpus, true) else {
             continue;
         };
         println!(
@@ -230,7 +230,7 @@ fn issue_selections(repo: &str, key: &str, limit: usize) -> Result<Vec<Selection
                         .pdf
                         .as_deref()
                         .and_then(revision_in)
-                        .unwrap_or_else(|| kind.source().1)
+                        .unwrap_or_else(|| kind.corpus.source().1)
                         .to_owned(),
                     scale: 1.5,
                     tolerance: 0.002,
@@ -282,7 +282,7 @@ fn rerun(args: &ReproArgs, repo: &str, selection: &Selection) -> Result<bool> {
     );
     let dir = work_dir(kind);
     let root = dir.join("corpus");
-    checkout(kind, &root, &selection.revision, &selection.cases)?;
+    checkout(kind.corpus, &root, &selection.revision, &selection.cases)?;
     let references = dir.join("references");
     let base = issue_body::pages_url(repo, kind);
     let published = selection
@@ -308,7 +308,9 @@ fn rerun(args: &ReproArgs, repo: &str, selection: &Selection) -> Result<bool> {
         }
     }
     let options = RunOptions {
-        kind,
+        kind: kind.corpus,
+        renderer: kind.renderer,
+        chrome: None,
         root,
         explicit_root: true,
         filter: None,
