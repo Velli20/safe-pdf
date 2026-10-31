@@ -47,6 +47,25 @@ impl Rect<f32> {
         }
     }
 
+    /// Returns this rectangle with each edge moved to the nearest pixel boundary, keeping
+    /// at least one pixel per axis, so thin bars stay solid and the gaps between them
+    /// stay open.
+    pub fn snapped_to_pixels(&self) -> Self {
+        let snap = |start: f32, end: f32| {
+            let (low, high) = (start.round(), end.round());
+            (low, if high == low { low + 1.0 } else { high })
+        };
+        let rect = self.normalized();
+        let (left, right) = snap(rect.left, rect.right);
+        let (top, bottom) = snap(rect.top, rect.bottom);
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
     pub fn width(&self) -> f32 {
         self.right - self.left
     }

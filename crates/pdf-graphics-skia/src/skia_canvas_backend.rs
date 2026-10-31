@@ -449,6 +449,34 @@ fn make_paint(
     paint
 }
 
+impl SkiaCanvasBackend<'_> {
+    /// Fills `path` without anti-aliasing, snapped to the nearest pixel edges, when it is
+    /// a rectangle aligned with the pixel grid, so thin bars stay solid and separate.
+    /// Returns whether the path was such a rectangle.
+    ///
+    /// See [`pdf_graphics::rect::Rect::snapped_to_pixels`].
+    fn fill_pixel_rect(
+        &mut self,
+        path: &CanvasPath<'_>,
+        paint: &mut skia_safe::Paint,
+    ) -> Result<bool, PdfCanvasError> {
+        let canvas = self.surface.canvas();
+        let to_pixels = from_skia_matrix(&canvas.local_to_device_as_3x3());
+        let Some(rect) = path.axis_aligned_rect(&to_pixels)? else {
+            return Ok(false);
+        };
+        let rect = rect.snapped_to_pixels();
+        // The snapped edges are whole numbers, so rounding only changes the type.
+        let pixels = skia_safe::Rect::new(rect.left, rect.top, rect.right, rect.bottom).round();
+        paint.set_anti_alias(false);
+        canvas.save();
+        canvas.reset_matrix();
+        canvas.draw_irect(pixels, paint);
+        canvas.restore();
+        Ok(true)
+    }
+}
+
 impl CanvasBackend for SkiaCanvasBackend<'_> {
     /// Fills the supplied device-space path using the requested paint and fill rule.
     fn fill_path(
@@ -459,9 +487,12 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
+        let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
+        if shader.is_none() && self.fill_pixel_rect(path, &mut paint)? {
+            return Ok(());
+        }
         let mut sk_path = to_skia_path(path, true)?;
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
-        let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
         if let Some(shader_spec) = shader {
             let mapping = from_skia_matrix(&self.surface.canvas().local_to_device_as_3x3());
             paint.set_shader(to_skia_shader(shader_spec, &mapping)?);

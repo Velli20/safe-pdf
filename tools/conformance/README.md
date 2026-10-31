@@ -66,8 +66,9 @@ image's darkness lies within the range of the other's 3x3 neighbourhood, widened
 `GLYPH_COVERAGE_SLACK` (40%, in `src/compare.rs`). Then it decides pass or fail again. Accepted
 pixels are drawn yellow.
 
-Differences outside glyph bounds are compared as before, including vector shapes such as barcode
-bars that PDFium snaps to pixels. Missing or extra glyphs, wrong glyphs or colors, and shapes off
+Differences outside glyph bounds are compared as before, including vector shapes. Safe-PDF snaps
+a solid axis-aligned rectangle to whole pixels without anti-aliasing, so barcode bars stay crisp,
+though their edges may still differ from PDFium's by a pixel. Missing or extra glyphs, wrong glyphs or colors, and shapes off
 by more than a pixel still count.
 
 ## Commands

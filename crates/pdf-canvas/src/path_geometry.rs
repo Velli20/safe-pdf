@@ -4,6 +4,7 @@ use std::sync::Arc;
 use pdf_graphics::{
     pdf_path::{PathVerb, PdfPath},
     point::Point,
+    rect::Rect,
     transform::{Transform, TransformError},
 };
 
@@ -122,6 +123,50 @@ impl<'a> CanvasPath<'a> {
                 PathVerb::Close => PathVerb::Close,
             })
         })
+    }
+
+    /// Returns the rectangle this path covers when it is one subpath of four corners whose
+    /// edges stay horizontal and vertical after mapping through `to_pixels`.
+    ///
+    /// The subpath may end with a segment back to its first corner and may be closed;
+    /// curves, further subpaths, or more corners yield `None`.
+    pub fn axis_aligned_rect(&self, to_pixels: &Transform) -> Result<Option<Rect>, TransformError> {
+        let mut corners = [Point::default(); 5];
+        let mut len = 0_usize;
+        let mut closed = false;
+        for verb in self.verbs() {
+            let point = match verb? {
+                _ if closed => return Ok(None),
+                PathVerb::MoveTo { x, y } if len == 0 => Point::new(x, y),
+                PathVerb::LineTo { x, y } if len > 0 => Point::new(x, y),
+                PathVerb::Close if len > 0 => {
+                    closed = true;
+                    continue;
+                }
+                _ => return Ok(None),
+            };
+            let Some(corner) = corners.get_mut(len) else {
+                return Ok(None);
+            };
+            *corner = to_pixels.try_map_point(point)?;
+            len = len.saturating_add(1);
+        }
+        let [a, b, c, d] = match (len, corners) {
+            (4, [a, b, c, d, _]) => [a, b, c, d],
+            (5, [a, b, c, d, e]) if e == a => [a, b, c, d],
+            _ => return Ok(None),
+        };
+        let horizontal_first = a.y == b.y && b.x == c.x && c.y == d.y && d.x == a.x;
+        let vertical_first = a.x == b.x && b.y == c.y && c.x == d.x && d.y == a.y;
+        Ok((horizontal_first || vertical_first).then(|| {
+            Rect {
+                left: a.x,
+                top: a.y,
+                right: c.x,
+                bottom: c.y,
+            }
+            .normalized()
+        }))
     }
 
     /// Materializes a mutable device-space path, validating all mapped coordinates.
