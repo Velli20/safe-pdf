@@ -13,6 +13,7 @@ use pdf_graphics::{
     size::Size, transform::Transform,
 };
 use pdf_shading::paint::ShadingPaint;
+use skia_safe::RoundOut;
 
 /// Native allocation, conversion, and mask replay failures.
 #[derive(Debug, thiserror::Error)]
@@ -449,6 +450,35 @@ fn make_paint(
     paint
 }
 
+impl SkiaCanvasBackend<'_> {
+    /// Fills `path` without anti-aliasing over every pixel it touches when it is a
+    /// rectangle aligned with the pixel grid, at least one pixel wide and tall, so thin
+    /// bars stay solid. Returns whether the path was such a rectangle.
+    fn fill_pixel_rect(
+        &mut self,
+        path: &CanvasPath<'_>,
+        paint: &mut skia_safe::Paint,
+    ) -> Result<bool, PdfCanvasError> {
+        let canvas = self.surface.canvas();
+        let to_pixels = from_skia_matrix(&canvas.local_to_device_as_3x3());
+        let Some(rect) = path.axis_aligned_rect(&to_pixels)? else {
+            return Ok(false);
+        };
+        let mut pixels: skia_safe::IRect =
+            skia_safe::Rect::new(rect.left, rect.top, rect.right, rect.bottom).round_out();
+        if pixels.is_empty() {
+            pixels.right = pixels.left.saturating_add(1).max(pixels.right);
+            pixels.bottom = pixels.top.saturating_add(1).max(pixels.bottom);
+        }
+        paint.set_anti_alias(false);
+        canvas.save();
+        canvas.reset_matrix();
+        canvas.draw_irect(pixels, paint);
+        canvas.restore();
+        Ok(true)
+    }
+}
+
 impl CanvasBackend for SkiaCanvasBackend<'_> {
     /// Fills the supplied device-space path using the requested paint and fill rule.
     fn fill_path(
@@ -459,9 +489,12 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
+        let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
+        if shader.is_none() && self.fill_pixel_rect(path, &mut paint)? {
+            return Ok(());
+        }
         let mut sk_path = to_skia_path(path, true)?;
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
-        let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
         if let Some(shader_spec) = shader {
             let mapping = from_skia_matrix(&self.surface.canvas().local_to_device_as_3x3());
             paint.set_shader(to_skia_shader(shader_spec, &mapping)?);
