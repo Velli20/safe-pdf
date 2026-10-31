@@ -830,7 +830,8 @@ export type Ink = {
  */
 style: ResolvedStyle | null,
 /**
- * Nonempty open strokes, each containing at least two points.
+ * Open strokes, each containing at least two points; empty only for source ink drawn
+ * from its appearance.
  */
 strokes: Array<Polyline>,
 /**
@@ -1565,7 +1566,7 @@ opacity: number,
 subtype: Array<number>,
 /**
  * The optional annotation rectangle from `/Rect`, in PDF page user space
- * where `bottom` is the lower `y` edge. Edges keep their source values and
+ * where `top` is the lower `y` edge. Edges keep their source values and
  * order, so inverted rectangles are preserved rather than normalized.
  */
 rect: Rect | null,

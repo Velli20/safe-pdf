@@ -939,7 +939,7 @@ pub struct SourceAnnotation {
     /// The annotation subtype name.
     pub subtype: Arc<[u8]>,
     /// The optional annotation rectangle from `/Rect`, in PDF page user space
-    /// where `bottom` is the lower `y` edge. Edges keep their source values and
+    /// where `top` is the lower `y` edge. Edges keep their source values and
     /// order, so inverted rectangles are preserved rather than normalized.
     pub rect: Option<Rect>,
     /// The optional annotation contents.

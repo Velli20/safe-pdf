@@ -1,5 +1,5 @@
-//! Source appearances a host paints in place of a native presentation: widgets on the
-//! page canvas, stamp artwork into the stamp's own presentation.
+//! Source appearances a host paints in place of a native presentation: widgets and ink
+//! without strokes on the page canvas, stamp artwork into the stamp's own presentation.
 use crate::{
     engine::DocumentView, entry::ControlKind, kind::AnnotationKind as Kind,
     layer_error::AnnotationLayerResult, models::Annotation, projection, subtypes::Stamp,
@@ -25,11 +25,12 @@ pub struct PaintedAppearance {
 }
 
 impl PaintedAppearance {
-    /// The appearance of a displayed widget whose control is painted, or `None`.
+    /// The appearance of a displayed annotation painted on the canvas, or `None`.
     ///
-    /// Checkboxes and radio options draw their on-state while live Core state selects
-    /// them and `Off` otherwise; push buttons draw their source `/AS`. A `pressed`
-    /// widget draws its down appearance when it has one.
+    /// Widgets whose control is `painted` draw their live state: checkboxes and radio
+    /// options their on-state while live Core state selects them and `Off` otherwise, push
+    /// buttons their source `/AS`. A `pressed` widget draws its down appearance when it has
+    /// one. Ink without strokes draws its source `/AS` state.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
@@ -41,6 +42,9 @@ impl PaintedAppearance {
     ) -> AnnotationLayerResult<Option<Self>> {
         if !projection::displayed(annotation, optional_content) {
             return Ok(None);
+        }
+        if annotation.is_drawn_from_appearance() {
+            return Ok(drawn_from_appearance(annotation));
         }
         widget(annotation, view, pressed)
     }
@@ -98,6 +102,18 @@ fn widget(
         state,
         rect: rect.normalized(),
     }))
+}
+
+/// Ink without strokes draws its source normal appearance, selected by `/AS`, at its
+/// source rectangle.
+fn drawn_from_appearance(annotation: &Annotation) -> Option<PaintedAppearance> {
+    let source = annotation.source()?;
+    let normal = source.appearance.as_ref()?.normal.clone()?;
+    Some(PaintedAppearance {
+        normal,
+        state: source.appearance_state.as_deref().map(<[u8]>::to_vec),
+        rect: source.rect?.normalized(),
+    })
 }
 
 /// A stamp draws its source normal appearance, selected by `/AS`, at its live bounds.
