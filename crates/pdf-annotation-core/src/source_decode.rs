@@ -9,7 +9,7 @@ use crate::pdf_data::{
     BorderEffectStyle, BorderStyle, BorderStyleName, NativeAnnotation, PageAnnotations,
     SourceAnnotation,
 };
-use pdf_graphics::{DashPattern, rect::Rect};
+use pdf_graphics::DashPattern;
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
     ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
@@ -46,16 +46,8 @@ impl FromPdfObject for SourceAnnotation {
                 .clamp(0.0, 1.0),
             // `/Subtype` identifies the concrete annotation kind.
             subtype: dictionary.required(b"Subtype")?,
-            // `/Rect` is `[left, bottom, right, top]`; keep the source edges
-            // as-is so inverted rectangles survive decoding.
-            rect: dictionary
-                .optional::<[f32; 4]>(b"Rect")?
-                .map(|[left, bottom, right, top]| Rect {
-                    left,
-                    top,
-                    right,
-                    bottom,
-                }),
+            // The source edges are kept as-is so inverted rectangles survive decoding.
+            rect: dictionary.optional(b"Rect")?,
             // `/Contents` is descriptive text only; like PDFium, a malformed value (e.g. an
             // integer) is treated as absent rather than rejecting the annotation.
             contents: dictionary.lenient(b"Contents"),

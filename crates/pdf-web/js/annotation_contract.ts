@@ -1566,7 +1566,7 @@ opacity: number,
 subtype: Array<number>,
 /**
  * The optional annotation rectangle from `/Rect`, in PDF page user space
- * where `bottom` is the lower `y` edge. Edges keep their source values and
+ * where `top` is the lower `y` edge. Edges keep their source values and
  * order, so inverted rectangles are preserved rather than normalized.
  */
 rect: Rect | null,
