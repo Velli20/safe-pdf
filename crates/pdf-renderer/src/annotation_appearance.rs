@@ -48,7 +48,8 @@ impl PdfRenderer {
                 .resources
                 .as_ref()
                 .map(|resources| resources.get())
-                .transpose()?;
+                .transpose()?
+                .or_else(|| page.resources.clone());
             canvas.render_content_stream(
                 &form.content_stream,
                 Some(matrix),
