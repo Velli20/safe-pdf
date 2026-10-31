@@ -8,6 +8,7 @@
 
 use bytes::Bytes;
 use pdf_ccitt::CCITTFaxParams;
+use pdf_jbig2::document::DecodeLimits;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     object_kind::ObjectKind, object_variant::ObjectVariant, pdf_array::PdfArray,
@@ -187,11 +188,11 @@ impl FromPdfObject for FilterPipeline {
                         };
                         (|| {
                             let width = context
-                                .optional::<u16>(b"Width")?
+                                .optional::<u32>(b"Width")?
                                 .filter(|width| *width != 0)
                                 .ok_or_else(missing_dimensions_error)?;
                             let height = context
-                                .optional::<u16>(b"Height")?
+                                .optional::<u32>(b"Height")?
                                 .filter(|height| *height != 0)
                                 .ok_or_else(missing_dimensions_error)?;
                             let globals = entry
@@ -280,8 +281,8 @@ pub(crate) enum FilterParams {
     Dct { height: Option<u16> },
     /// JBIG2Decode's page size, the image's dimensions, and its shared segments.
     Jbig2 {
-        width: u16,
-        height: u16,
+        width: u32,
+        height: u32,
         globals: Option<StreamObject>,
     },
 }
@@ -373,12 +374,12 @@ impl Filter {
                     height,
                     globals,
                 },
-            ) => pdf_jbig2::decode(
-                data,
-                *width,
-                *height,
-                globals.as_ref().map(StreamObject::raw_data),
-            )?,
+            ) => {
+                let globals = globals.as_ref().map(StreamObject::raw_data);
+                let encoded = data.len().saturating_add(globals.map_or(0, <[u8]>::len));
+                let limits = DecodeLimits::for_pdf_image(*width, *height, encoded);
+                pdf_jbig2::decode_pdf(data, *width, *height, globals, limits)?
+            }
             (Self::CCITTFaxDecode, FilterParams::Ccitt(params)) => pdf_ccitt::decode(data, params)?,
             (Self::Unsupported(name), _) => {
                 return Err(FilterError::UnsupportedFilter(
