@@ -5,6 +5,7 @@ use crate::{
     annotation_overlay::{PreparedAnnotationOverlay, WebAnnotationOverlay},
     error::{WebError as Error, WebResult},
 };
+use pdf_annotation_core::PaintedAppearance;
 use pdf_document::document::PdfDocument;
 use pdf_graphics::size::Size;
 use pdf_graphics_web::WebCanvasBackend;
@@ -91,6 +92,43 @@ impl WebPageRenderer {
                 content_revision,
                 annotations,
             })
+        })();
+        if result.is_err() {
+            // Keep the original rendering failure if cleanup also fails.
+            let _ = backend.abort_page();
+        }
+        result
+    }
+
+    /// Draws `artwork` of page `page_index` through `viewport`, the artwork layout from
+    /// [`WebViewport::for_artwork`] that `backend` was created with.
+    ///
+    /// # Errors
+    /// Returns backend, PDF interpretation, or viewport mismatch errors. Failed rendering
+    /// aborts backend page state.
+    pub fn render_artwork(
+        &self,
+        page_index: u32,
+        artwork: &PaintedAppearance,
+        backend: &mut WebCanvasBackend,
+        viewport: &WebViewport,
+        overlay: &WebAnnotationOverlay,
+    ) -> WebResult<()> {
+        if backend.viewport() != viewport.canvas() {
+            return Err(Error::InvalidInput(
+                "backend canvas viewport differs from artwork",
+            ));
+        }
+        let result = (|| {
+            let index = usize::try_from(page_index).map_err(|_| Error::ResourceLimit)?;
+            self.renderer.render_annotation_appearances(
+                backend,
+                index,
+                viewport.page(),
+                overlay.optional_content(),
+                std::slice::from_ref(artwork),
+            )?;
+            Ok(backend.finish_page()?)
         })();
         if result.is_err() {
             // Keep the original rendering failure if cleanup also fails.

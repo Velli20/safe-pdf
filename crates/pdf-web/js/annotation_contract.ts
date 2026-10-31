@@ -1927,6 +1927,11 @@ has_popup: boolean,
  */
 control: WidgetControl | null,
 /**
+ * Whether the host draws this entry's source appearance into the entry itself,
+ * rendered on request for the entry's id, in place of a label.
+ */
+artwork: boolean,
+/**
  * Local-unit outlines for markup, ink, and geometric annotations.
  */
 shapes: Array<Shape>, };

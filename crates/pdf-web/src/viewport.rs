@@ -4,7 +4,9 @@ use crate::error::{WebError as Error, WebResult};
 use num_traits::ToPrimitive;
 use pdf_canvas::{CanvasViewport, PageViewport, ViewportError};
 use pdf_document::page::PdfPage;
-use pdf_graphics::{point::Point, size::Size, transform::Transform, viewport::pixel_extent};
+use pdf_graphics::{
+    point::Point, rect::Rect, size::Size, transform::Transform, viewport::pixel_extent,
+};
 
 /// Validated page viewport using the engine's existing affine and geometry types.
 ///
@@ -68,6 +70,31 @@ impl WebViewport {
             Size::new(backing(size.width)?, backing(size.height)?),
             device_to_css,
             revision,
+        )
+    }
+
+    /// Lays out page-space `rect` in its own unrotated local box, one device unit per page
+    /// unit with the origin at its top-left corner, sampled at this viewport's pixel
+    /// density. This is the box an annotation entry's CSS transform places, so artwork
+    /// drawn through it follows the entry's rotation and zoom.
+    pub fn for_artwork(&self, rect: &Rect) -> WebResult<Self> {
+        let page_to_backing = self
+            .canvas
+            .device_to_backing()
+            .post_concatenated(self.page.page_to_device());
+        let rect = rect.normalized();
+        let local = Size::new(rect.width(), rect.height());
+        let backing = |extent: f32, scale: f32| {
+            pixel_extent(extent * scale).ok_or(Error::InvalidInput("artwork bounds"))
+        };
+        Self::new(
+            PageViewport::new(rect, 0, local)?,
+            Size::new(
+                backing(local.width, page_to_backing.sx.hypot(page_to_backing.ky))?,
+                backing(local.height, page_to_backing.kx.hypot(page_to_backing.sy))?,
+            ),
+            Transform::identity(),
+            self.revision,
         )
     }
 

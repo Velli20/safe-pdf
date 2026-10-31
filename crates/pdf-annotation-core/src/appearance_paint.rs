@@ -1,8 +1,9 @@
-//! Source appearances a host paints on the page canvas in place of a native control or
-//! native shapes.
+//! Source appearances a host paints in place of a native presentation: widgets and ink
+//! without strokes on the page canvas, stamp artwork into the stamp's own presentation.
 use crate::{
-    engine::DocumentView, entry::ControlKind, layer_error::AnnotationLayerResult,
-    models::Annotation, projection, widget_control,
+    engine::DocumentView, entry::ControlKind, kind::AnnotationKind as Kind,
+    layer_error::AnnotationLayerResult, models::Annotation, projection, subtypes::Stamp,
+    widget_control,
 };
 use pdf_graphics::rect::Rect;
 use pdf_object_reader::pdf_object::PdfObject;
@@ -11,8 +12,7 @@ use pdf_optional_content::OptionalContentState;
 /// The `/Off` appearance state of an unselected button.
 const OFF_STATE: &[u8] = b"Off";
 
-/// One annotation's normal appearance, selected by its live state and placed at its
-/// rectangle.
+/// One annotation's normal appearance, selected by its live state and placed at its rectangle.
 #[derive(Clone, Debug)]
 pub struct PaintedAppearance {
     /// The resolved `/AP /N` entry, or `/D` while pressed: a drawing stream, or a
@@ -43,60 +43,86 @@ impl PaintedAppearance {
         if !projection::displayed(annotation, optional_content) {
             return Ok(None);
         }
-        let Some(state) = annotation.painted_state(view)? else {
-            return Ok(None);
+        if annotation.is_drawn_from_appearance() {
+            return Ok(drawn_from_appearance(annotation));
+        }
+        widget(annotation, view, pressed)
+    }
+
+    /// The source artwork of a displayed stamp at its live bounds, or `None`.
+    ///
+    /// The host draws it into the stamp's own presentation rather than the page
+    /// canvas, so the artwork moves with the stamp while it is dragged.
+    pub(crate) fn artwork(
+        annotation: &Annotation,
+        optional_content: &OptionalContentState,
+    ) -> Option<Self> {
+        let Kind::Stamp(payload) = &annotation.content else {
+            return None;
         };
-        let Some(source) = annotation.source() else {
-            return Ok(None);
-        };
-        let appearance = source.appearance.as_ref();
-        let down = appearance
-            .and_then(|ap| ap.down.clone())
-            .filter(|_| pressed);
-        let (Some(normal), Some(rect)) = (
-            down.or_else(|| appearance.and_then(|ap| ap.normal.clone())),
-            source.rect,
-        ) else {
-            return Ok(None);
-        };
-        Ok(Some(Self {
-            normal,
-            state,
-            rect: rect.normalized(),
-        }))
+        if !projection::displayed(annotation, optional_content) {
+            return None;
+        }
+        stamp(annotation, payload)
     }
 }
 
-impl Annotation {
-    /// The appearance state to paint, or `None` when the annotation is not painted.
-    ///
-    /// # Errors
-    /// Returns an error when a widget's bound field is missing.
-    fn painted_state(
-        &self,
-        view: &DocumentView<'_>,
-    ) -> AnnotationLayerResult<Option<Option<Vec<u8>>>> {
-        let source_state = || {
-            self.source()
-                .and_then(|source| source.appearance_state.as_deref())
-                .map(<[u8]>::to_vec)
-        };
-        if self.is_drawn_from_appearance() {
-            return Ok(Some(source_state()));
-        }
-        let Some(field) = projection::widget_field(self, view)? else {
-            return Ok(None);
-        };
-        let Some(control) = widget_control::control(self, field).filter(|c| c.painted) else {
-            return Ok(None);
-        };
-        Ok(Some(match control.kind {
-            ControlKind::Button => source_state(),
-            _ if control.checked => self
-                .source()
-                .and_then(|source| source.button_on_state().ok())
-                .map(<[u8]>::to_vec),
-            _ => Some(OFF_STATE.to_vec()),
-        }))
-    }
+/// A widget whose control is painted draws its appearance for the live field state.
+fn widget(
+    annotation: &Annotation,
+    view: &DocumentView<'_>,
+    pressed: bool,
+) -> AnnotationLayerResult<Option<PaintedAppearance>> {
+    let Some(field) = projection::widget_field(annotation, view)? else {
+        return Ok(None);
+    };
+    let Some(control) = widget_control::control(annotation, field).filter(|c| c.painted) else {
+        return Ok(None);
+    };
+    let Some(source) = annotation.source() else {
+        return Ok(None);
+    };
+    let appearance = source.appearance.as_ref();
+    let down = appearance
+        .and_then(|ap| ap.down.clone())
+        .filter(|_| pressed);
+    let (Some(normal), Some(rect)) = (
+        down.or_else(|| appearance.and_then(|ap| ap.normal.clone())),
+        source.rect,
+    ) else {
+        return Ok(None);
+    };
+    let state = match control.kind {
+        ControlKind::Button => source.appearance_state.as_deref().map(<[u8]>::to_vec),
+        _ if control.checked => source.button_on_state().ok().map(<[u8]>::to_vec),
+        _ => Some(OFF_STATE.to_vec()),
+    };
+    Ok(Some(PaintedAppearance {
+        normal,
+        state,
+        rect: rect.normalized(),
+    }))
+}
+
+/// Ink without strokes draws its source normal appearance, selected by `/AS`, at its
+/// source rectangle.
+fn drawn_from_appearance(annotation: &Annotation) -> Option<PaintedAppearance> {
+    let source = annotation.source()?;
+    let normal = source.appearance.as_ref()?.normal.clone()?;
+    Some(PaintedAppearance {
+        normal,
+        state: source.appearance_state.as_deref().map(<[u8]>::to_vec),
+        rect: source.rect?.normalized(),
+    })
+}
+
+/// A stamp draws its source normal appearance, selected by `/AS`, at its live bounds.
+fn stamp(annotation: &Annotation, stamp: &Stamp) -> Option<PaintedAppearance> {
+    let source = annotation.source()?;
+    let normal = source.appearance.as_ref()?.normal.clone()?;
+    Some(PaintedAppearance {
+        normal,
+        state: source.appearance_state.as_deref().map(<[u8]>::to_vec),
+        rect: stamp.bounds.normalized(),
+    })
 }

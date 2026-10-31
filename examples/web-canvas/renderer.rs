@@ -116,6 +116,34 @@ impl WebDocument {
         self.repaint(page_index, canvas)
     }
 
+    /// Draws the source artwork of `annotation` (a decimal Core id) into `canvas`, sized
+    /// to the annotation's local box at its mounted page's pixel density. The host shows
+    /// the canvas inside the annotation, so the artwork moves with it while dragged.
+    /// Leaves `canvas` untouched when the annotation has no artwork.
+    pub fn render_artwork(
+        &self,
+        page_index: u32,
+        annotation: &str,
+        canvas: web_sys::HtmlCanvasElement,
+    ) -> Result<(), JsValue> {
+        let id = AnnotationId(annotation.parse().map_err(error)?);
+        let Some(artwork) = self.overlay.artwork(id) else {
+            return Ok(());
+        };
+        let viewport = self
+            .viewports
+            .get(&page_index)
+            .ok_or_else(|| error("unmounted page"))?
+            .for_artwork(&artwork.rect)
+            .map_err(error)?;
+        let mut backend =
+            WebCanvasBackend::new(canvas, *viewport.canvas(), WebCanvasOptions::default())
+                .map_err(error)?;
+        self.renderer
+            .render_artwork(page_index, &artwork, &mut backend, &viewport, &self.overlay)
+            .map_err(error)
+    }
+
     /// Renders the page fitted to exactly `width` x `height` canvas pixels, one CSS pixel
     /// each, unrotated; the annotations are placed in the same pixels.
     pub fn render_fitted(
