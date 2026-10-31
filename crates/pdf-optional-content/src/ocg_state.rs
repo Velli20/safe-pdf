@@ -1,5 +1,7 @@
 //! Optional content group state retained from `SetOCGState` actions.
 
+use std::sync::Arc;
+
 /// Owned optional content group target of a `SetOCGState` `/State` element.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
@@ -20,7 +22,7 @@ pub enum OcgTarget {
     /// A direct `/OCG` dictionary; only its `/Name` is retained.
     Dictionary {
         /// The group's `/Name` bytes.
-        name: Vec<u8>,
+        name: Arc<[u8]>,
     },
 }
 

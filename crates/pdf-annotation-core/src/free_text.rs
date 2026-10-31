@@ -1,4 +1,6 @@
 //! Plain free-text editing without PDF appearance-stream generation.
+use std::sync::Arc;
+
 use crate::{
     error::ValidationError,
     models::Point,
@@ -141,7 +143,7 @@ pub struct FreeText {
     /// Current text and border style.
     pub style: FreeTextStyle,
     /// Rich text retained without claiming a rich-text editor or renderer.
-    pub rich_contents: Option<Vec<u8>>,
+    pub rich_contents: Option<Arc<[u8]>>,
     /// Optional open two- or three-point callout, translated with the annotation.
     pub callout: Option<Polyline>,
     /// Retained border effect, unsupported by the plain-text editor.

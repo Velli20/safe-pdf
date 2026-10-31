@@ -2,8 +2,6 @@
 //!
 //! Parsing is strict for any entry that is present: malformed values fail the
 //! annotation. Referenced resources are retained as leaves, never fetched.
-use std::sync::Arc;
-
 use crate::error::SourceDecodeError;
 use crate::metadata::AnnotationFlags;
 use crate::pdf_data::{
@@ -47,7 +45,7 @@ impl FromPdfObject for SourceAnnotation {
                 .unwrap_or(1.0)
                 .clamp(0.0, 1.0),
             // `/Subtype` identifies the concrete annotation kind.
-            subtype: dictionary.required::<Arc<[u8]>>(b"Subtype")?.to_vec(),
+            subtype: dictionary.required(b"Subtype")?,
             // `/Rect` is `[left, bottom, right, top]`; keep the source edges
             // as-is so inverted rectangles survive decoding.
             rect: dictionary
@@ -60,19 +58,13 @@ impl FromPdfObject for SourceAnnotation {
                 }),
             // `/Contents` is descriptive text only; like PDFium, a malformed value (e.g. an
             // integer) is treated as absent rather than rejecting the annotation.
-            contents: dictionary
-                .lenient::<Arc<[u8]>>(b"Contents")
-                .map(|bytes| bytes.to_vec()),
-            name: dictionary
-                .optional::<Arc<[u8]>>(b"NM")?
-                .map(|bytes| bytes.to_vec()),
+            contents: dictionary.lenient(b"Contents"),
+            name: dictionary.optional(b"NM")?,
             flags: dictionary
                 .optional::<i32>(b"F")?
                 .map(AnnotationFlags::from_bits_retain),
             appearance: dictionary.optional(b"AP")?,
-            appearance_state: dictionary
-                .optional::<Arc<[u8]>>(b"AS")?
-                .map(|bytes| bytes.to_vec()),
+            appearance_state: dictionary.optional(b"AS")?,
             border: dictionary.optional(b"Border")?,
             color: dictionary.optional(b"C")?,
             struct_parent: dictionary.optional(b"StructParent")?,
@@ -177,15 +169,9 @@ impl FromPdfObject for AppearanceCharacteristics {
             rotation: dictionary.optional(b"R")?,
             border_color: dictionary.optional(b"BC")?,
             background_color: dictionary.optional(b"BG")?,
-            normal_caption: dictionary
-                .optional::<Arc<[u8]>>(b"CA")?
-                .map(|bytes| bytes.to_vec()),
-            rollover_caption: dictionary
-                .optional::<Arc<[u8]>>(b"RC")?
-                .map(|bytes| bytes.to_vec()),
-            alternate_caption: dictionary
-                .optional::<Arc<[u8]>>(b"AC")?
-                .map(|bytes| bytes.to_vec()),
+            normal_caption: dictionary.optional(b"CA")?,
+            rollover_caption: dictionary.optional(b"RC")?,
+            alternate_caption: dictionary.optional(b"AC")?,
         })
     }
 }
