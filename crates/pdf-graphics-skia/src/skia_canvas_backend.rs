@@ -13,7 +13,6 @@ use pdf_graphics::{
     size::Size, transform::Transform,
 };
 use pdf_shading::paint::ShadingPaint;
-use skia_safe::RoundOut;
 
 /// Native allocation, conversion, and mask replay failures.
 #[derive(Debug, thiserror::Error)]
@@ -451,9 +450,9 @@ fn make_paint(
 }
 
 impl SkiaCanvasBackend<'_> {
-    /// Fills `path` without anti-aliasing over every pixel it touches when it is a
-    /// rectangle aligned with the pixel grid, at least one pixel wide and tall, so thin
-    /// bars stay solid. Returns whether the path was such a rectangle.
+    /// Fills `path` without anti-aliasing over the whole pixels it covers when it is a
+    /// rectangle aligned with the pixel grid (see [`pdf_graphics::rect::Rect::snapped_to_pixels`]), so thin
+    /// bars stay solid and separate. Returns whether the path was such a rectangle.
     fn fill_pixel_rect(
         &mut self,
         path: &CanvasPath<'_>,
@@ -464,12 +463,9 @@ impl SkiaCanvasBackend<'_> {
         let Some(rect) = path.axis_aligned_rect(&to_pixels)? else {
             return Ok(false);
         };
-        let mut pixels: skia_safe::IRect =
-            skia_safe::Rect::new(rect.left, rect.top, rect.right, rect.bottom).round_out();
-        if pixels.is_empty() {
-            pixels.right = pixels.left.saturating_add(1).max(pixels.right);
-            pixels.bottom = pixels.top.saturating_add(1).max(pixels.bottom);
-        }
+        let rect = rect.snapped_to_pixels();
+        // The snapped edges are whole numbers, so rounding only changes the type.
+        let pixels = skia_safe::Rect::new(rect.left, rect.top, rect.right, rect.bottom).round();
         paint.set_anti_alias(false);
         canvas.save();
         canvas.reset_matrix();
