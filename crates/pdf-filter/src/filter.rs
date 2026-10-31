@@ -176,14 +176,30 @@ impl Filter {
     /// Returns [`FilterError::Decompression`] if the zlib decompression fails,
     /// which can happen if the data is corrupted or not valid zlib-compressed data.
     pub(crate) fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
+        /// Most output capacity reserved before decoding. The reservation guesses
+        /// a 4:1 ratio; the cap keeps a small stream that expands enormously from
+        /// reserving memory up front instead of growing as it decodes.
+        const MAX_RESERVED_CAPACITY: usize = 16 << 20;
+
         let mut decoder = flate2::read::ZlibDecoder::new(stream_data);
-        let mut decoded = Vec::new();
+        let mut decoded = Vec::with_capacity(
+            stream_data
+                .len()
+                .saturating_mul(4)
+                .min(MAX_RESERVED_CAPACITY),
+        );
 
         use std::io::Read;
 
         decoder
             .read_to_end(&mut decoded)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
+
+        // The decoded data outlives this call, so give back a reservation that
+        // a low-ratio stream left mostly unused.
+        if decoded.capacity() / 2 > decoded.len() {
+            decoded.shrink_to_fit();
+        }
 
         Ok(decoded)
     }
