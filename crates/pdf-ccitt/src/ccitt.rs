@@ -162,41 +162,82 @@ fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
     max_pos
 }
 
-/// Locate reference pixels b1 and b2 for the 2D row decoder.
+/// The last reference-line search for each color during one coding line.
 ///
-/// * `a0` – current position on the coding line (`None` = before first pixel).
-/// * `a0color` – color of the current coding line at `a0`.
-///
-/// Returns `(b1, b2)` where each may equal `columns` when not found.
-fn find_b1_b2(ref_row: &[u8], columns: usize, a0: Option<usize>, a0color: bool) -> (usize, usize) {
-    // Color of the reference line at position a0 (white when before first pixel).
-    let first_bit = match a0 {
-        None => true,
-        Some(pos) => ref_pixel(ref_row, pos),
-    };
+/// Searches on one coding line start ever further right, so a search that
+/// starts inside a range an earlier search of the same color already scanned
+/// has the same answer. Remembering it keeps a wide line with long uniform
+/// runs linear, instead of rescanning each run once per changing element.
+#[derive(Debug, Default, Clone, Copy)]
+struct ReferenceSearch {
+    /// `(start, result)` of the last search for a white pixel.
+    white: Option<(usize, usize)>,
+    /// `(start, result)` of the last search for a black pixel.
+    black: Option<(usize, usize)>,
+}
 
-    let search_start = a0.map_or(0, |pos| pos.saturating_add(1));
-    let mut b1 = find_bit(ref_row, columns, search_start, !first_bit);
-
-    if b1 >= columns {
-        return (columns, columns);
+impl ReferenceSearch {
+    /// [`find_bit`] on the reference line, reusing the last search of the
+    /// same color when `start_pos` lies within the range it scanned.
+    fn find_bit(&mut self, row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
+        let slot = if bit {
+            &mut self.white
+        } else {
+            &mut self.black
+        };
+        if let Some((start, result)) = *slot
+            && start <= start_pos
+            && start_pos <= result
+        {
+            return result;
+        }
+        let result = find_bit(row, max_pos, start_pos, bit);
+        *slot = Some((start_pos, result));
+        result
     }
 
-    // If the reference line at a0 has the same color as the coding line at a0,
-    // the first transition found above leads to the wrong color.  Advance once
-    // more so that b1 ends up at the nearest opposite-color transition.
-    let mut cur_first_bit = first_bit;
-    if first_bit != a0color {
-        b1 = find_bit(ref_row, columns, b1.saturating_add(1), first_bit);
-        cur_first_bit = !cur_first_bit;
-    }
+    /// Locate reference pixels b1 and b2 for the 2D row decoder.
+    ///
+    /// * `a0` – current position on the coding line (`None` = before first pixel).
+    /// * `a0color` – color of the current coding line at `a0`.
+    ///
+    /// Returns `(b1, b2)` where each may equal `columns` when not found.
+    fn find_b1_b2(
+        &mut self,
+        ref_row: &[u8],
+        columns: usize,
+        a0: Option<usize>,
+        a0color: bool,
+    ) -> (usize, usize) {
+        // Color of the reference line at position a0 (white when before first pixel).
+        let first_bit = match a0 {
+            None => true,
+            Some(pos) => ref_pixel(ref_row, pos),
+        };
 
-    if b1 >= columns {
-        return (columns, columns);
-    }
+        let search_start = a0.map_or(0, |pos| pos.saturating_add(1));
+        let mut b1 = self.find_bit(ref_row, columns, search_start, !first_bit);
 
-    let b2 = find_bit(ref_row, columns, b1.saturating_add(1), cur_first_bit);
-    (b1, b2)
+        if b1 >= columns {
+            return (columns, columns);
+        }
+
+        // If the reference line at a0 has the same color as the coding line at a0,
+        // the first transition found above leads to the wrong color.  Advance once
+        // more so that b1 ends up at the nearest opposite-color transition.
+        let mut cur_first_bit = first_bit;
+        if first_bit != a0color {
+            b1 = self.find_bit(ref_row, columns, b1.saturating_add(1), first_bit);
+            cur_first_bit = !cur_first_bit;
+        }
+
+        if b1 >= columns {
+            return (columns, columns);
+        }
+
+        let b2 = self.find_bit(ref_row, columns, b1.saturating_add(1), cur_first_bit);
+        (b1, b2)
+    }
 }
 
 /// Decode one Huffman-encoded run length from `reader`.
@@ -612,13 +653,14 @@ impl<'reader, 'data> CcittDecoder<'reader, 'data> {
     fn decode_2d_row(&mut self) -> Result<(), CcittDecodeError> {
         let mut a0: Option<usize> = None;
         let mut a0color = true;
+        let mut search = ReferenceSearch::default();
 
         loop {
             if self.reader.exhausted() {
                 return Err(CcittDecodeError::UnexpectedEof);
             }
 
-            let (b1, b2) = find_b1_b2(&self.ref_row, self.columns, a0, a0color);
+            let (b1, b2) = search.find_b1_b2(&self.ref_row, self.columns, a0, a0color);
             let mode = read_2d_mode(self.reader).ok_or(CcittDecodeError::UnexpectedEof)?;
 
             match mode {
@@ -857,7 +899,7 @@ mod tests {
     fn find_b1_b2_all_white_ref() {
         let ref_row = [0xffu8; 1]; // all white
         // a0=None (before first pixel), white coding, ref all white → no opposite-color transition
-        let (b1, b2) = find_b1_b2(&ref_row, 8, None, true);
+        let (b1, b2) = ReferenceSearch::default().find_b1_b2(&ref_row, 8, None, true);
         assert_eq!((b1, b2), (8, 8)); // not found
     }
 
@@ -866,7 +908,7 @@ mod tests {
         let ref_row = [0b1111_0000u8]; // white 0-3, black 4-7
         // a0=None coding=white: first opposite (black) in ref at 4 → b1=4
         // then next same-color (black) after b1 → no white → b2=8
-        let (b1, b2) = find_b1_b2(&ref_row, 8, None, true);
+        let (b1, b2) = ReferenceSearch::default().find_b1_b2(&ref_row, 8, None, true);
         assert_eq!(b1, 4);
         assert_eq!(b2, 8);
     }
