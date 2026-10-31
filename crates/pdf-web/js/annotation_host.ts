@@ -16,5 +16,8 @@ export interface AnnotationLayerCallbacks {
   onAction?(entry: WebAnnotationEntry, trigger: ActionTrigger): void;
   /** Reports a canvas-painted widget held down (`true`) or released (`false`). */
   onPress?(entry: WebAnnotationEntry, pressed: boolean): void;
+  /** Draws the source artwork of an entry with `artwork` into `canvas`, sizing it to the
+   * entry's local box at the page's pixel density. */
+  renderArtwork?(entry: WebAnnotationEntry, canvas: HTMLCanvasElement): void;
   onError?(error: unknown): void;
 }

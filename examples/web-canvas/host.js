@@ -228,6 +228,7 @@ class PdfViewer {
         toPageDelta: (entry, dx, dy) => Array.from(this.pdf.page_delta(entry.page, dx, dy)),
         onAction: (entry, trigger) => this.handleAnnotationAction(entry, trigger),
         onPress: (entry, pressed) => this.pressAnnotation(entry, pressed),
+        renderArtwork: (entry, canvas) => this.pdf.render_artwork(entry.page, String(entry.id), canvas),
         onError: error => this.showError(error),
       });
     }
