@@ -3,6 +3,7 @@ use pdf_canvas::{
     pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas,
 };
 use pdf_document::document::PdfDocument;
+use pdf_object_reader::ObjectReadError;
 use pdf_optional_content::OptionalContentState;
 use pdf_text_engine::FontSystem;
 use std::sync::Arc;
@@ -59,6 +60,8 @@ pub enum PdfRendererError {
     PageNotFound(usize),
     #[error("PDF canvas error: {0}")]
     PdfCanvasError(#[source] pdf_utils::TracedError<pdf_canvas::error::PdfCanvasError>),
+    #[error("Failed to read page content stream: {0}")]
+    ContentStream(#[from] ObjectReadError),
 }
 
 impl From<PdfCanvasError> for PdfRendererError {
@@ -73,7 +76,7 @@ impl PdfRendererError {
     pub fn trace(&self) -> Option<&pdf_utils::ErrorTrace> {
         match self {
             Self::PdfCanvasError(error) => Some(error.trace()),
-            Self::PageNotFound(_) => None,
+            Self::PageNotFound(_) | Self::ContentStream(_) => None,
         }
     }
 }
@@ -146,8 +149,8 @@ impl PdfRenderer {
                 PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?
                     .with_image_cache(Arc::clone(&self.image_cache))
                     .with_optional_content(&optional_content);
-            if let Some(cs) = &page.contents {
-                canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
+            if let Some(cs) = self.document.content_stream(page)? {
+                canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
             }
         }
         Ok(())
@@ -174,8 +177,8 @@ impl PdfRenderer {
         .with_image_cache(Arc::clone(&self.image_cache))
         .with_text_recording()
         .with_optional_content(optional_content);
-        if let Some(cs) = &page.contents {
-            canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
+        if let Some(cs) = self.document.content_stream(page)? {
+            canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
         }
         Ok(PageTextLayout::new(canvas.take_text_glyphs()))
     }
@@ -199,8 +202,8 @@ impl PdfRenderer {
                     .with_image_cache(Arc::clone(&self.image_cache))
                     .with_text_recording()
                     .with_optional_content(&optional_content);
-            if let Some(cs) = &page.contents {
-                canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
+            if let Some(cs) = self.document.content_stream(page)? {
+                canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
             }
             canvas.take_text_glyphs()
         };

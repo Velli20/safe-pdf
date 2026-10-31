@@ -211,8 +211,9 @@ fn revision_5_authenticates_and_decrypts_aes_256_content() {
         .expect("revision 5 user password authenticates");
     let page = document.get_page(0).expect("encrypted PDF contains a page");
     assert_eq!(
-        page.contents
-            .as_ref()
+        document
+            .content_stream(page)
+            .expect("encrypted content stream parses")
             .expect("encrypted content stream is materialized")
             .operators
             .len(),
