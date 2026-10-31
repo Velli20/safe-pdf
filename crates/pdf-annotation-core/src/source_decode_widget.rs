@@ -23,6 +23,7 @@ impl FromPdfObject for WidgetAnnotation {
             field_id,
             field_type: fields.field_type,
             field_name: fields.field_name,
+            partial_names: fields.partial_names,
             alternate_name: fields.alternate_name,
             mapping_name: fields.mapping_name,
             field_flags: fields.field_flags,
@@ -37,6 +38,7 @@ impl FromPdfObject for WidgetAnnotation {
             appearance_characteristics: dictionary.optional(b"MK")?,
             border_style: dictionary.optional(b"BS")?,
             action: dictionary.optional(b"A")?,
+            additional_actions: dictionary.optional(b"AA")?,
         })
     }
 }
@@ -46,6 +48,7 @@ impl FromPdfObject for WidgetAnnotation {
 struct FieldProperties {
     field_type: Option<Arc<[u8]>>,
     field_name: Option<Arc<[u8]>>,
+    partial_names: Vec<Arc<[u8]>>,
     alternate_name: Option<Arc<[u8]>>,
     mapping_name: Option<Arc<[u8]>>,
     field_flags: Option<WidgetFieldFlags>,
@@ -69,10 +72,14 @@ impl FromPdfObject for FieldProperties {
             result => result?,
         }
         .unwrap_or_default();
+        let field_name = dictionary.optional::<Arc<[u8]>>(b"T")?;
+        let mut partial_names = parent.partial_names;
+        partial_names.extend(field_name.clone());
 
         Ok(Self {
             field_type: dictionary.optional(b"FT")?.or(parent.field_type),
-            field_name: dictionary.optional(b"T")?.or(parent.field_name),
+            partial_names,
+            field_name: field_name.or(parent.field_name),
             alternate_name: dictionary.optional(b"TU")?.or(parent.alternate_name),
             mapping_name: dictionary.optional(b"TM")?.or(parent.mapping_name),
             field_flags: dictionary

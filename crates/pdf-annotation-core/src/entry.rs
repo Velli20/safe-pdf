@@ -1,6 +1,7 @@
 //! Backend-neutral annotation entries: Core values projected into one viewport.
 use crate::shapes::Shape;
 use crate::{
+    actions::ActionTrigger,
     fields::{ChoiceOption, FieldId, OptionId},
     kind::AnnotationKind,
     models::{AnnotationId, Revision},
@@ -112,6 +113,8 @@ pub struct AnnotationEntry {
     pub style: ResolvedStyle,
     /// Host-owned action notification; links fall back to their destination.
     pub action: Option<AnnotationAction>,
+    /// Triggers that run an action; the host reports only these through `perform_action`.
+    pub triggers: Vec<ActionTrigger>,
     /// Live Unicode contents.
     pub text: String,
     /// Displayed subtype name.

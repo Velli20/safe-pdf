@@ -1,8 +1,8 @@
 //! Browser adapter around Core's backend-neutral annotation overlay.
 use crate::{WebViewport, annotation_entry::WebAnnotationEntry, error::WebResult};
 use pdf_annotation_core::{
-    AnnotationCommandRequest, AnnotationOverlay, AnnotationReceipt, OptionalContentReceipt,
-    PaintedAppearance, PreparedAnnotations, models::AnnotationId, pdf_data::AnnotationAction,
+    ActionReceipt, ActionTrigger, AnnotationCommandRequest, AnnotationOverlay, AnnotationReceipt,
+    PaintedAppearance, PreparedAnnotations, models::AnnotationId,
 };
 use pdf_document::{diagnostic::PdfReadDiagnostic, document::PdfDocument};
 use pdf_graphics::{rect::Rect, transform::Transform};
@@ -146,15 +146,18 @@ impl WebAnnotationOverlay {
             .accept_event(command, viewport.map(WebViewport::revision), page_bounds)?)
     }
 
-    /// Applies a `SetOCGState` action to runtime optional content visibility.
+    /// Runs the action `trigger` selects on annotation `id`: hide steps commit one
+    /// Core edit, optional content steps change visibility, and the rest return to
+    /// the host.
     ///
     /// # Errors
-    /// Returns an error when the action is not a `SetOCGState` action.
-    pub fn set_optional_content_state(
+    /// Rejects an unknown annotation and propagates Core errors from the hide edit.
+    pub fn perform_action(
         &mut self,
-        action: &AnnotationAction,
-    ) -> WebResult<OptionalContentReceipt> {
-        Ok(self.overlay.set_optional_content_state(action)?)
+        id: AnnotationId,
+        trigger: ActionTrigger,
+    ) -> WebResult<ActionReceipt> {
+        Ok(self.overlay.perform_action(id, trigger)?)
     }
 
     /// Returns the widget appearances painted on `page`'s canvas under live field state,

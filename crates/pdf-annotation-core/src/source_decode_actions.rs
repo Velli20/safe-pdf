@@ -2,7 +2,7 @@
 use crate::error::SourceDecodeError;
 use crate::pdf_data::{
     AnnotationAction, AnnotationDestination, DestinationTarget, ExplicitDestination,
-    FileSpecification, FileSpecificationDictionary,
+    FileSpecification, FileSpecificationDictionary, HideTarget, WidgetAdditionalActions,
 };
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
@@ -11,12 +11,14 @@ use pdf_object_reader::{
 };
 use pdf_optional_content::{OcgStateEntry, OcgTarget};
 
-/// Reads an action dictionary, such as a link's or widget's `/A` entry.
+/// Reads an action dictionary, such as a link's or widget's `/A` entry, together
+/// with its `/Next` successors. A chain is flattened into one `Sequence` in execution
+/// order; a `/Next` chain that loops back ends at the repeated action.
 impl FromPdfObject for AnnotationAction {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut action = context.dictionary()?;
         let action_type = action.required::<PdfName>(b"S")?;
-        Ok(match action_type.as_ref() {
+        let head = match action_type.as_ref() {
             b"GoTo" => Self::GoTo {
                 destination: action.required(b"D")?,
             },
@@ -66,9 +68,59 @@ impl FromPdfObject for AnnotationAction {
                 duration: action.optional(b"D")?,
             },
             b"GoTo3DView" => Self::GoTo3DView,
+            b"Hide" => Self::Hide {
+                targets: action.optional_list(b"T")?,
+                hide: action.optional(b"H")?.unwrap_or(true),
+            },
             other => Self::Unknown {
                 action_type: Vec::from(other),
             },
+        };
+        let next = match action.optional_list::<Self>(b"Next") {
+            Err(error) if error.is_cyclic_reference() => Vec::new(),
+            result => result?,
+        };
+        if next.is_empty() {
+            return Ok(head);
+        }
+        let mut sequence = vec![head];
+        for action in next {
+            match action {
+                Self::Sequence(actions) => sequence.extend(actions),
+                action => sequence.push(action),
+            }
+        }
+        Ok(Self::Sequence(sequence))
+    }
+}
+
+/// Reads one `/T` entry of a hide action: a field name, or an annotation or field
+/// dictionary identified by the indirect object holding it.
+impl FromPdfObject for HideTarget {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        if !matches!(context.object(), ObjectVariant::Dictionary(_)) {
+            return Ok(Self::FieldName(context.decode()?));
+        }
+        Ok(match context.dictionary()?.object_number() {
+            Some(number) => Self::Object {
+                number: u64::try_from(number).map_err(|_| SourceDecodeError::ResourceLimit)?,
+            },
+            None => Self::Unresolved,
+        })
+    }
+}
+
+/// Reads the pointer and focus triggers of a widget's `/AA` dictionary.
+impl FromPdfObject for WidgetAdditionalActions {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut actions = context.dictionary()?;
+        Ok(Self {
+            cursor_enter: actions.optional(b"E")?,
+            cursor_exit: actions.optional(b"X")?,
+            mouse_down: actions.optional(b"D")?,
+            mouse_up: actions.optional(b"U")?,
+            focus: actions.optional(b"Fo")?,
+            blur: actions.optional(b"Bl")?,
         })
     }
 }

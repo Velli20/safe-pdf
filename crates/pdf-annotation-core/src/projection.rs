@@ -91,6 +91,7 @@ pub(crate) fn project(
         content: annotation.content.clone(),
         href: action.as_ref().and_then(AnnotationAction::href),
         action,
+        triggers: annotation.triggers(),
         text: annotation.text()?,
         subtype: annotation.content.subtype_name().into_owned(),
         unsupported: unsupported_reason(annotation, field),

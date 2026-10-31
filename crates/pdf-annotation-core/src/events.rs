@@ -28,6 +28,11 @@ pub enum Change {
     Updated(AnnotationId),
     /// The annotation is no longer present in the live document.
     Deleted(AnnotationId),
+    /// The hidden flag of these annotations was set or cleared.
+    VisibilityUpdated {
+        /// Every hidden or shown annotation, hidden ones first, in command order.
+        annotations: Vec<AnnotationId>,
+    },
     /// Core assigned this identity to a new shared field.
     FieldCreated(FieldId),
     /// An unreferenced field was removed from the document.
