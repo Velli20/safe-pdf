@@ -53,6 +53,11 @@ impl DecodedSamples {
                 ),
                 None => Self::decode_indexed_rgba(raw_data, metadata, indexed),
             },
+            // A CalRGB image draws its samples as RGB; the calibration applies only to
+            // colors painted in the space.
+            Some(cal_rgb @ ColorSpace::CalRGB(_)) => {
+                Self::decode_direct(raw_data, metadata, cal_rgb.num_color_components())
+            }
             Some(color_space) => match color_space.device_equivalent() {
                 Some(device) => {
                     Self::decode_direct(raw_data, metadata, device.num_color_components())
