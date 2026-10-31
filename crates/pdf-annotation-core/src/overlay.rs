@@ -178,6 +178,13 @@ impl AnnotationOverlay {
             .collect()
     }
 
+    /// Returns the source artwork of the displayed stamp `id` at its live bounds, for
+    /// drawing into the stamp's own presentation; `None` for other annotations.
+    pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
+        let view = self.document.engine.view();
+        PaintedAppearance::artwork(view.annotation(id)?, &self.optional_content)
+    }
+
     /// Validates a GUI context, clamps interactive dragging, and dispatches one edit.
     /// `viewport_revision` and `page_bounds` are required for a mounted target and dragging.
     /// Programmatic operations omit the target and retain Core's unclamped semantics.

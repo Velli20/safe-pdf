@@ -152,6 +152,9 @@ pub struct AnnotationEntry {
     pub has_popup: bool,
     /// Native control for widgets bound to a supported field.
     pub control: Option<WidgetControl>,
+    /// Whether the host draws this entry's source appearance into the entry itself,
+    /// rendered on request for the entry's id, in place of a label.
+    pub artwork: bool,
     /// Local-unit outlines for markup, ink, and geometric annotations.
     pub shapes: Vec<Shape>,
 }

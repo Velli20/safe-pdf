@@ -169,6 +169,12 @@ impl WebAnnotationOverlay {
         Ok(self.overlay.painted_appearances(page, self.pressed)?)
     }
 
+    /// Returns the source artwork of the displayed stamp `id`, drawn into the stamp's
+    /// own presentation; `None` for other annotations.
+    pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
+        self.overlay.artwork(id)
+    }
+
     /// Marks the widget the pointer holds down, or none; the host repaints its page.
     pub fn set_pressed(&mut self, pressed: Option<AnnotationId>) {
         self.pressed = pressed;

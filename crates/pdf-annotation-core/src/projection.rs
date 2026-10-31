@@ -1,5 +1,6 @@
 //! Project borrowed Core values into viewport entries without touching PDF objects.
 use crate::{
+    appearance_paint::PaintedAppearance,
     engine::DocumentView,
     entry::AnnotationEntry,
     fields::{Field, FieldKind},
@@ -85,6 +86,7 @@ pub(crate) fn project(
     let style = annotation.style()?;
     let action = annotation.action();
     let visible = displayed(annotation, optional_content);
+    let artwork = PaintedAppearance::artwork(annotation, optional_content).is_some();
     Ok(AnnotationEntry {
         id: annotation.id,
         page: annotation.page.0,
@@ -94,7 +96,8 @@ pub(crate) fn project(
         triggers: annotation.triggers(),
         text: annotation.text()?,
         subtype: annotation.content.subtype_name().into_owned(),
-        unsupported: unsupported_reason(annotation, field),
+        // Source artwork shows the annotation as authored, so no placeholder is needed.
+        unsupported: unsupported_reason(annotation, field).filter(|_| !artwork),
         bounds: device_regions(annotation, &bounds, viewport)?,
         origin: bounds.origin(),
         size: bounds.size(),
@@ -109,6 +112,7 @@ pub(crate) fn project(
         label: annotation.content.label(),
         has_popup,
         control: field.and_then(|field| widget_control::control(annotation, field)),
+        artwork,
         shapes: shapes::shapes(annotation, &bounds, &style),
         style,
     })

@@ -1,4 +1,5 @@
-//! Paints widget appearance streams over rendered page content.
+//! Paints annotation appearance streams: widgets over rendered page content, and
+//! stamp artwork into a viewport cropped to the stamp.
 use crate::{PdfRenderer, PdfRendererError};
 use pdf_annotation_core::PaintedAppearance;
 use pdf_canvas::{PageViewport, canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};

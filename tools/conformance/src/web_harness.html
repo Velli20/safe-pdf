@@ -28,9 +28,9 @@ window.conformanceReady = init();
 // Resolves to `{ entries }` once the page has settled, or `{ error }` when Safe-PDF fails.
 window.conformanceRender = async (base64, password, pageIndex, width, height) => {
   const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-  let snapshot;
+  let pdf, snapshot;
   try {
-    const pdf = new WebDocument(bytes, password ?? undefined);
+    pdf = new WebDocument(bytes, password ?? undefined);
     snapshot = pdf.render_fitted(pageIndex, document.getElementById('content'), width, height);
   } catch (error) {
     return { error: String(error) };
@@ -45,6 +45,7 @@ window.conformanceRender = async (base64, password, pageIndex, width, height) =>
   new NativeAnnotationLayer(root, {
     onCommand: () => Promise.reject(new Error('read-only')),
     toPageDelta: () => [0, 0],
+    renderArtwork: (entry, canvas) => pdf.render_artwork(entry.page, String(entry.id), canvas),
   }).reconcile({
     entries,
     annotationRevision: snapshot.content_revision(),

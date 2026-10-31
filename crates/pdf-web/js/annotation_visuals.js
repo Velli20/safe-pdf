@@ -50,6 +50,7 @@ export class VisualComponent extends AnnotationComponent {
    * @param {import('./annotation_layer.js').NativeAnnotationLayer} layer */
   constructor(entry, layer) {
     super(entry, entry.content.kind === AnnotationKind.Link ? 'a' : 'div');
+    this.layer = layer;
     this.signature = '';
     if (entry.content.kind === AnnotationKind.Link) this.listen(this.node, 'click', event => {
       if (this.suppressClick) {
@@ -73,10 +74,26 @@ export class VisualComponent extends AnnotationComponent {
       } else node.removeAttribute('href');
       node.tabIndex = 0; node.classList.add('native-link');
     } else if (kind === AnnotationKind.Stamp) {
-      node.textContent = entry.label; node.classList.add('native-stamp');
+      if (entry.artwork) this.drawArtwork();
+      else { node.textContent = entry.label; node.classList.add('native-stamp'); this.signature = ''; }
     } else if (this.signature !== entry.modified_revision) {
       node.replaceChildren(drawSvg(entry));
       this.signature = entry.modified_revision;
     }
+  }
+  /** Draws the source artwork into a canvas that moves with the node. Moves keep the
+   * drawing; a new size or viewport draws a fresh canvas before swapping it in. */
+  drawArtwork() {
+    const { entry, node, layer } = this;
+    const signature = `${entry.size.width}x${entry.size.height}@${layer.snapshot?.viewportRevision}`;
+    if (this.signature === signature) return;
+    const canvas = document.createElement('canvas');
+    canvas.className = 'native-artwork';
+    try {
+      layer.renderArtwork(entry, canvas);
+    } catch (error) { layer.onError(error); return; }
+    node.classList.remove('native-stamp');
+    node.replaceChildren(canvas);
+    this.signature = signature;
   }
 }
