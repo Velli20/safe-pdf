@@ -13,6 +13,8 @@ pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-document = { path = "../pdf-document" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-canvas = { path = "../pdf-canvas" }
+pdf-annotation-core = { path = "../pdf-annotation-core" }
+pdf-resources = { path = "../pdf-resources" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-font = { path = "../pdf-font" }
 pdf-text-engine = { path = "../pdf-text-engine" }

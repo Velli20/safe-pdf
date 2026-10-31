@@ -29,9 +29,26 @@ export class FormControl extends AnnotationComponent {
     if (node instanceof HTMLInputElement && model.input_type) node.type = model.input_type;
     if (node instanceof HTMLButtonElement) node.type = 'button';
     this.bindDraftEvents();
+    this.bindPressEvents();
     this.listen(node, 'click', event => {
       if (this.control().kind === ControlKind.Button) { event.preventDefault(); layer.onAction(this.entry); }
     });
+  }
+
+  /** Reports pointer presses on a canvas-painted widget so the host paints its down appearance. */
+  bindPressEvents() {
+    let pressed = false;
+    const release = () => {
+      if (!pressed) return;
+      pressed = false;
+      this.layer.onPress(this.entry, false);
+    };
+    this.listen(this.node, 'pointerdown', event => {
+      if (event.button !== 0 || !this.control().painted || !this.entry.editable && this.control().kind !== ControlKind.Button) return;
+      pressed = true;
+      this.layer.onPress(this.entry, true);
+    });
+    for (const name of /** @type {const} */ (['pointerup', 'pointercancel', 'pointerleave'])) this.listen(this.node, name, release);
   }
 
   /** @returns {import('./annotation_contract').WidgetControl} */
@@ -119,6 +136,7 @@ export class FormControl extends AnnotationComponent {
 
   update() {
     const p = this.control();
+    this.node.classList.toggle('native-painted', p.painted);
     this.setPending(this.phase === EditPhase.Committing);
     if (p.options) this.updateChoice(p);
     else if (p.input_type === 'checkbox' || p.input_type === 'radio' || p.tag === 'button') this.updateButton(p);
@@ -147,7 +165,7 @@ export class FormControl extends AnnotationComponent {
       // PDF radios in unison may have several checked members; HTML grouping must not override /AS.
       node.name = `pdf-${this.entry.page}-${this.entry.id}`;
     } else if (node instanceof HTMLButtonElement) {
-      node.textContent = p.caption || p.label || 'Button';
+      node.textContent = p.painted ? '' : p.caption || p.label || 'Button';
       node.title = p.caption || p.label;
     }
   }

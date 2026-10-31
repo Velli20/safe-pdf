@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::{metadata::AnnotationFlags, models::Quad};
 use pdf_graphics::{DashPattern, color::Color, polyline::Polyline, rect::Rect};
+use pdf_object_reader::pdf_object::PdfObject;
 use pdf_optional_content::{OcgStateEntry, OptionalContentMembership};
 
 bitflags::bitflags! {
@@ -204,8 +205,18 @@ pub struct AppearanceCharacteristics {
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct AppearanceDictionary {
-    /// Normal-state names; no drawing resources are retained.
+    /// Normal-state names.
     pub normal_states: Vec<Vec<u8>>,
+    /// The resolved `/N` entry, a drawing stream or a dictionary of state streams,
+    /// kept unparsed for hosts that paint the appearance. Not serialized.
+    #[serde(skip)]
+    #[cfg_attr(feature = "typescript", ts(skip))]
+    pub normal: Option<PdfObject>,
+    /// The resolved `/D` entry shown while the annotation is pressed, kept unparsed
+    /// like `normal`. Not serialized.
+    #[serde(skip)]
+    #[cfg_attr(feature = "typescript", ts(skip))]
+    pub down: Option<PdfObject>,
 }
 
 /// Owned FileSpecification data retained from the source PDF.

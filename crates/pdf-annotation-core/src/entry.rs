@@ -87,6 +87,9 @@ pub struct WidgetControl {
     pub top_index: u32,
     /// Counterclockwise content rotation in degrees from the source appearance.
     pub rotation: i32,
+    /// Whether the host paints the source appearance on the page canvas, leaving the
+    /// control a transparent hit and input target.
+    pub painted: bool,
 }
 
 /// One Core annotation projected into logical device coordinates for a host to present.

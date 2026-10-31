@@ -12,5 +12,7 @@ export interface AnnotationLayerCallbacks {
   /** Converts a container CSS displacement into a PDF page displacement for drags. */
   toPageDelta(entry: WebAnnotationEntry, dx: number, dy: number): [number, number];
   onAction?(entry: WebAnnotationEntry): void;
+  /** Reports a canvas-painted widget held down (`true`) or released (`false`). */
+  onPress?(entry: WebAnnotationEntry, pressed: boolean): void;
   onError?(error: unknown): void;
 }

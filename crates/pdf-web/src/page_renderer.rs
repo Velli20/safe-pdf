@@ -39,11 +39,12 @@ impl WebPageRenderer {
         self.renderer.document()
     }
 
-    /// Renders only page content via PdfRenderer, collects its existing TextGlyph output,
-    /// and prepares annotations separately through the supplied overlay layer.
+    /// Renders page content via PdfRenderer, collects its existing TextGlyph output,
+    /// paints the appearances of widgets whose native controls are transparent, and
+    /// prepares annotations separately through the supplied overlay layer.
     ///
     /// Uses the shared content-and-text pass; annotation preparation produces native
-    /// models only. Both passes use the supplied viewport.
+    /// models only. All passes use the supplied viewport.
     /// Finishes with balanced backend state, retaining no backend borrow in the output.
     /// `page_index` selects both the document page and the Core page in `overlay`.
     /// `content_revision` identifies the text layout independently of annotation edits.
@@ -75,6 +76,13 @@ impl WebPageRenderer {
                 viewport.page(),
                 overlay.optional_content(),
             )?);
+            self.renderer.render_annotation_appearances(
+                backend,
+                index,
+                viewport.page(),
+                overlay.optional_content(),
+                &overlay.painted_appearances(page_index)?,
+            )?;
             backend.finish_page()?;
             let annotations = overlay.prepare(page_index, viewport)?;
             Ok(WebPageOutput {

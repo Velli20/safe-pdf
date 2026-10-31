@@ -2,7 +2,7 @@
 use crate::{WebViewport, annotation_entry::WebAnnotationEntry, error::WebResult};
 use pdf_annotation_core::{
     AnnotationCommandRequest, AnnotationOverlay, AnnotationReceipt, OptionalContentReceipt,
-    PreparedAnnotations, pdf_data::AnnotationAction,
+    PaintedAppearance, PreparedAnnotations, models::AnnotationId, pdf_data::AnnotationAction,
 };
 use pdf_document::{diagnostic::PdfReadDiagnostic, document::PdfDocument};
 use pdf_graphics::{rect::Rect, transform::Transform};
@@ -65,6 +65,9 @@ impl PreparedAnnotationOverlay {
 /// One Core engine per document, independent of page mounts and canvas resources.
 pub struct WebAnnotationOverlay {
     overlay: AnnotationOverlay,
+    /// The widget held down by the pointer, painted with its down appearance.
+    /// Presentation state only; it never advances the document revision.
+    pressed: Option<AnnotationId>,
 }
 
 impl WebAnnotationOverlay {
@@ -79,6 +82,7 @@ impl WebAnnotationOverlay {
             .map(|page| page.annotations.as_deref().unwrap_or_default());
         Ok(Self {
             overlay: AnnotationOverlay::new(pages, document.optional_content.as_ref())?,
+            pressed: None,
         })
     }
 
@@ -151,6 +155,20 @@ impl WebAnnotationOverlay {
         action: &AnnotationAction,
     ) -> WebResult<OptionalContentReceipt> {
         Ok(self.overlay.set_optional_content_state(action)?)
+    }
+
+    /// Returns the widget appearances painted on `page`'s canvas under live field state,
+    /// with the pressed widget's down appearance.
+    ///
+    /// # Errors
+    /// Propagates annotation layer errors for absent pages or unbound widgets.
+    pub fn painted_appearances(&self, page: u32) -> WebResult<Vec<PaintedAppearance>> {
+        Ok(self.overlay.painted_appearances(page, self.pressed)?)
+    }
+
+    /// Marks the widget the pointer holds down, or none; the host repaints its page.
+    pub fn set_pressed(&mut self, pressed: Option<AnnotationId>) {
+        self.pressed = pressed;
     }
 
     /// Returns the runtime optional content visibility page content is rendered with.
