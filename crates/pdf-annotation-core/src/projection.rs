@@ -10,7 +10,7 @@ use crate::{
     pdf_data::AnnotationAction,
     shapes, widget_control,
 };
-use pdf_graphics::{point::Point, rect::Rect, size::Size, viewport::PageViewport};
+use pdf_graphics::{point::Point, rect::Rect, viewport::PageViewport};
 use pdf_optional_content::OptionalContentState;
 
 /// The shared field a widget is bound to; `None` for other kinds.
@@ -95,8 +95,8 @@ pub(crate) fn project(
         subtype: annotation.content.subtype_name().into_owned(),
         unsupported: unsupported_reason(annotation, field),
         bounds: device_regions(annotation, &bounds, viewport)?,
-        origin: Point::new(bounds.left, bounds.top),
-        size: Size::new(bounds.width(), bounds.height()),
+        origin: bounds.origin(),
+        size: bounds.size(),
         transform: viewport.local_frame(Point::new(bounds.left, bounds.bottom))?,
         no_zoom: annotation.metadata.no_zoom(),
         no_rotate: annotation.metadata.no_rotate(),

@@ -2,7 +2,6 @@
 use crate::error::ValidationError;
 use crate::fields::TextMode;
 use crate::kind::SourceLayout;
-use crate::models::Point;
 use crate::pdf_data::*;
 use pdf_graphics::rect::Rect;
 
@@ -94,7 +93,7 @@ impl SourceAnnotation {
                 .copied(),
             _ => None,
         };
-        let anchor = first_ink_point.unwrap_or_else(|| Point::new(rect.left, rect.top));
+        let anchor = first_ink_point.unwrap_or_else(|| rect.origin());
         Some(SourceLayout { rect, anchor })
     }
 
