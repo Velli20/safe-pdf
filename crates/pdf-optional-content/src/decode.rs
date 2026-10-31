@@ -11,7 +11,6 @@ use crate::optional_content::{
 };
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
-use std::sync::Arc;
 
 /// Decodes the catalog's `/OCProperties`; alternate `/Configs` are not retained.
 impl FromPdfObject for OptionalContentProperties {
@@ -158,7 +157,7 @@ impl FromPdfObject for OcgTarget {
             .into());
         }
         Ok(Self::Dictionary {
-            name: context.required::<Arc<[u8]>>(b"Name")?.to_vec(),
+            name: context.required(b"Name")?,
         })
     }
 }

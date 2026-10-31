@@ -1,5 +1,7 @@
 //! Owned PDF metadata. These values retain source information without resolving resources.
 //! Raw byte fields are never interpreted as UTF-8 merely to serialize them.
+use std::sync::Arc;
+
 use crate::{metadata::AnnotationFlags, models::Quad};
 use pdf_graphics::{DashPattern, color::Color, polyline::Polyline, rect::Rect};
 use pdf_optional_content::{OcgStateEntry, OptionalContentMembership};
@@ -190,11 +192,11 @@ pub struct AppearanceCharacteristics {
     /// The background color.
     pub background_color: Option<Color>,
     /// The normal caption.
-    pub normal_caption: Option<Vec<u8>>,
+    pub normal_caption: Option<Arc<[u8]>>,
     /// The rollover caption.
-    pub rollover_caption: Option<Vec<u8>>,
+    pub rollover_caption: Option<Arc<[u8]>>,
     /// The alternate caption.
-    pub alternate_caption: Option<Vec<u8>>,
+    pub alternate_caption: Option<Arc<[u8]>>,
 }
 
 /// Owned AppearanceDictionary data retained from the source PDF.
@@ -214,7 +216,7 @@ pub enum FileSpecification {
     /// A file specification dictionary.
     Dictionary(Box<FileSpecificationDictionary>),
     /// A direct path string.
-    Path(Vec<u8>),
+    Path(Arc<[u8]>),
 }
 
 /// Owned FileSpecificationDictionary data retained from the source PDF.
@@ -223,17 +225,17 @@ pub enum FileSpecification {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct FileSpecificationDictionary {
     /// The file system name.
-    pub file_system: Option<Vec<u8>>,
+    pub file_system: Option<Arc<[u8]>>,
     /// The platform-independent file name.
-    pub file_name: Option<Vec<u8>>,
+    pub file_name: Option<Arc<[u8]>>,
     /// The Unicode file name.
-    pub unicode_file_name: Option<Vec<u8>>,
+    pub unicode_file_name: Option<Arc<[u8]>>,
     /// The macOS file name.
-    pub mac_file_name: Option<Vec<u8>>,
+    pub mac_file_name: Option<Arc<[u8]>>,
     /// The DOS file name.
-    pub dos_file_name: Option<Vec<u8>>,
+    pub dos_file_name: Option<Arc<[u8]>>,
     /// The Unix file name.
-    pub unix_file_name: Option<Vec<u8>>,
+    pub unix_file_name: Option<Arc<[u8]>>,
     /// Whether the file is volatile.
     pub volatile: Option<bool>,
 }
@@ -372,7 +374,7 @@ pub enum AnnotationAction {
     /// A URI action.
     Uri {
         /// The URI bytes.
-        uri: Vec<u8>,
+        uri: Arc<[u8]>,
         /// Whether to treat the URI as a map request.
         is_map: Option<bool>,
     },
@@ -384,21 +386,21 @@ pub enum AnnotationAction {
     /// A named action.
     Named {
         /// The action name.
-        name: Vec<u8>,
+        name: Arc<[u8]>,
     },
     /// A submit-form action.
     SubmitForm {
         /// The file specification.
         file_specification: Option<FileSpecification>,
         /// The field names.
-        fields: Option<Vec<Vec<u8>>>,
+        fields: Option<Vec<Arc<[u8]>>>,
         /// The submit flags.
         flags: Option<i32>,
     },
     /// A reset-form action.
     ResetForm {
         /// The field names.
-        fields: Option<Vec<Vec<u8>>>,
+        fields: Option<Vec<Arc<[u8]>>>,
         /// The reset flags.
         flags: Option<i32>,
     },
@@ -410,7 +412,7 @@ pub enum AnnotationAction {
     /// A JavaScript action.
     JavaScript {
         /// The script bytes.
-        script: Vec<u8>,
+        script: Arc<[u8]>,
     },
     /// A SetOCGState action.
     SetOCGState {
@@ -509,13 +511,13 @@ pub enum FreeTextAlignment {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct FreeTextAnnotation {
     /// The default appearance string.
-    pub default_appearance: Option<Vec<u8>>,
+    pub default_appearance: Option<Arc<[u8]>>,
     /// The quadding mode.
     pub quadding: Option<i32>,
     /// Rich text contents.
-    pub rich_contents: Option<Vec<u8>>,
+    pub rich_contents: Option<Arc<[u8]>>,
     /// The default style string.
-    pub default_style: Option<Vec<u8>>,
+    pub default_style: Option<Arc<[u8]>>,
     /// The open callout line, from its starting point to its attachment point.
     pub callout_line: Option<Polyline>,
     /// The border effect.
@@ -523,7 +525,7 @@ pub struct FreeTextAnnotation {
     /// The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
     pub difference_rect: Option<Rect>,
     /// The intent.
-    pub intent: Option<Vec<u8>>,
+    pub intent: Option<Arc<[u8]>>,
 }
 
 /// Owned HighlightAnnotation data retained from the source PDF.
@@ -572,7 +574,7 @@ pub struct LineAnnotation {
     /// Whether the caption is positioned at the line's end.
     pub caption: Option<bool>,
     /// The intent.
-    pub intent: Option<Vec<u8>>,
+    pub intent: Option<Arc<[u8]>>,
 }
 
 /// Owned LinkAnnotation data retained from the source PDF.
@@ -608,7 +610,7 @@ pub struct PolygonAnnotation {
     /// The border style.
     pub border_style: Option<BorderStyle>,
     /// The intent.
-    pub intent: Option<Vec<u8>>,
+    pub intent: Option<Arc<[u8]>>,
 }
 
 /// Owned PolyLineAnnotation data retained from the source PDF.
@@ -625,7 +627,7 @@ pub struct PolyLineAnnotation {
     /// The border style.
     pub border_style: Option<BorderStyle>,
     /// The intent.
-    pub intent: Option<Vec<u8>>,
+    pub intent: Option<Arc<[u8]>>,
 }
 
 /// Owned PopupAnnotation data retained from the source PDF.
@@ -675,7 +677,7 @@ pub struct SquigglyAnnotation {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct StampAnnotation {
     /// The stamp name.
-    pub name: Option<Vec<u8>>,
+    pub name: Option<Arc<[u8]>>,
 }
 
 /// Owned StrikeOutAnnotation data retained from the source PDF.
@@ -699,13 +701,13 @@ pub struct TextAnnotation {
     /// Whether the note popup starts open.
     pub open: Option<bool>,
     /// The note icon name.
-    pub name: Option<Vec<u8>>,
+    pub name: Option<Arc<[u8]>>,
     /// The annotation state.
-    pub state: Option<Vec<u8>>,
+    pub state: Option<Arc<[u8]>>,
     /// The annotation state model.
-    pub state_model: Option<Vec<u8>>,
+    pub state_model: Option<Arc<[u8]>>,
     /// The intent name.
-    pub intent: Option<Vec<u8>>,
+    pub intent: Option<Arc<[u8]>>,
 }
 
 /// Owned UnderlineAnnotation data retained from the source PDF.
@@ -727,9 +729,9 @@ pub struct UnderlineAnnotation {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct WidgetChoiceOption {
     /// Value written to the field when this option is selected.
-    pub export_value: Vec<u8>,
+    pub export_value: Arc<[u8]>,
     /// Value presented to the user for this option.
-    pub display_value: Vec<u8>,
+    pub display_value: Arc<[u8]>,
 }
 
 /// Owned WidgetFieldValue data retained from the source PDF.
@@ -738,7 +740,7 @@ pub struct WidgetChoiceOption {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub enum WidgetFieldValue {
     /// A string-like value represented as raw PDF bytes.
-    Bytes(Vec<u8>),
+    Bytes(Arc<[u8]>),
     /// A dictionary value, such as a signature field value; contents are not retained.
     Dictionary,
     /// An array of widget field values.
@@ -760,13 +762,13 @@ pub struct WidgetAnnotation {
     #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
     pub field_id: Option<u64>,
     /// The form field type.
-    pub field_type: Option<Vec<u8>>,
+    pub field_type: Option<Arc<[u8]>>,
     /// The field name.
-    pub field_name: Option<Vec<u8>>,
+    pub field_name: Option<Arc<[u8]>>,
     /// The alternate field name.
-    pub alternate_name: Option<Vec<u8>>,
+    pub alternate_name: Option<Arc<[u8]>>,
     /// The mapping name.
-    pub mapping_name: Option<Vec<u8>>,
+    pub mapping_name: Option<Arc<[u8]>>,
     /// The field flags.
     #[cfg_attr(feature = "typescript", ts(type = "number | null"))]
     pub field_flags: Option<WidgetFieldFlags>,
@@ -775,7 +777,7 @@ pub struct WidgetAnnotation {
     /// The default value.
     pub default_value: Option<WidgetFieldValue>,
     /// The default appearance string.
-    pub default_appearance: Option<Vec<u8>>,
+    pub default_appearance: Option<Arc<[u8]>>,
     /// The quadding mode.
     pub quadding: Option<i32>,
     /// Maximum number of text characters.
@@ -865,22 +867,22 @@ pub struct SourceAnnotation {
     /// Opacity applied by native presentation.
     pub opacity: f64,
     /// The annotation subtype name.
-    pub subtype: Vec<u8>,
+    pub subtype: Arc<[u8]>,
     /// The optional annotation rectangle from `/Rect`, in PDF page user space
     /// where `bottom` is the lower `y` edge. Edges keep their source values and
     /// order, so inverted rectangles are preserved rather than normalized.
     pub rect: Option<Rect>,
     /// The optional annotation contents.
-    pub contents: Option<Vec<u8>>,
+    pub contents: Option<Arc<[u8]>>,
     /// The optional annotation name from `/NM`.
-    pub name: Option<Vec<u8>>,
+    pub name: Option<Arc<[u8]>>,
     /// The optional annotation flags from `/F`.
     #[cfg_attr(feature = "typescript", ts(type = "number | null"))]
     pub flags: Option<AnnotationFlags>,
     /// The optional appearance dictionary from `/AP`.
     pub appearance: Option<AppearanceDictionary>,
     /// The optional appearance state from `/AS`.
-    pub appearance_state: Option<Vec<u8>>,
+    pub appearance_state: Option<Arc<[u8]>>,
     /// The optional border array from `/Border`.
     pub border: Option<AnnotationBorder>,
     /// The optional annotation color from `/C`, converted from the source

@@ -1,6 +1,4 @@
 //! Subtype-specific payload decoding for the `/Subtype` vocabulary Core retains.
-use std::sync::Arc;
-
 use crate::error::SourceDecodeError;
 use crate::models::{Point, Quad};
 use crate::pdf_data::{
@@ -50,18 +48,10 @@ impl FromPdfObject for TextAnnotation {
         let mut dictionary = context.dictionary()?;
         Ok(Self {
             open: dictionary.optional(b"Open")?,
-            name: dictionary
-                .optional::<Arc<[u8]>>(b"Name")?
-                .map(|bytes| bytes.to_vec()),
-            state: dictionary
-                .optional::<Arc<[u8]>>(b"State")?
-                .map(|bytes| bytes.to_vec()),
-            state_model: dictionary
-                .optional::<Arc<[u8]>>(b"StateModel")?
-                .map(|bytes| bytes.to_vec()),
-            intent: dictionary
-                .optional::<Arc<[u8]>>(b"IT")?
-                .map(|bytes| bytes.to_vec()),
+            name: dictionary.optional(b"Name")?,
+            state: dictionary.optional(b"State")?,
+            state_model: dictionary.optional(b"StateModel")?,
+            intent: dictionary.optional(b"IT")?,
         })
     }
 }
@@ -87,22 +77,14 @@ impl FromPdfObject for FreeTextAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut dictionary = context.dictionary()?;
         Ok(Self {
-            default_appearance: dictionary
-                .optional::<Arc<[u8]>>(b"DA")?
-                .map(|bytes| bytes.to_vec()),
+            default_appearance: dictionary.optional(b"DA")?,
             quadding: dictionary.optional(b"Q")?,
-            rich_contents: dictionary
-                .optional::<Arc<[u8]>>(b"RC")?
-                .map(|bytes| bytes.to_vec()),
-            default_style: dictionary
-                .optional::<Arc<[u8]>>(b"DS")?
-                .map(|bytes| bytes.to_vec()),
+            rich_contents: dictionary.optional(b"RC")?,
+            default_style: dictionary.optional(b"DS")?,
             callout_line: dictionary.optional(b"CL")?.map(callout_line).transpose()?,
             border_effect: dictionary.optional(b"BE")?,
             difference_rect: dictionary.lenient(b"RD"),
-            intent: dictionary
-                .optional::<Arc<[u8]>>(b"IT")?
-                .map(|bytes| bytes.to_vec()),
+            intent: dictionary.optional(b"IT")?,
         })
     }
 }
@@ -118,9 +100,7 @@ impl FromPdfObject for LineAnnotation {
             leader_line_length: dictionary.optional(b"LL")?,
             leader_line_extension: dictionary.optional(b"LLE")?,
             caption: dictionary.optional(b"Cap")?,
-            intent: dictionary
-                .optional::<Arc<[u8]>>(b"IT")?
-                .map(|bytes| bytes.to_vec()),
+            intent: dictionary.optional(b"IT")?,
         })
     }
 }
@@ -160,9 +140,7 @@ impl FromPdfObject for PolygonAnnotation {
             line_endings: dictionary.optional(b"LE")?,
             interior_color: dictionary.optional(b"IC")?,
             border_style: dictionary.optional(b"BS")?,
-            intent: dictionary
-                .optional::<Arc<[u8]>>(b"IT")?
-                .map(|bytes| bytes.to_vec()),
+            intent: dictionary.optional(b"IT")?,
         })
     }
 }
@@ -178,9 +156,7 @@ impl FromPdfObject for PolyLineAnnotation {
             line_endings: dictionary.optional(b"LE")?,
             interior_color: dictionary.optional(b"IC")?,
             border_style: dictionary.optional(b"BS")?,
-            intent: dictionary
-                .optional::<Arc<[u8]>>(b"IT")?
-                .map(|bytes| bytes.to_vec()),
+            intent: dictionary.optional(b"IT")?,
         })
     }
 }
@@ -210,10 +186,7 @@ text_markup_decoder!(StrikeOutAnnotation);
 impl FromPdfObject for StampAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         Ok(Self {
-            name: context
-                .dictionary()?
-                .optional::<Arc<[u8]>>(b"Name")?
-                .map(|bytes| bytes.to_vec()),
+            name: context.dictionary()?.optional(b"Name")?,
         })
     }
 }

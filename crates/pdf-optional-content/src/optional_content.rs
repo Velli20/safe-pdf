@@ -9,6 +9,7 @@ use crate::error::OptionalContentError;
 use crate::ocg_state::{OcgStateEntry, OcgTarget};
 use crate::visibility_expression::VisibilityExpression;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 /// Identity of one optional content group within its source document.
 ///
@@ -36,7 +37,7 @@ pub enum OptionalContentGroupId {
     /// A group that has no object number, identified by its `/Name` bytes.
     Name {
         /// The group's `/Name` bytes.
-        name: Vec<u8>,
+        name: Arc<[u8]>,
     },
 }
 
@@ -52,7 +53,7 @@ impl OptionalContentGroupId {
                 number: u64::try_from(number).map_err(|_| OptionalContentError::ResourceLimit)?,
             }),
             (None, Some(name)) => Ok(Self::Name {
-                name: name.to_vec(),
+                name: Arc::from(name),
             }),
             (None, None) => Err(OptionalContentError::MissingEntry { entry: b"Name" }),
         }
@@ -262,9 +263,11 @@ impl OptionalContentState {
             OcgTarget::Reference { number, .. } => {
                 vec![OptionalContentGroupId::Object { number: *number }]
             }
-            OcgTarget::Dictionary { name } => match self.named.get(name) {
+            OcgTarget::Dictionary { name } => match self.named.get(&**name) {
                 Some(ids) => ids.clone(),
-                None => vec![OptionalContentGroupId::Name { name: name.clone() }],
+                None => vec![OptionalContentGroupId::Name {
+                    name: Arc::clone(name),
+                }],
             },
         }
     }

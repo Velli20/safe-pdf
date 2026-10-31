@@ -11,6 +11,6 @@ typescript = ["dep:ts-rs"]
 
 [dependencies]
 ts-rs = { version = "12", optional = true }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 thiserror = "2.0.12"
 pdf-object-reader = { path = "../pdf-object-reader" }
