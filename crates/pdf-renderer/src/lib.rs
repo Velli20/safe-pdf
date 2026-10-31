@@ -1,6 +1,6 @@
 use pdf_canvas::{
-    PageViewport, canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    recording_canvas::RecordingCanvas,
+    PageViewport, canvas_backend::CanvasBackend, error::PdfCanvasError, image_cache::ImageCache,
+    pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas,
 };
 use pdf_document::document::PdfDocument;
 use pdf_optional_content::OptionalContentState;
@@ -82,6 +82,9 @@ impl PdfRendererError {
 pub struct PdfRenderer {
     document: PdfDocument,
     font_system: Arc<FontSystem>,
+    /// Image rasters kept between renders, so drawing a page again does not decode
+    /// its images again.
+    image_cache: Arc<ImageCache>,
 }
 
 impl PdfRenderer {
@@ -93,6 +96,7 @@ impl PdfRenderer {
         Self {
             document,
             font_system: pdf_text_engine::bundled_font_system(),
+            image_cache: Arc::default(),
         }
     }
 
@@ -101,6 +105,7 @@ impl PdfRenderer {
         Self {
             document,
             font_system,
+            image_cache: Arc::default(),
         }
     }
 
@@ -139,6 +144,7 @@ impl PdfRenderer {
         {
             let mut canvas =
                 PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?
+                    .with_image_cache(Arc::clone(&self.image_cache))
                     .with_optional_content(&optional_content);
             if let Some(cs) = &page.contents {
                 canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
@@ -165,6 +171,7 @@ impl PdfRenderer {
             viewport,
             Arc::clone(&self.font_system),
         )?
+        .with_image_cache(Arc::clone(&self.image_cache))
         .with_text_recording()
         .with_optional_content(optional_content);
         if let Some(cs) = &page.contents {
@@ -189,6 +196,7 @@ impl PdfRenderer {
         let glyphs = {
             let mut canvas =
                 PdfCanvas::new(&mut recording, page, None, Arc::clone(&self.font_system))?
+                    .with_image_cache(Arc::clone(&self.image_cache))
                     .with_text_recording()
                     .with_optional_content(&optional_content);
             if let Some(cs) = &page.contents {

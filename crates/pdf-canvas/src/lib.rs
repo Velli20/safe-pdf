@@ -24,6 +24,8 @@ mod canvas_text_ops;
 mod content_stream_render_state;
 /// Errors reported across the canvas boundary.
 pub mod error;
+/// Decoded image rasters shared across renders.
+pub mod image_cache;
 /// Validated mask descriptions and portable coverage preparation.
 pub mod mask_layer;
 /// Hiding of marked-content sequences whose optional content is off.
