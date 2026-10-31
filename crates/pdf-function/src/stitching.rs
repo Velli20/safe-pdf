@@ -31,6 +31,11 @@ impl StitchingFunction {
         let b1 = self.bounds.get(index).copied().unwrap_or(self.domain.max);
         Interval::new(b0, b1)
     }
+
+    /// Returns the boundary values dividing the domain into sub-domains.
+    pub fn bounds(&self) -> &[f32] {
+        &self.bounds
+    }
 }
 
 impl FunctionImpl for StitchingFunction {

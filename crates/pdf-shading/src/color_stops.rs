@@ -33,6 +33,11 @@ impl ColorStops {
     }
 
     /// Samples a shading function across an explicit shading domain.
+    ///
+    /// The function is sampled at evenly spaced positions and on both sides of each
+    /// breakpoint inside the domain, so a stitching function keeps every segment
+    /// however many it has. Both samples of a breakpoint share its position, which
+    /// makes the handover a hard edge.
     pub fn from_function_domain(
         function: &Function,
         color_space: &ColorSpace,
@@ -44,18 +49,44 @@ impl ColorStops {
             ));
         }
 
-        let capacity = usize::from(Self::DEFAULT_NUM_COLOR_STOPS);
+        let breakpoints = function.breakpoints();
+        let capacity = usize::from(Self::DEFAULT_NUM_COLOR_STOPS)
+            .saturating_add(breakpoints.len().saturating_mul(2));
         let mut positions = Vec::with_capacity(capacity);
         let mut colors = Vec::with_capacity(capacity);
+        let mut sample = |t: f32, x: f32| -> Result<(), PdfShadingError> {
+            let components = function.interpolate(&[x])?;
+            colors.push(color_space.apply(&components)?);
+            positions.push(t);
+            Ok(())
+        };
 
         let denominator = f32::from(Self::DEFAULT_NUM_COLOR_STOPS - 1);
-        for i in 0..Self::DEFAULT_NUM_COLOR_STOPS {
-            let t = f32::from(i) / denominator;
-            let components = function.interpolate(&[domain.lerp(t)])?;
-            let color = color_space.apply(&components)?;
-
-            positions.push(t);
-            colors.push(color);
+        let mut grid = (0..Self::DEFAULT_NUM_COLOR_STOPS)
+            .map(|i| f32::from(i) / denominator)
+            .peekable();
+        // Malformed /Bounds may be out of order; breakpoints behind the last one are
+        // skipped so the positions stay sorted.
+        let mut last = 0.0;
+        for &b in breakpoints {
+            let Some(t) = domain
+                .normalize(b)
+                .filter(|_| domain.min < b && b < domain.max)
+                .filter(|t| *t >= last)
+            else {
+                continue;
+            };
+            while let Some(g) = grid.next_if(|g| *g < t) {
+                sample(g, domain.lerp(g))?;
+            }
+            // An input exactly on a bound selects the next segment, so the segment
+            // ending there is sampled just below it.
+            sample(t, b.next_down())?;
+            sample(t, b)?;
+            last = t;
+        }
+        for g in grid {
+            sample(g, domain.lerp(g))?;
         }
 
         Ok(Self {
@@ -126,32 +157,36 @@ pub(crate) fn interpolate(
     positions: &[f32],
     colors: &[Color],
 ) -> Result<[u8; 4], ImageRasterError> {
-    let Some((first_pos, first)) = positions.first().zip(colors.first()) else {
+    let Some(first) = colors.first() else {
         return Err(ImageRasterError::InvalidInput("empty stops"));
     };
-    if t < f64::from(*first_pos) {
+    // The segment ends at the first stop past `t`; a duplicate position is passed over,
+    // so the later color applies from it.
+    let end = positions.partition_point(|p| f64::from(*p) <= t);
+    let Some(start) = end.checked_sub(1) else {
         return Ok(first.to_rgba8());
-    }
-    for (pair, colors) in positions.windows(2).zip(colors.windows(2)) {
-        if let ([a, b], [ca, cb]) = (pair, colors)
-            && t < f64::from(*b)
-        {
-            let f = ((t - f64::from(*a)) / f64::from(*b - *a))
-                .to_f32()
-                .ok_or(ImageRasterError::InvalidInput("stop interpolation"))?;
-            return Ok(Color::from_rgba(
-                ca.r + (cb.r - ca.r) * f,
-                ca.g + (cb.g - ca.g) * f,
-                ca.b + (cb.b - ca.b) * f,
-                ca.a + (cb.a - ca.a) * f,
-            )
-            .to_rgba8());
-        }
-    }
-    colors
-        .last()
-        .map(|c| c.to_rgba8())
-        .ok_or(ImageRasterError::InvalidInput("empty stops"))
+    };
+    let (Some(a), Some(b), Some(ca), Some(cb)) = (
+        positions.get(start),
+        positions.get(end),
+        colors.get(start),
+        colors.get(end),
+    ) else {
+        return colors
+            .last()
+            .map(|c| c.to_rgba8())
+            .ok_or(ImageRasterError::InvalidInput("empty stops"));
+    };
+    let f = ((t - f64::from(*a)) / f64::from(*b - *a))
+        .to_f32()
+        .ok_or(ImageRasterError::InvalidInput("stop interpolation"))?;
+    Ok(Color::from_rgba(
+        ca.r + (cb.r - ca.r) * f,
+        ca.g + (cb.g - ca.g) * f,
+        ca.b + (cb.b - ca.b) * f,
+        ca.a + (cb.a - ca.a) * f,
+    )
+    .to_rgba8())
 }
 
 #[cfg(test)]

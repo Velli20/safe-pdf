@@ -123,6 +123,19 @@ impl Function {
     pub fn apply(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
         FunctionImpl::interpolate(self, inputs)
     }
+
+    /// Returns the inputs where the function may change abruptly, in increasing order.
+    ///
+    /// These are the `/Bounds` of a stitching function, where one sub-function hands
+    /// over to the next. Other function types return an empty slice.
+    pub fn breakpoints(&self) -> &[f32] {
+        match self {
+            Function::Stitching(function) => function.bounds(),
+            Function::Sampled(_) | Function::Exponential(_) | Function::PostScriptCalculator(_) => {
+                &[]
+            }
+        }
+    }
 }
 
 /// Ensures the underlying stream contains at least `expected` bytes.
