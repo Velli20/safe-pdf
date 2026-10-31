@@ -450,9 +450,11 @@ fn make_paint(
 }
 
 impl SkiaCanvasBackend<'_> {
-    /// Fills `path` without anti-aliasing over the whole pixels it covers when it is a
-    /// rectangle aligned with the pixel grid (see [`pdf_graphics::rect::Rect::snapped_to_pixels`]), so thin
-    /// bars stay solid and separate. Returns whether the path was such a rectangle.
+    /// Fills `path` without anti-aliasing, snapped to the nearest pixel edges, when it is
+    /// a rectangle aligned with the pixel grid, so thin bars stay solid and separate.
+    /// Returns whether the path was such a rectangle.
+    ///
+    /// See [`pdf_graphics::rect::Rect::snapped_to_pixels`].
     fn fill_pixel_rect(
         &mut self,
         path: &CanvasPath<'_>,

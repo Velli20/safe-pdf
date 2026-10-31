@@ -47,26 +47,13 @@ impl Rect<f32> {
         }
     }
 
-    /// Returns the whole-pixel rectangle a solid fill of this rectangle covers: its outer
-    /// pixel bounds, at least one pixel per axis, trimmed on the side with more slack when
-    /// they are a full pixel wider than the rectangle's rounded-up size.
-    ///
-    /// The trim keeps thin bars separated by thin gaps from merging into one block.
+    /// Returns this rectangle with each edge moved to the nearest pixel boundary, keeping
+    /// at least one pixel per axis, so thin bars stay solid and the gaps between them
+    /// stay open.
     pub fn snapped_to_pixels(&self) -> Self {
         let snap = |start: f32, end: f32| {
-            let (mut low, mut high) = (start.floor(), end.ceil());
-            if high == low {
-                high += 1.0;
-            }
-            let size = (end - start).ceil().max(1.0);
-            if high - low >= size + 1.0 {
-                if start - low > high - end {
-                    low += 1.0;
-                } else {
-                    high -= 1.0;
-                }
-            }
-            (low, high)
+            let (low, high) = (start.round(), end.round());
+            (low, if high == low { low + 1.0 } else { high })
         };
         let rect = self.normalized();
         let (left, right) = snap(rect.left, rect.right);
