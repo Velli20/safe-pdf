@@ -1,4 +1,4 @@
-use crate::{point::Point, transform::Transform};
+use crate::{point::Point, size::Size, transform::Transform};
 
 /// An axis-aligned rectangle whose edge coordinate type defaults to `f32`.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -72,6 +72,16 @@ impl Rect<f32> {
 
     pub fn height(&self) -> f32 {
         self.bottom - self.top
+    }
+
+    /// Returns the top-left corner `(left, top)`.
+    pub fn origin(&self) -> Point {
+        Point::new(self.left, self.top)
+    }
+
+    /// Returns the width and height as a [`Size`].
+    pub fn size(&self) -> Size {
+        Size::new(self.width(), self.height())
     }
 
     /// Returns whether this rectangle has finite edges and finite, positive dimensions.

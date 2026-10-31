@@ -104,7 +104,7 @@ fn text_note(
     Ok(TextNote {
         properties: Some(Box::new(v.clone())),
         style: Some(style.clone()),
-        anchor: Point::new(rect.left, rect.top),
+        anchor: rect.origin(),
         text: source.contents()?,
         color: style.rgba_color()?,
     })
