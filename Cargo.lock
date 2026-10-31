@@ -2453,6 +2453,7 @@ dependencies = [
  "pdf-document",
  "pdf-font",
  "pdf-graphics",
+ "pdf-object-reader",
  "pdf-optional-content",
  "pdf-text-engine",
  "pdf-utils",

@@ -941,9 +941,10 @@ trailer\n<</Root 1 0 R/Size 5>>\nstartxref\n";
         .document()
         .get_page(0)
         .expect("issue6069 should contain one page");
-    let contents = page
-        .contents
-        .as_ref()
+    let contents = report
+        .document()
+        .content_stream(page)
+        .expect("the recovered page content stream should parse")
         .expect("the recovered page content stream should remain available");
 
     assert_eq!(contents.operators.len(), 5);
@@ -955,9 +956,12 @@ fn test_xref_backed_zero_length_filtered_stream_recovers() {
     let document = PdfReader
         .read_from_bytes(data, None)
         .expect("xref-backed stream with a malformed zero length should recover");
-    let contents = document
+    let page = document
         .get_page(0)
-        .and_then(|page| page.contents.as_ref())
+        .expect("the page should remain available");
+    let contents = document
+        .content_stream(page)
+        .expect("the recovered and decoded content stream should parse")
         .expect("the recovered and decoded content stream should remain available");
 
     assert_eq!(contents.operators.len(), 2);

@@ -242,10 +242,10 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
             }),
         Err(_) => Err(anyhow!("document not loaded")),
     };
-    if let Some(page) = safe_document
+    if let Some((document, page)) = safe_document
         .as_ref()
         .ok()
-        .and_then(|document| document.get_page(job.page))
+        .and_then(|document| document.get_page(job.page).map(|page| (document, page)))
     {
         // Written before rendering, so it is there when rendering crashes or times out.
         stage("safe-streams");
@@ -253,7 +253,7 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
         fs::create_dir_all(job.out_dir)?;
         fs::write(
             job.out_dir.join(&name),
-            StreamGraph::of_page(page, job.page).text(),
+            StreamGraph::of_page(document, page, job.page).text(),
         )?;
         output.files.push(name);
     }
@@ -587,10 +587,10 @@ fn write_operators(
     document: &PdfDocument,
     prefix: &str,
 ) -> Result<()> {
-    let Some(content) = document
-        .get_page(job.page)
-        .and_then(|page| page.contents.as_ref())
-    else {
+    let Some(page) = document.get_page(job.page) else {
+        return Ok(());
+    };
+    let Some(content) = document.content_stream(page)? else {
         return Ok(());
     };
     let mut text = format!(

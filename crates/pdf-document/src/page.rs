@@ -2,13 +2,14 @@ use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
 use pdf_annotation_core::{PageAnnotations, SourceAnnotation};
-use pdf_content_stream::ContentStream;
 use pdf_graphics::{
     rect::Rect,
     size::Size,
     viewport::{PageViewport, ViewportError},
 };
 use pdf_resources::resources::Resources;
+
+use crate::page_contents::PageContents;
 
 /// Represents a single page in a PDF document.
 ///
@@ -17,9 +18,9 @@ use pdf_resources::resources::Resources;
 /// its resources, and other attributes according to PDF 1.7 specification.
 #[derive(Default)]
 pub struct PdfPage {
-    /// The contents of the page, which can be a single stream object or
-    /// an array of streams.
-    pub contents: Option<ContentStream>,
+    /// The unparsed contents of the page, which can be a single stream object or
+    /// an array of streams. Read the operators with [`crate::document::PdfDocument::content_stream`].
+    pub contents: Option<PageContents>,
     /// The raw annotation dictionaries attached to the page.
     pub annotations: Option<Vec<SourceAnnotation>>,
     /// `/MediaBox` attribute which defines the page boundaries.
@@ -161,7 +162,7 @@ impl PdfPage {
 impl FromPdfObject for PdfPage {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let contents = context.optional::<ContentStream>(b"Contents")?;
+        let contents = context.optional::<PageContents>(b"Contents")?;
         let media_box = context.lenient(b"MediaBox");
         let crop_box = context.lenient(b"CropBox");
         let rotation = context.optional::<i32>(b"Rotate")?;

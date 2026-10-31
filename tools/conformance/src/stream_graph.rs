@@ -5,7 +5,7 @@
 //! The graph is read from the resource dictionaries without rendering, so it is available
 //! for pages whose rendering crashes or times out.
 
-use pdf_document::page::PdfPage;
+use pdf_document::{document::PdfDocument, page::PdfPage};
 use pdf_font::PdfFontSpec;
 use pdf_object_reader::{ObjectHandle, pdf_name::PdfName};
 use pdf_resources::{
@@ -65,8 +65,8 @@ pub struct StreamGraph {
 }
 
 impl StreamGraph {
-    /// Lists the content streams reachable from page `index`.
-    pub fn of_page(page: &PdfPage, index: usize) -> Self {
+    /// Lists the content streams reachable from `page`, page `index` of `document`.
+    pub fn of_page(document: &PdfDocument, page: &PdfPage, index: usize) -> Self {
         let mut graph = Self {
             text: String::new(),
             lines: 0,
@@ -78,10 +78,11 @@ impl StreamGraph {
             0,
             &format!(
                 "page {index} content{}",
-                page.contents
-                    .as_ref()
-                    .map(|content| format!(" ({} operators)", content.operators.len()))
-                    .unwrap_or_default()
+                match document.content_stream(page) {
+                    Ok(Some(content)) => format!(" ({} operators)", content.operators.len()),
+                    Ok(None) => String::new(),
+                    Err(error) => format!(" (unreadable: {error})"),
+                }
             ),
         );
         if let Some(resources) = &page.resources {
