@@ -830,7 +830,8 @@ export type Ink = {
  */
 style: ResolvedStyle | null,
 /**
- * Nonempty open strokes, each containing at least two points.
+ * Open strokes, each containing at least two points; empty only for source ink drawn
+ * from its appearance.
  */
 strokes: Array<Polyline>,
 /**

@@ -79,12 +79,13 @@ impl AnnotationKind {
     /// Live page-space bounds of this payload.
     ///
     /// `layout` sizes anchored notes from their source rectangle and positions ink whose
-    /// source rectangle was measured against its first point; without it notes are 24 units
-    /// square and ink bounds are derived from its strokes and width.
+    /// source rectangle was measured against its first point, or places ink without strokes
+    /// at that rectangle; without it notes are 24 units square and ink bounds are derived
+    /// from its strokes and width.
     ///
     /// # Errors
     /// Returns `InvalidHighlight` for markup without quads, `InvalidInk` for ink without
-    /// strokes, and `InvalidBounds` when the result is not a finite, positive rectangle.
+    /// strokes or a source layout, and `InvalidBounds` when the result is not a finite, positive rectangle.
     pub fn bounds(&self, layout: Option<&SourceLayout>) -> Result<Rect, ValidationError> {
         let result = match self {
             Self::FreeText(v) => v.bounds,
@@ -110,12 +111,14 @@ impl AnnotationKind {
             Self::Highlight(v) => quads_bounds(&v.quads)?,
             Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => quads_bounds(&v.quads)?,
             Self::Ink(v) => {
-                if let (Some(l), Some(first)) = (
-                    layout,
-                    v.strokes.iter().flat_map(|stroke| &stroke.points).next(),
-                ) {
+                let first = v.strokes.iter().flat_map(|stroke| &stroke.points).next();
+                if let Some(l) = layout
+                    && (first.is_some() || v.strokes.is_empty())
+                {
                     let mut b = l.rect;
-                    b.translate(first.x - l.anchor.x, first.y - l.anchor.y);
+                    if let Some(first) = first {
+                        b.translate(first.x - l.anchor.x, first.y - l.anchor.y);
+                    }
                     b
                 } else {
                     let half = v.width / 2.0;
@@ -275,11 +278,11 @@ impl AnnotationKind {
                 if let Some(style) = &ink.style {
                     style.validate()?;
                 }
-                if ink.strokes.is_empty()
-                    || ink
-                        .strokes
-                        .iter()
-                        .any(|stroke| stroke.closed || stroke.points.len() < 2)
+                // A source ink without strokes is drawn from its appearance instead.
+                if ink
+                    .strokes
+                    .iter()
+                    .any(|stroke| stroke.closed || stroke.points.len() < 2)
                 {
                     return Err(ValidationError::InvalidInk);
                 }

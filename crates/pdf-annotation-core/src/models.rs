@@ -93,7 +93,8 @@ pub struct Ink {
     /// Content replacement replaces this style too; retained source never overrides it.
     #[serde(default)]
     pub style: Option<crate::style::ResolvedStyle>,
-    /// Nonempty open strokes, each containing at least two points.
+    /// Open strokes, each containing at least two points; empty only for source ink drawn
+    /// from its appearance.
     pub strokes: Vec<Polyline>,
     /// Finite, strictly positive stroke width in page user-space units.
     pub width: f32,
@@ -231,6 +232,13 @@ impl Annotation {
                     | AnnotationKind::Squiggly(_)
                     | AnnotationKind::StrikeOut(_)
             )
+            && !self.is_drawn_from_appearance()
+    }
+
+    /// Whether this is source ink without strokes, whose appearance is painted at its fixed
+    /// source rectangle instead of native shapes.
+    pub fn is_drawn_from_appearance(&self) -> bool {
+        matches!(&self.content, AnnotationKind::Ink(ink) if ink.strokes.is_empty())
     }
 
     /// Whether plain FreeText content can be edited without changing style or geometry.

@@ -1,4 +1,5 @@
-//! Source appearances a host paints on the page canvas in place of a native control.
+//! Source appearances a host paints on the page canvas in place of a native control or
+//! native shapes.
 use crate::{
     engine::DocumentView, entry::ControlKind, layer_error::AnnotationLayerResult,
     models::Annotation, projection, widget_control,
@@ -10,7 +11,8 @@ use pdf_optional_content::OptionalContentState;
 /// The `/Off` appearance state of an unselected button.
 const OFF_STATE: &[u8] = b"Off";
 
-/// One widget's normal appearance, selected by its live state and placed at its rectangle.
+/// One annotation's normal appearance, selected by its live state and placed at its
+/// rectangle.
 #[derive(Clone, Debug)]
 pub struct PaintedAppearance {
     /// The resolved `/AP /N` entry, or `/D` while pressed: a drawing stream, or a
@@ -23,11 +25,12 @@ pub struct PaintedAppearance {
 }
 
 impl PaintedAppearance {
-    /// The appearance of a displayed widget whose control is `painted`, or `None`.
+    /// The appearance of a displayed annotation painted on the canvas, or `None`.
     ///
-    /// Checkboxes and radio options draw their on-state while live Core state selects
-    /// them and `Off` otherwise; push buttons draw their source `/AS`. A `pressed`
-    /// widget draws its down appearance when it has one.
+    /// Widgets whose control is `painted` draw their live state: checkboxes and radio
+    /// options their on-state while live Core state selects them and `Off` otherwise, push
+    /// buttons their source `/AS`. A `pressed` widget draws its down appearance when it has
+    /// one. Ink without strokes draws its source `/AS` state.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
@@ -40,10 +43,7 @@ impl PaintedAppearance {
         if !projection::displayed(annotation, optional_content) {
             return Ok(None);
         }
-        let Some(field) = projection::widget_field(annotation, view)? else {
-            return Ok(None);
-        };
-        let Some(control) = widget_control::control(annotation, field).filter(|c| c.painted) else {
+        let Some(state) = annotation.painted_state(view)? else {
             return Ok(None);
         };
         let Some(source) = annotation.source() else {
@@ -59,15 +59,44 @@ impl PaintedAppearance {
         ) else {
             return Ok(None);
         };
-        let state = match control.kind {
-            ControlKind::Button => source.appearance_state.as_deref().map(<[u8]>::to_vec),
-            _ if control.checked => source.button_on_state().ok().map(<[u8]>::to_vec),
-            _ => Some(OFF_STATE.to_vec()),
-        };
         Ok(Some(Self {
             normal,
             state,
             rect: rect.normalized(),
+        }))
+    }
+}
+
+impl Annotation {
+    /// The appearance state to paint, or `None` when the annotation is not painted.
+    ///
+    /// # Errors
+    /// Returns an error when a widget's bound field is missing.
+    fn painted_state(
+        &self,
+        view: &DocumentView<'_>,
+    ) -> AnnotationLayerResult<Option<Option<Vec<u8>>>> {
+        let source_state = || {
+            self.source()
+                .and_then(|source| source.appearance_state.as_deref())
+                .map(<[u8]>::to_vec)
+        };
+        if self.is_drawn_from_appearance() {
+            return Ok(Some(source_state()));
+        }
+        let Some(field) = projection::widget_field(self, view)? else {
+            return Ok(None);
+        };
+        let Some(control) = widget_control::control(self, field).filter(|c| c.painted) else {
+            return Ok(None);
+        };
+        Ok(Some(match control.kind {
+            ControlKind::Button => source_state(),
+            _ if control.checked => self
+                .source()
+                .and_then(|source| source.button_on_state().ok())
+                .map(<[u8]>::to_vec),
+            _ => Some(OFF_STATE.to_vec()),
         }))
     }
 }

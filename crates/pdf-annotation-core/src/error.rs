@@ -112,8 +112,9 @@ pub enum ValidationError {
     /// Highlights require nonempty, nondegenerate convex quadrilaterals.
     #[error("highlight regions must be nonempty convex quadrilaterals")]
     InvalidHighlight,
-    /// Ink requires at least one stroke with at least two points per stroke.
-    #[error("ink requires nonempty strokes with at least two points each")]
+    /// Ink strokes require at least two points each, and ink without strokes requires a
+    /// source rectangle.
+    #[error("ink requires strokes with at least two points each, or a source rectangle")]
     InvalidInk,
     /// A retained PDF text string has no Unicode interpretation.
     #[error("undecodable PDF text string: {0}")]
