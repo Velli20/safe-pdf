@@ -18,3 +18,9 @@ pdf-utils = { path = "../pdf-utils" }
 [lints]
 workspace = true
 
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "flate_decode"
+harness = false
