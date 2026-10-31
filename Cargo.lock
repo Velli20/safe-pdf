@@ -2486,6 +2486,7 @@ dependencies = [
 name = "pdf-renderer"
 version = "0.1.0"
 dependencies = [
+ "pdf-annotation-core",
  "pdf-canvas",
  "pdf-cmap",
  "pdf-content-stream",
@@ -2494,6 +2495,7 @@ dependencies = [
  "pdf-graphics",
  "pdf-object-reader",
  "pdf-optional-content",
+ "pdf-resources",
  "pdf-text-engine",
  "pdf-utils",
  "thiserror 2.0.12",

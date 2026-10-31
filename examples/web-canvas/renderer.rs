@@ -1,5 +1,5 @@
 //! A small document owner demonstrating the browser crate's host-facing APIs.
-use pdf_annotation_core::pdf_data::AnnotationAction;
+use pdf_annotation_core::{models::AnnotationId, pdf_data::AnnotationAction};
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics::{size::Size, transform::Transform};
 use pdf_graphics_web::{WebCanvasBackend, WebCanvasOptions};
@@ -82,6 +82,38 @@ impl WebDocument {
         let page = page_of(self.renderer.document(), page_index)?;
         let viewport = WebViewport::for_page(page, zoom, dpr, rotation, revision).map_err(error)?;
         self.render_viewport(page_index, canvas, viewport)
+    }
+
+    /// Renders the page again through its mounted viewport, so canvas-painted widget
+    /// appearances follow committed edits. Keeps the viewport revision, leaving drafts
+    /// in other controls current.
+    pub fn repaint(
+        &mut self,
+        page_index: u32,
+        canvas: web_sys::HtmlCanvasElement,
+    ) -> Result<WebAnnotationSnapshot, JsValue> {
+        let viewport = self
+            .viewports
+            .get(&page_index)
+            .cloned()
+            .ok_or_else(|| error("unmounted page"))?;
+        self.render_viewport(page_index, canvas, viewport)
+    }
+
+    /// Paints the widget `annotation` (a decimal Core id) held down, or releases the
+    /// pressed widget when `None`, and repaints `page_index`.
+    pub fn press(
+        &mut self,
+        page_index: u32,
+        canvas: web_sys::HtmlCanvasElement,
+        annotation: Option<String>,
+    ) -> Result<WebAnnotationSnapshot, JsValue> {
+        let pressed = annotation
+            .map(|id| id.parse().map(AnnotationId))
+            .transpose()
+            .map_err(error)?;
+        self.overlay.set_pressed(pressed);
+        self.repaint(page_index, canvas)
     }
 
     /// Renders the page fitted to exactly `width` x `height` canvas pixels, one CSS pixel

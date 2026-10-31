@@ -1,5 +1,6 @@
 //! Document-owned Core editing and disposable per-viewport annotation entries.
 use crate::{
+    appearance_paint::PaintedAppearance,
     commands::Operation,
     engine::DocumentView,
     entry::AnnotationEntry,
@@ -150,6 +151,31 @@ impl AnnotationOverlay {
             Some(cached) => Ok(cached.clone()),
             None => self.prepare(page, viewport, viewport_revision),
         }
+    }
+
+    /// Returns the source appearances of `page`'s displayed button widgets in
+    /// presentation order, selected by live field state, for painting on the page canvas.
+    /// The `pressed` widget draws its down appearance.
+    ///
+    /// # Errors
+    /// Rejects absent pages and widgets whose bound field is missing.
+    pub fn painted_appearances(
+        &self,
+        page: u32,
+        pressed: Option<AnnotationId>,
+    ) -> AnnotationLayerResult<Vec<PaintedAppearance>> {
+        let view = self.document.engine.view();
+        if page >= view.data().document.page_count {
+            return Err(AnnotationLayerError::PageOutOfRange(page));
+        }
+        self.page_annotations(&view, page)
+            .into_iter()
+            .filter_map(|annotation| {
+                let pressed = pressed == Some(annotation.id);
+                PaintedAppearance::new(annotation, &view, &self.optional_content, pressed)
+                    .transpose()
+            })
+            .collect()
     }
 
     /// Validates a GUI context, clamps interactive dragging, and dispatches one edit.

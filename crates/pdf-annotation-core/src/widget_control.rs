@@ -49,6 +49,7 @@ pub(crate) fn control(annotation: &Annotation, field: &Field) -> Option<WidgetCo
             .and_then(|w| w.appearance_characteristics.as_ref())
             .and_then(|mk| mk.rotation)
             .unwrap_or(0),
+        painted: false,
     };
     match &definition.content {
         FieldKind::Text(text) => {
@@ -129,6 +130,18 @@ pub(crate) fn control(annotation: &Annotation, field: &Field) -> Option<WidgetCo
         }
         _ => return None,
     }
+    model.painted = matches!(
+        model.kind,
+        ControlKind::Checkbox
+            | ControlKind::CheckboxGroup
+            | ControlKind::Radio
+            | ControlKind::Button
+    ) && annotation
+        .metadata
+        .source
+        .as_deref()
+        .and_then(|source| source.appearance.as_ref())
+        .is_some_and(|appearance| appearance.normal.is_some());
     Some(model)
 }
 

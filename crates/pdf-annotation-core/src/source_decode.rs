@@ -119,20 +119,38 @@ impl FromPdfObject for PageAnnotations {
     }
 }
 
-/// Reads `/AP` normal-state names; drawing streams are never decoded.
+/// Reads `/AP` normal-state names and keeps the resolved `/N` and `/D` entries unparsed.
 impl FromPdfObject for AppearanceDictionary {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut appearance = context.dictionary()?;
+        // A malformed down appearance only loses the pressed look.
+        let down = appearance.resolve_entry(b"D")?.filter(|down| {
+            matches!(
+                down.value(),
+                ObjectVariant::Stream(_) | ObjectVariant::Dictionary(_)
+            )
+        });
         let Some(normal) = appearance.resolve_entry(b"N")? else {
             return Ok(Self {
                 normal_states: Vec::new(),
+                normal: None,
+                down,
             });
         };
         let states = match normal.value() {
             ObjectVariant::Dictionary(states) => states,
-            ObjectVariant::Stream(_) | ObjectVariant::Null => {
+            ObjectVariant::Stream(_) => {
                 return Ok(Self {
                     normal_states: Vec::new(),
+                    normal: Some(normal),
+                    down,
+                });
+            }
+            ObjectVariant::Null => {
+                return Ok(Self {
+                    normal_states: Vec::new(),
+                    normal: None,
+                    down,
                 });
             }
             _ => {
@@ -157,7 +175,11 @@ impl FromPdfObject for AppearanceDictionary {
                 }
             }
         }
-        Ok(Self { normal_states })
+        Ok(Self {
+            normal_states,
+            normal: Some(normal),
+            down,
+        })
     }
 }
 
