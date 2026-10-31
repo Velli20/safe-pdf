@@ -190,7 +190,7 @@ fn annotation_boxes(page: &pdf_document::page::PdfPage, width: u32, height: u32)
     page.annotations
         .iter()
         .flatten()
-        .filter(|annotation| annotation.subtype != b"Link" && annotation.subtype != b"Popup")
+        .filter(|annotation| *annotation.subtype != *b"Link" && *annotation.subtype != *b"Popup")
         .filter_map(|annotation| {
             let rect = annotation.rect?;
             let mapped = viewport.map_rect(&rect).ok()?;
