@@ -5,6 +5,13 @@ import { EditPhase } from './annotation_sessions.js';
 /** @type {Record<import('./annotation_contract').ControlTag, keyof HTMLElementTagNameMap>} */
 const TAGS = { input: 'input', text_area: 'textarea', select: 'select', button: 'button' };
 
+/** DOM events that run a widget's pointer and focus trigger actions.
+ * @type {Array<[keyof HTMLElementEventMap, import('./annotation_contract').ActionTrigger]>} */
+const TRIGGER_EVENTS = [
+  ['pointerenter', 'cursor_enter'], ['pointerleave', 'cursor_exit'], ['pointerdown', 'mouse_down'],
+  ['pointerup', 'mouse_up'], ['focus', 'focus'], ['blur', 'blur'],
+];
+
 /** Owns form drafts, composition, option nodes, and control listeners for a Core-derived control. */
 export class FormControl extends AnnotationComponent {
   /** @param {import('./annotation_contract').WebAnnotationEntry} entry
@@ -30,9 +37,17 @@ export class FormControl extends AnnotationComponent {
     if (node instanceof HTMLButtonElement) node.type = 'button';
     this.bindDraftEvents();
     this.bindPressEvents();
+    this.bindTriggerEvents();
     this.listen(node, 'click', event => {
-      if (this.control().kind === ControlKind.Button) { event.preventDefault(); layer.onAction(this.entry); }
+      if (this.control().kind === ControlKind.Button) { event.preventDefault(); layer.onAction(this.entry, 'activate'); }
     });
+  }
+
+  /** Reports the pointer and focus triggers the entry has an action for. */
+  bindTriggerEvents() {
+    for (const [name, trigger] of TRIGGER_EVENTS) {
+      this.listen(this.node, name, () => { if (this.entry.triggers.includes(trigger)) this.layer.onAction(this.entry, trigger); });
+    }
   }
 
   /** Reports pointer presses on a canvas-painted widget so the host paints its down appearance. */
@@ -121,6 +136,8 @@ export class FormControl extends AnnotationComponent {
     this.setPending(true);
     const accepted = await this.layer.submit(this, command, this.revision, this.viewportRevision);
     if (this.abort.signal.aborted) return;
+    // A committed value activates the widget, running its action as a button click does.
+    if (accepted && this.entry.triggers.includes('activate')) this.layer.onAction(this.entry, 'activate');
     this.phase = accepted || !['set_text', 'set_combo_value'].includes(command.operation) ? EditPhase.Clean : EditPhase.Rejected;
     this.revision = this.layer.snapshot?.annotationRevision;
     this.viewportRevision = this.layer.snapshot?.viewportRevision;

@@ -58,7 +58,7 @@ export class VisualComponent extends AnnotationComponent {
         return;
       }
       if (!this.node.hasAttribute('href')) event.preventDefault();
-      layer.onAction(this.entry);
+      layer.onAction(this.entry, 'activate');
     });
   }
   update() {

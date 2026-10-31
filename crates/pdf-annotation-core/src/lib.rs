@@ -55,6 +55,8 @@ mod source_properties;
 
 mod wire;
 
+/// Triggers that run annotation actions.
+pub mod actions;
 /// Source appearances hosts paint on the page canvas.
 pub mod appearance_paint;
 /// Backend-neutral annotation entries projected into one host viewport.
@@ -76,12 +78,11 @@ mod shape_path;
 pub mod shapes;
 mod widget_control;
 
+pub use actions::ActionTrigger;
 pub use appearance_paint::PaintedAppearance;
 pub use entry::{AnnotationEntry, ControlKind, ControlTag, WidgetControl};
 pub use layer_error::{AnnotationLayerError, AnnotationLayerResult};
 pub use overlay::{AnnotationOverlay, PreparedAnnotations};
-pub use requests::{
-    AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget, OptionalContentReceipt,
-};
+pub use requests::{ActionReceipt, AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget};
 pub use session_store::{SessionStorageError, SessionStore};
 pub use shapes::{Shape, ShapePaint};

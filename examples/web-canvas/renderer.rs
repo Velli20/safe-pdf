@@ -1,5 +1,5 @@
 //! A small document owner demonstrating the browser crate's host-facing APIs.
-use pdf_annotation_core::{models::AnnotationId, pdf_data::AnnotationAction};
+use pdf_annotation_core::{ActionTrigger, models::AnnotationId};
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics::{size::Size, transform::Transform};
 use pdf_graphics_web::{WebCanvasBackend, WebCanvasOptions};
@@ -218,17 +218,13 @@ impl WebDocument {
         self.accept_event(WebAnnotationEvent::new(json)?)
     }
 
-    /// Applies a `SetOCGState` link action to runtime optional content visibility,
-    /// returning the pages the host must request again as JSON.
-    ///
-    /// `action_json` is the same `action` value the host received on an annotation
-    /// entry, so there is no second request schema to keep in sync.
-    pub fn set_optional_content_state(&mut self, action_json: &str) -> Result<String, JsValue> {
-        let action: AnnotationAction = serde_json::from_str(action_json).map_err(error)?;
-        let receipt = self
-            .overlay
-            .set_optional_content_state(&action)
-            .map_err(error)?;
+    /// Runs the action `trigger` (a JSON `ActionTrigger` string) selects on
+    /// `annotation` (a decimal Core id), returning the `ActionReceipt` as JSON: the
+    /// pages the host must request again and the actions it performs itself.
+    pub fn perform_action(&mut self, annotation: &str, trigger: &str) -> Result<String, JsValue> {
+        let id = AnnotationId(annotation.parse().map_err(error)?);
+        let trigger: ActionTrigger = serde_json::from_str(trigger).map_err(error)?;
+        let receipt = self.overlay.perform_action(id, trigger).map_err(error)?;
         serde_json::to_string(&receipt).map_err(error)
     }
 

@@ -1,19 +1,19 @@
 //! Document-owned Core editing and disposable per-viewport annotation entries.
 use crate::{
+    actions::ActionTrigger,
     appearance_paint::PaintedAppearance,
-    commands::Operation,
+    commands::{AnnotationCommand, Operation},
     engine::DocumentView,
     entry::AnnotationEntry,
     events::{Change, Event},
     import::{self, ImportedDocument, LayoutHint},
     kind::AnnotationKind,
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
+    metadata::AnnotationFlags,
     models::{Annotation, AnnotationId, Point, Revision},
-    pdf_data::{AnnotationAction, SourceAnnotation},
+    pdf_data::{AnnotationAction, HideTarget, SourceAnnotation},
     projection,
-    requests::{
-        AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget, OptionalContentReceipt,
-    },
+    requests::{ActionReceipt, AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget},
 };
 use pdf_graphics::{rect::Rect, viewport::PageViewport};
 use pdf_object_reader::diagnostic::PdfReadDiagnostic;
@@ -213,35 +213,119 @@ impl AnnotationOverlay {
         })
     }
 
-    /// Applies a `SetOCGState` action to runtime optional content visibility and
-    /// drops the prepared presentation of every page it can affect.
+    /// Runs the action `trigger` selects on annotation `id`, step by step in order.
     ///
-    /// Visibility is presentation state: this never mutates an annotation, never
-    /// dirties the sidecar, and never advances the document revision. The returned
-    /// pages are the ones the host must request again.
+    /// Hide steps fold into one net change per target, committed as a single Core
+    /// edit that sets or clears each target's hidden flag; targets already in that
+    /// state are left alone, so a repeated action advances no revision. Optional
+    /// content steps change presentation state only. Every other step is returned
+    /// for the host, which owns navigation and other side effects.
     ///
     /// The action's `/PreserveRB` is accepted and ignored, because `/RBGroups`
     /// radio relationships are not modelled; a group is turned on without turning
     /// off the siblings a full reader would.
     ///
     /// # Errors
-    /// Rejects an action that is not `SetOCGState`.
-    pub fn set_optional_content_state(
+    /// Rejects an unknown annotation, and propagates Core errors from the hide edit.
+    pub fn perform_action(
         &mut self,
-        action: &AnnotationAction,
-    ) -> AnnotationLayerResult<OptionalContentReceipt> {
-        let AnnotationAction::SetOCGState { state, .. } = action else {
-            return Err(AnnotationLayerError::InvalidInput(
-                "optional content action",
-            ));
+        id: AnnotationId,
+        trigger: ActionTrigger,
+    ) -> AnnotationLayerResult<ActionReceipt> {
+        let action = self
+            .document
+            .engine
+            .view()
+            .annotation(id)
+            .ok_or(AnnotationLayerError::InvalidInput("action annotation"))?
+            .trigger_action(trigger);
+        let Some(action) = action else {
+            return Ok(ActionReceipt::default());
         };
-        let pages = self.apply_optional_content(state);
-        for page in &pages {
-            self.pages.remove(page);
+        let mut visibility = Vec::new();
+        let mut pages = BTreeSet::new();
+        let mut host_actions = Vec::new();
+        for step in action.steps() {
+            match step {
+                AnnotationAction::Hide { targets, hide } => {
+                    self.collect_hide_targets(targets, *hide, &mut visibility);
+                }
+                AnnotationAction::SetOCGState { state, .. } => {
+                    let changed = self.apply_optional_content(state);
+                    for page in &changed {
+                        self.pages.remove(page);
+                    }
+                    pages.extend(changed);
+                }
+                other => host_actions.push(other.clone()),
+            }
         }
-        Ok(OptionalContentReceipt {
+        let revision = match self.set_hidden(&visibility)? {
+            Some(event) => {
+                let changed = self.record_change(&event, None);
+                self.invalidate(&changed, event.revision);
+                pages.extend(changed);
+                Some(event.revision)
+            }
+            None => None,
+        };
+        Ok(ActionReceipt {
+            revision,
             pages: pages.into_iter().collect(),
+            host_actions,
         })
+    }
+
+    /// Records `hide` for every annotation a hide step names, replacing the state an
+    /// earlier step recorded for the same annotation.
+    fn collect_hide_targets(
+        &self,
+        targets: &[HideTarget],
+        hide: bool,
+        visibility: &mut Vec<(AnnotationId, bool)>,
+    ) {
+        let view = self.document.engine.view();
+        let matched = view
+            .data()
+            .annotations
+            .iter()
+            .filter(|annotation| targets.iter().any(|t| annotation.is_hide_target(t)));
+        for annotation in matched {
+            match visibility.iter_mut().find(|(id, _)| *id == annotation.id) {
+                Some((_, state)) => *state = hide,
+                None => visibility.push((annotation.id, hide)),
+            }
+        }
+    }
+
+    /// Commits the hidden flags in `visibility` that differ from the live ones, or
+    /// returns `None` when every annotation is already in its requested state.
+    fn set_hidden(
+        &mut self,
+        visibility: &[(AnnotationId, bool)],
+    ) -> AnnotationLayerResult<Option<Event>> {
+        let (mut hidden, mut shown) = (Vec::new(), Vec::new());
+        {
+            let view = self.document.engine.view();
+            for (id, hide) in visibility {
+                let is_hidden = view
+                    .annotation(*id)
+                    .is_some_and(|a| a.metadata.flags.contains(AnnotationFlags::HIDDEN));
+                match (hide, is_hidden) {
+                    (true, false) => hidden.push(*id),
+                    (false, true) => shown.push(*id),
+                    _ => {}
+                }
+            }
+        }
+        if hidden.is_empty() && shown.is_empty() {
+            return Ok(None);
+        }
+        let event = self.document.engine.dispatch(AnnotationCommand {
+            expected_revision: self.revision(),
+            operation: Operation::SetHidden { hidden, shown },
+        })?;
+        Ok(Some(event))
     }
 
     /// Applies `state` and reports the pages holding an annotation that depends on
@@ -430,8 +514,9 @@ impl AnnotationOverlay {
                 self.document.hints.remove(&id.0);
                 self.modified.remove(&id.0);
             }
-            Change::FieldUpdated { widgets, .. } => {
-                for id in widgets {
+            Change::FieldUpdated { widgets: ids, .. }
+            | Change::VisibilityUpdated { annotations: ids } => {
+                for id in ids {
                     pages.extend(self.page_of(*id));
                     self.modified.insert(id.0, event.revision);
                 }

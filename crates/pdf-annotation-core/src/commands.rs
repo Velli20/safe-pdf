@@ -63,6 +63,13 @@ pub enum Operation {
         /// Existing annotation to remove.
         id: AnnotationId,
     },
+    /// Set or clear the hidden flag of existing annotations, as a hide action does.
+    SetHidden {
+        /// Annotations to hide.
+        hidden: Vec<AnnotationId>,
+        /// Annotations to show.
+        shown: Vec<AnnotationId>,
+    },
     /// Validate and insert a shared field, allocating its identity independently.
     CreateField {
         /// Fixed configuration and initial value; incomplete required values are valid.

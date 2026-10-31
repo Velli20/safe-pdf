@@ -1,5 +1,10 @@
 //! Typed browser envelopes around Core's existing semantic commands.
-use crate::{commands::AnnotationCommand, events::Event, models::AnnotationId};
+use crate::{
+    commands::AnnotationCommand,
+    events::Event,
+    models::{AnnotationId, Revision},
+    pdf_data::AnnotationAction,
+};
 use serde::{Deserialize, Serialize};
 
 /// Captured mounted control context, separate from the document revision.
@@ -40,15 +45,19 @@ pub struct AnnotationReceipt {
     pub pages: Vec<u32>,
 }
 
-/// Acknowledgement of an applied optional content visibility change.
+/// Outcome of running an annotation's action for one trigger.
 ///
-/// Carries no revision: optional content visibility is host presentation state,
-/// so applying it never edits an annotation and never advances the document
-/// revision. Only the listed pages need their presentation refreshed.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Hide actions commit one Core edit and report its revision. Optional content
+/// changes are presentation state and advance no revision. Actions Core does not
+/// run are returned for the host, in order.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
-pub struct OptionalContentReceipt {
+pub struct ActionReceipt {
+    /// Document revision after the committed hide edit; `None` when nothing was edited.
+    pub revision: Option<Revision>,
     /// Pages whose annotation presentation must be refreshed.
     pub pages: Vec<u32>,
+    /// Actions the host performs itself, such as navigation, in execution order.
+    pub host_actions: Vec<AnnotationAction>,
 }

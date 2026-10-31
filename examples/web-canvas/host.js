@@ -58,6 +58,7 @@ const pdfText = bytes => bytes[0] === 0xfe && bytes[1] === 0xff
 // Describes an annotation action for the status bar without executing it.
 function describeAction(action) {
   if (typeof action === 'string') return `Annotation action: ${action}`;
+  if (action.Sequence) return action.Sequence.map(describeAction).join('; ');
   const remote = action.GoToRemote;
   if (!remote) return `Annotation action: ${Object.keys(action)[0]}`;
   const spec = remote.file_specification;
@@ -225,7 +226,7 @@ class PdfViewer {
       page.nativeLayer = new NativeAnnotationLayer(page.annotations, {
         onCommand: (entry, command, revision, viewportRevision) => this.sendAnnotationEvent(entry, command, revision, viewportRevision),
         toPageDelta: (entry, dx, dy) => Array.from(this.pdf.page_delta(entry.page, dx, dy)),
-        onAction: entry => this.handleAnnotationAction(entry),
+        onAction: (entry, trigger) => this.handleAnnotationAction(entry, trigger),
         onPress: (entry, pressed) => this.pressAnnotation(entry, pressed),
         onError: error => this.showError(error),
       });
@@ -263,19 +264,18 @@ class PdfViewer {
     return receipt;
   }
 
-  // Applies a SetOCGState action to optional content visibility, else reports the
-  // action. Toggling a group only changes presentation, so the pages the receipt
-  // names are re-requested without any revision advancing.
-  handleAnnotationAction(entry) {
-    if (entry.action && typeof entry.action === 'object' && 'SetOCGState' in entry.action) {
-      try {
-        const receipt = JSON.parse(this.pdf.set_optional_content_state(JSON.stringify(entry.action)));
-        this.refreshAnnotations(receipt.pages);
-        this.elements.status.textContent = `Optional content updated (${receipt.pages.length} page(s))`;
-      } catch (error) { this.showError(error); }
-      return;
-    }
-    this.elements.status.textContent = entry.action ? describeAction(entry.action) : entry.text || '';
+  // Runs the action the trigger selects. Hide and optional content steps run in the
+  // document, so the pages the receipt names are re-requested; the remaining steps,
+  // such as navigation, are only reported. Clicks without an action show the text.
+  handleAnnotationAction(entry, trigger) {
+    let receipt;
+    try {
+      receipt = JSON.parse(this.pdf.perform_action(entry.id, JSON.stringify(trigger)));
+    } catch (error) { this.showError(error); return; }
+    try { this.refreshAnnotations(receipt.pages); }
+    catch (error) { this.showError(`Action committed; presentation refresh failed: ${error}`); }
+    if (receipt.host_actions.length) this.elements.status.textContent = receipt.host_actions.map(describeAction).join('; ');
+    else if (trigger === 'activate' && !entry.triggers.includes('activate')) this.elements.status.textContent = entry.text || '';
   }
 
   // Repaints the page with the widget's down appearance while it is held.

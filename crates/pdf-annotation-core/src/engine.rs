@@ -5,6 +5,7 @@ use crate::error::{CoreError, ValidationError};
 use crate::events::{Change, Event};
 use crate::fields::{Field, FieldId, FieldIssue, FieldIssueKind, FieldKind};
 use crate::kind::AnnotationKind;
+use crate::metadata::AnnotationFlags;
 use crate::models::{
     Annotation, AnnotationId, DocumentData, DocumentDescriptor, PageIndex, Revision, SCHEMA_VERSION,
 };
@@ -382,6 +383,7 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
                 self.data.fields.retain(|candidate| candidate.id != field);
                 Change::FieldDeleted(field)
             }
+            Operation::SetHidden { hidden, shown } => self.set_hidden(hidden, shown)?,
             operation @ (Operation::SetText { field, .. }
             | Operation::SetCheckbox { field, .. }
             | Operation::SetCheckboxGroupSelection { field, .. }
@@ -510,6 +512,32 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
             Self::validate_annotation(data, annotation.page, &annotation.content)?;
         }
         Ok(())
+    }
+
+    /// Sets the hidden flag of `hidden` and clears it on `shown`, once every
+    /// annotation is known to exist.
+    fn set_hidden(
+        &mut self,
+        hidden: Vec<AnnotationId>,
+        shown: Vec<AnnotationId>,
+    ) -> Result<Change, CoreError<S::Error>> {
+        if let Some(id) = hidden
+            .iter()
+            .chain(&shown)
+            .find(|id| self.view().annotation(**id).is_none())
+        {
+            return Err(CoreError::MissingAnnotation(*id));
+        }
+        for annotation in &mut self.data.annotations {
+            if hidden.contains(&annotation.id) {
+                annotation.metadata.flags.insert(AnnotationFlags::HIDDEN);
+            } else if shown.contains(&annotation.id) {
+                annotation.metadata.flags.remove(AnnotationFlags::HIDDEN);
+            }
+        }
+        Ok(Change::VisibilityUpdated {
+            annotations: hidden.into_iter().chain(shown).collect(),
+        })
     }
 
     fn edit_field(

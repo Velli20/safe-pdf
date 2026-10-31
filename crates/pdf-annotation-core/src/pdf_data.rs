@@ -363,6 +363,43 @@ pub enum ExplicitDestination {
     },
 }
 
+/// One `/T` entry of a hide action.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
+pub enum HideTarget {
+    /// The fully qualified name of a field, whose widgets and descendants are targeted.
+    FieldName(Arc<[u8]>),
+    /// The indirect object number of an annotation or field dictionary.
+    Object {
+        /// The object number.
+        #[serde(with = "crate::wire")]
+        #[cfg_attr(feature = "typescript", ts(type = "string"))]
+        number: u64,
+    },
+    /// A direct dictionary, which has no identity to match an annotation by.
+    Unresolved,
+}
+
+/// Actions a widget's `/AA` dictionary runs on pointer and focus triggers.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
+pub struct WidgetAdditionalActions {
+    /// `/E`: the pointer enters the annotation.
+    pub cursor_enter: Option<AnnotationAction>,
+    /// `/X`: the pointer leaves the annotation.
+    pub cursor_exit: Option<AnnotationAction>,
+    /// `/D`: a pointer button is pressed inside the annotation.
+    pub mouse_down: Option<AnnotationAction>,
+    /// `/U`: a pointer button is released inside the annotation.
+    pub mouse_up: Option<AnnotationAction>,
+    /// `/Fo`: the annotation receives input focus.
+    pub focus: Option<AnnotationAction>,
+    /// `/Bl`: the annotation loses input focus.
+    pub blur: Option<AnnotationAction>,
+}
+
 /// Owned AnnotationAction data retained from the source PDF.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
@@ -445,6 +482,15 @@ pub enum AnnotationAction {
     },
     /// A GoTo3DView action; the view dictionary is not retained.
     GoTo3DView,
+    /// A hide action that hides or shows annotations and the widgets of fields.
+    Hide {
+        /// The annotations and fields the action applies to.
+        targets: Vec<HideTarget>,
+        /// Whether the targets are hidden; `false` shows them.
+        hide: bool,
+    },
+    /// An action followed by its `/Next` successors, flattened into execution order.
+    Sequence(Vec<AnnotationAction>),
     /// A vendor or future action type.
     Unknown {
         /// The action subtype name.
@@ -453,11 +499,14 @@ pub enum AnnotationAction {
 }
 
 impl AnnotationAction {
-    /// Trimmed URI of a `Uri` action when it is an absolute `http`, `https`, or
-    /// `mailto` target a host may navigate to; other schemes and actions yield `None`.
+    /// Trimmed URI of a `Uri` action, or of the first action of a sequence, when it
+    /// is an absolute `http`, `https`, or `mailto` target a host may navigate to;
+    /// other schemes and actions yield `None`.
     pub fn href(&self) -> Option<String> {
-        let Self::Uri { uri, .. } = self else {
-            return None;
+        let uri = match self {
+            Self::Uri { uri, .. } => uri,
+            Self::Sequence(actions) => return actions.first().and_then(Self::href),
+            _ => return None,
         };
         let uri = String::from_utf8_lossy(uri).trim().to_owned();
         let lower = uri.to_ascii_lowercase();
@@ -776,6 +825,11 @@ pub struct WidgetAnnotation {
     pub field_type: Option<Arc<[u8]>>,
     /// The field name.
     pub field_name: Option<Arc<[u8]>>,
+    /// The partial `/T` names along the `/Parent` chain, outermost first; joined by
+    /// periods they form the fully qualified field name. Defaulted on load so older
+    /// sidecars still deserialize.
+    #[serde(default)]
+    pub partial_names: Vec<Arc<[u8]>>,
     /// The alternate field name.
     pub alternate_name: Option<Arc<[u8]>>,
     /// The mapping name.
@@ -811,6 +865,11 @@ pub struct WidgetAnnotation {
     pub border_style: Option<BorderStyle>,
     /// The action dictionary.
     pub action: Option<AnnotationAction>,
+    /// The `/AA` pointer and focus trigger actions. Defaulted on load so older
+    /// sidecars still deserialize.
+    #[serde(default)]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub additional_actions: Option<WidgetAdditionalActions>,
 }
 
 /// Native PDF annotation subtype data.
