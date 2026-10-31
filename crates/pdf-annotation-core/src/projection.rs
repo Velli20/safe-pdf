@@ -14,7 +14,7 @@ use pdf_graphics::{point::Point, rect::Rect, size::Size, viewport::PageViewport}
 use pdf_optional_content::OptionalContentState;
 
 /// The shared field a widget is bound to; `None` for other kinds.
-fn widget_field<'a>(
+pub(crate) fn widget_field<'a>(
     annotation: &Annotation,
     view: &DocumentView<'a>,
 ) -> AnnotationLayerResult<Option<&'a Field>> {
@@ -58,6 +58,17 @@ fn device_regions(
     Ok(regions)
 }
 
+/// Whether `annotation` is shown under its flags and `optional_content`.
+pub(crate) fn displayed(annotation: &Annotation, optional_content: &OptionalContentState) -> bool {
+    // Optional content hides an annotation without altering its flags, so the two
+    // conditions are independent: either one alone suppresses display.
+    annotation.is_visible()
+        && annotation
+            .source()
+            .and_then(|source| source.optional_content.as_ref())
+            .is_none_or(|content| optional_content.is_visible(content))
+}
+
 pub(crate) fn project(
     annotation: &Annotation,
     view: &DocumentView<'_>,
@@ -73,13 +84,7 @@ pub(crate) fn project(
     let field = widget_field(annotation, view)?;
     let style = annotation.style()?;
     let action = annotation.action();
-    // Optional content hides an annotation without altering its flags, so the two
-    // conditions are independent: either one alone suppresses display.
-    let visible = annotation.is_visible()
-        && annotation
-            .source()
-            .and_then(|source| source.optional_content.as_ref())
-            .is_none_or(|content| optional_content.is_visible(content));
+    let visible = displayed(annotation, optional_content);
     Ok(AnnotationEntry {
         id: annotation.id,
         page: annotation.page.0,

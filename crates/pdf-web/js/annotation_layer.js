@@ -15,8 +15,8 @@ import { VisualComponent } from './annotation_visuals.js';
 export class NativeAnnotationLayer {
   /** @param {HTMLElement} root
    * @param {import('./annotation_host').AnnotationLayerCallbacks} callbacks */
-  constructor(root, { onCommand, toPageDelta, onAction = () => { }, onError = () => { } }) {
-    this.root = root; this.onCommand = onCommand; this.toPageDelta = toPageDelta; this.onAction = onAction; this.onError = onError;
+  constructor(root, { onCommand, toPageDelta, onAction = () => { }, onPress = () => { }, onError = () => { } }) {
+    this.root = root; this.onCommand = onCommand; this.toPageDelta = toPageDelta; this.onAction = onAction; this.onPress = onPress; this.onError = onError;
     /** @type {Map<string, import('./annotation_dom.js').AnnotationComponent>} */
     this.nodes = new Map();
     /** @type {import('./annotation_host').AnnotationLayerSnapshot | undefined} */
@@ -83,7 +83,11 @@ export class NativeAnnotationLayer {
     node.setAttribute('aria-label', entry.control?.label || entry.text || entry.subtype);
     const font = { fontSize: `${style.font_size}px`, fontFamily: style.font_family, textAlign: style.alignment };
     Object.assign(container.style, font);
-    Object.assign(node.style, { ...font, color: css.color, backgroundColor: css.background, border: css.border });
+    // A canvas-painted widget shows its PDF appearance through a transparent control.
+    const painted = entry.control?.painted;
+    Object.assign(node.style, painted
+      ? { ...font, color: 'transparent', backgroundColor: 'transparent', border: 'none' }
+      : { ...font, color: css.color, backgroundColor: css.background, border: css.border });
     component.update();
   }
   /** Notes inherit a linked popup's initial open state once, then every note reconciles. */

@@ -231,7 +231,7 @@ alternate_caption: Array<number> | null, };
  */
 export type AppearanceDictionary = {
 /**
- * Normal-state names; no drawing resources are retained.
+ * Normal-state names.
  */
 normal_states: Array<Array<number>>, };
 
@@ -2109,7 +2109,12 @@ top_index: number,
 /**
  * Counterclockwise content rotation in degrees from the source appearance.
  */
-rotation: number, };
+rotation: number,
+/**
+ * Whether the host paints the source appearance on the page canvas, leaving the
+ * control a transparent hit and input target.
+ */
+painted: boolean, };
 
 /**
  * Owned WidgetFieldValue data retained from the source PDF.

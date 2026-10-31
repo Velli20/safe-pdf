@@ -226,6 +226,7 @@ class PdfViewer {
         onCommand: (entry, command, revision, viewportRevision) => this.sendAnnotationEvent(entry, command, revision, viewportRevision),
         toPageDelta: (entry, dx, dy) => Array.from(this.pdf.page_delta(entry.page, dx, dy)),
         onAction: entry => this.handleAnnotationAction(entry),
+        onPress: (entry, pressed) => this.pressAnnotation(entry, pressed),
         onError: error => this.showError(error),
       });
     }
@@ -277,6 +278,18 @@ class PdfViewer {
     this.elements.status.textContent = entry.action ? describeAction(entry.action) : entry.text || '';
   }
 
+  // Repaints the page with the widget's down appearance while it is held.
+  pressAnnotation(entry, pressed) {
+    const page = this.pages.get(entry.page);
+    if (!page?.snapshot) return;
+    try {
+      const snapshot = this.pdf.press(entry.page, page.canvas, pressed ? entry.id : undefined);
+      page.snapshot.free();
+      page.snapshot = snapshot;
+      this.updateAnnotations(page);
+    } catch (error) { this.showError(error); }
+  }
+
   refreshAnnotations(changed) {
     const revision = this.pdf.annotation_revision();
     for (const page of this.pages.values()) page.nativeLayer?.advanceRevision(revision);
@@ -284,7 +297,8 @@ class PdfViewer {
       const page = this.pages.get(index);
       if (!page) continue;
       if (!page.snapshot) continue;
-      const snapshot = this.pdf.annotations(index);
+      // Widget appearances are painted on the canvas, so committed state repaints it.
+      const snapshot = this.pdf.repaint(index, page.canvas);
       page.snapshot.free();
       page.snapshot = snapshot;
       this.updateAnnotations(page);

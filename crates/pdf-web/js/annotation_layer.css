@@ -1,9 +1,13 @@
-.native-annotations { position: absolute; inset: 0; pointer-events: none; }
+/* Form-field highlight composited over each non-button widget; hosts may set it to `transparent`. */
+.native-annotations { position: absolute; inset: 0; pointer-events: none; --native-form-highlight: rgb(221 228 255 / 0.392); }
 .native-annotation { position: absolute; left: 0; top: 0; transform-origin: 0 0; box-sizing: border-box; pointer-events: auto; }
 .native-control { display: block; width: 100%; height: 100%; margin: 0; box-sizing: border-box; padding: 0; overflow: hidden; white-space: pre-wrap; }
 .native-control:is(input,textarea,select), .native-free-text-editor { user-select: text; touch-action: auto; }
-.native-control:is(input,textarea,select,button) { background: white; border: 1px solid #777; border-radius: 0; }
-.native-control:is(input[type=radio],input[type=checkbox]) { appearance: auto; }
+.native-control:is(input,textarea,select,button) { background-color: white; border: 1px solid #777; border-radius: 0; }
+/* Push buttons are not highlighted, so their appearance keeps full color. */
+.native-control:is(input,textarea,select) { background-image: linear-gradient(var(--native-form-highlight), var(--native-form-highlight)); }
+.native-control:is(input[type=radio],input[type=checkbox]):not(.native-painted) { appearance: auto; }
+.native-control.native-painted { appearance: none; }
 button.native-control { cursor: pointer; white-space: nowrap; text-align: center; }
 button.native-control:hover:not(:disabled) { filter: brightness(0.94); }
 button.native-control:active:not(:disabled) { filter: brightness(0.67); }

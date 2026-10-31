@@ -55,6 +55,8 @@ mod source_properties;
 
 mod wire;
 
+/// Source appearances hosts paint on the page canvas.
+pub mod appearance_paint;
 /// Backend-neutral annotation entries projected into one host viewport.
 pub mod entry;
 mod import;
@@ -74,6 +76,7 @@ mod shape_path;
 pub mod shapes;
 mod widget_control;
 
+pub use appearance_paint::PaintedAppearance;
 pub use entry::{AnnotationEntry, ControlKind, ControlTag, WidgetControl};
 pub use layer_error::{AnnotationLayerError, AnnotationLayerResult};
 pub use overlay::{AnnotationOverlay, PreparedAnnotations};

@@ -9,6 +9,7 @@ use pdf_text_engine::FontSystem;
 use std::sync::Arc;
 use thiserror::Error;
 
+mod annotation_appearance;
 mod document_text_selection;
 pub mod page_cache;
 pub mod text_selection;
