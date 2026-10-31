@@ -7,6 +7,7 @@ use crate::{
     pdf_font_program::{TrueTypeProgram, Type1Program},
     standard14::{self, Standard14Font},
 };
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
@@ -35,7 +36,7 @@ impl FromPdfObject for SimpleFontSpec {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let value = context.object();
         let mut context = context.dictionary()?;
-        let subtype: Arc<[u8]> = context.required(b"Subtype")?;
+        let subtype: PdfName = context.required(b"Subtype")?;
         let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");
         // A bad program must not discard an otherwise usable font.
         let program: Option<FontSource> = match subtype.as_ref() {

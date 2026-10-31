@@ -9,6 +9,7 @@ use crate::{
     web_render::{self, WebEndpoints},
 };
 use anyhow::{Result, anyhow};
+use bytes::Bytes;
 use image::{DynamicImage, GenericImage, Rgba, RgbaImage, imageops::FilterType};
 use num_traits::ToPrimitive;
 use pdf_canvas::{PageViewport, ViewportError};
@@ -64,7 +65,7 @@ fn report_stats(stats: &RenderStats) -> Result<()> {
     Ok(())
 }
 
-fn read_safe(bytes: &[u8], password: Option<&str>) -> Result<pdf_document::report::PdfReadReport> {
+fn read_safe(bytes: Bytes, password: Option<&str>) -> Result<pdf_document::report::PdfReadReport> {
     Ok(PdfReader.read_with_report(bytes, password.map(str::as_bytes))?)
 }
 
@@ -93,10 +94,10 @@ pub fn read(
     pdfium: Option<&Path>,
     reference_images: Option<&Path>,
 ) -> Result<()> {
-    let bytes = fs::read(pdf)?;
+    let bytes = Bytes::from(fs::read(pdf)?);
     let mut output = ReadOutput::default();
     stage("safe-read");
-    match read_safe(&bytes, password) {
+    match read_safe(bytes.clone(), password) {
         Ok(report) => {
             output.diagnostics = report
                 .diagnostics()
@@ -192,7 +193,7 @@ fn annotation_boxes(page: &pdf_document::page::PdfPage, width: u32, height: u32)
     page.annotations
         .iter()
         .flatten()
-        .filter(|annotation| annotation.subtype != b"Link" && annotation.subtype != b"Popup")
+        .filter(|annotation| *annotation.subtype != *b"Link" && *annotation.subtype != *b"Popup")
         .filter_map(|annotation| {
             let rect = annotation.rect?;
             let mapped = viewport.map_rect(&rect).ok()?;
@@ -227,13 +228,13 @@ fn glyph_boxes(layout: &PageTextLayout, width: u32, height: u32) -> Vec<[u32; 4]
 
 /// Renders one page with Safe-PDF, compares it with the reference, and writes evidence files.
 pub fn page(job: &PageJob<'_>) -> Result<()> {
-    let bytes = fs::read(job.pdf)?;
+    let bytes = Bytes::from(fs::read(job.pdf)?);
     let mut output = PageOutput {
         page: job.page,
         ..PageOutput::default()
     };
     stage("safe-read");
-    let safe_document = read_safe(&bytes, job.password).map(|report| report.into_document());
+    let safe_document = read_safe(bytes.clone(), job.password).map(|report| report.into_document());
     let safe_points = match &safe_document {
         Ok(document) => document
             .get_page(job.page)
@@ -244,10 +245,10 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
             }),
         Err(_) => Err(anyhow!("document not loaded")),
     };
-    if let Some(page) = safe_document
+    if let Some((document, page)) = safe_document
         .as_ref()
         .ok()
-        .and_then(|document| document.get_page(job.page))
+        .and_then(|document| document.get_page(job.page).map(|page| (document, page)))
     {
         // Written before rendering, so it is there when rendering crashes or times out.
         stage("safe-streams");
@@ -255,7 +256,7 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
         fs::create_dir_all(job.out_dir)?;
         fs::write(
             job.out_dir.join(&name),
-            StreamGraph::of_page(page, job.page).text(),
+            StreamGraph::of_page(document, page, job.page).text(),
         )?;
         output.files.push(name);
     }
@@ -629,10 +630,10 @@ fn write_operators(
     document: &PdfDocument,
     prefix: &str,
 ) -> Result<()> {
-    let Some(content) = document
-        .get_page(job.page)
-        .and_then(|page| page.contents.as_ref())
-    else {
+    let Some(page) = document.get_page(job.page) else {
+        return Ok(());
+    };
+    let Some(content) = document.content_stream(page)? else {
         return Ok(());
     };
     let mut text = format!(

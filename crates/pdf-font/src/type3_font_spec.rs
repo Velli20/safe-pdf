@@ -7,7 +7,9 @@ use crate::{
 };
 use pdf_content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, inline_bytes::InlineBytes,
+};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -63,7 +65,7 @@ impl FromPdfObject for CharProcedures {
             let handle = GlyphId::try_from(stream.id).map_err(|_| {
                 FontError::InvalidDescendantFonts("Type 3 content stream ID does not fit u32")
             })?;
-            handles.insert(GlyphName(Arc::from(name)), handle);
+            handles.insert(GlyphName(InlineBytes::from_bytes(name)), handle);
             streams.insert(handle, stream);
         }
         Ok(Self {

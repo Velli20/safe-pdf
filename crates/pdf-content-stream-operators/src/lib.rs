@@ -4,11 +4,10 @@ pub mod marked_content_operators;
 pub mod variants;
 
 extern crate alloc;
-use std::sync::Arc;
 
 use pdf_object_reader::{
     ArrayContext, EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, ReadSession,
-    object_variant::ObjectVariant,
+    inline_bytes::InlineBytes, object_variant::ObjectVariant,
 };
 
 /// The operands collected before an operator token, read in place through a
@@ -19,7 +18,7 @@ pub type OperandContext<'read, 'reader> = ArrayContext<'read, ReadSession<'reade
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfTextItem {
     /// Encoded PDF string bytes.
-    Text(Arc<[u8]>),
+    Text(InlineBytes),
     /// Numeric text-position adjustment in thousandths of a text-space unit.
     Adjustment(f32),
 }
@@ -29,7 +28,7 @@ impl FromPdfObject for PdfTextItem {
     #[inline]
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object() {
-            ObjectVariant::String(value) => Ok(Self::Text(Arc::clone(&value.bytes))),
+            ObjectVariant::String(value) => Ok(Self::Text(value.bytes.clone())),
             _ => Ok(Self::Adjustment(context.decode()?)),
         }
     }

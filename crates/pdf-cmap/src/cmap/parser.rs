@@ -74,7 +74,8 @@ impl<'a> CMapParser<'a> {
             b'(' => CMapToken::LiteralString(
                 self.parser
                     .parse_literal_string()
-                    .map_err(ParserError::from)?,
+                    .map_err(ParserError::from)?
+                    .into_owned(),
             ),
             b'/' => self.parse_name_token()?,
             b'<' => self.parse_left_angle_token()?,
@@ -101,7 +102,9 @@ impl<'a> CMapParser<'a> {
             let _ = self.parser.read_byte();
             Ok(CMapToken::DoubleLeftAngleBracket)
         } else {
-            Ok(CMapToken::HexString(self.parser.parse_hex_string()?))
+            Ok(CMapToken::HexString(
+                self.parser.parse_hex_string()?.to_vec(),
+            ))
         }
     }
 

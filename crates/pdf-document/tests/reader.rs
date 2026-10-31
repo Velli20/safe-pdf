@@ -650,7 +650,7 @@ fn test_encrypted_document_detection() {
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(matches!(
         result,
         Err(PdfReaderError::ObjectRead(ref error))
@@ -692,7 +692,7 @@ fn test_encrypted_document_v4_aes() {
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(result.is_err());
 }
 
@@ -719,7 +719,7 @@ fn test_unencrypted_document_loads_normally() {
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "Unencrypted document should load: {:?}",
@@ -759,7 +759,7 @@ fn test_headerless_document_loads_normally() {
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(result.is_ok());
     assert_eq!(result.unwrap().page_count(), 1);
 }
@@ -799,7 +799,7 @@ fn test_headerless_document_with_shifted_xref_offsets_loads_normally() {
     );
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(result.is_ok());
     assert_eq!(result.unwrap().page_count(), 1);
 }
@@ -808,7 +808,7 @@ fn test_headerless_document_with_shifted_xref_offsets_loads_normally() {
 fn test_issue139_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_issue139_like_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "issue139.pdf should load after xref recovery: {:?}",
@@ -821,7 +821,7 @@ fn test_issue139_pdf_loads_normally() {
 fn test_issue1293_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_issue1293_like_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "issue1293r.pdf should load with missing /Length recovery: {:?}",
@@ -836,7 +836,7 @@ fn test_issue1293_pdf_loads_normally() {
 fn test_pdfbox4352_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_pdfbox4352_like_pdf();
-    let result = reader.read_with_report(&data, None);
+    let result = reader.read_with_report(data, None);
     assert!(
         result.is_ok(),
         "PDFBOX-4352-style PDF should load despite malformed optional encryption object: {:?}",
@@ -857,7 +857,7 @@ fn test_pdfbox4352_pdf_loads_normally() {
 fn test_issue10438_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_issue10438_like_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "issue10438_reduced.pdf should load after xref recovery: {:?}",
@@ -872,7 +872,7 @@ fn test_issue10438_pdf_loads_normally() {
 fn test_missing_xref_command_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_missing_xref_command_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "xref_command_missing.pdf should load after malformed xref recovery: {:?}",
@@ -915,7 +915,7 @@ fn test_missing_startxref_value_with_leading_junk_loads_normally() {
 
     let reader = PdfReader;
     let document = reader
-        .read_from_bytes(&data, None)
+        .read_from_bytes(data, None)
         .expect("a missing startxref value should trigger linear recovery");
 
     assert_eq!(document.page_count(), 1);
@@ -935,15 +935,16 @@ xref\n0000000000 65535 f \n0000000008 00000 n \n0000000054 00000 n \n0000000128 
 trailer\n<</Root 1 0 R/Size 5>>\nstartxref\n";
 
     let report = PdfReader
-        .read_with_report(data, None)
+        .read_with_report(data.as_slice(), None)
         .expect("issue6069 should load through xref reconstruction");
     let page = report
         .document()
         .get_page(0)
         .expect("issue6069 should contain one page");
-    let contents = page
-        .contents
-        .as_ref()
+    let contents = report
+        .document()
+        .content_stream(page)
+        .expect("the recovered page content stream should parse")
         .expect("the recovered page content stream should remain available");
 
     assert_eq!(contents.operators.len(), 5);
@@ -953,11 +954,14 @@ trailer\n<</Root 1 0 R/Size 5>>\nstartxref\n";
 fn test_xref_backed_zero_length_filtered_stream_recovers() {
     let data = build_xref_backed_zero_length_filtered_stream_pdf();
     let document = PdfReader
-        .read_from_bytes(&data, None)
+        .read_from_bytes(data, None)
         .expect("xref-backed stream with a malformed zero length should recover");
-    let contents = document
+    let page = document
         .get_page(0)
-        .and_then(|page| page.contents.as_ref())
+        .expect("the page should remain available");
+    let contents = document
+        .content_stream(page)
+        .expect("the recovered and decoded content stream should parse")
         .expect("the recovered and decoded content stream should remain available");
 
     assert_eq!(contents.operators.len(), 2);
@@ -967,7 +971,7 @@ fn test_xref_backed_zero_length_filtered_stream_recovers() {
 fn test_xobject_image_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_xobject_image_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "xobject-image.pdf should load after traditional xref entry repair: {:?}",
@@ -982,7 +986,7 @@ fn test_xobject_image_pdf_loads_normally() {
 fn test_xobject_with_malformed_dimensions_loads_normally() {
     let data = build_xobject_with_malformed_dimensions_pdf();
     let doc = PdfReader
-        .read_from_bytes(&data, None)
+        .read_from_bytes(data, None)
         .expect("a malformed image should not prevent the document from loading");
     let page = doc.get_page(0).expect("the page should remain available");
     let xobject = page
@@ -1001,7 +1005,7 @@ fn test_xobject_with_malformed_dimensions_loads_normally() {
 fn test_xobject_image_with_flat_xref_rows_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_xobject_image_with_flat_xref_rows_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "xobject image with xref keyword and flat rows should load: {:?}",
@@ -1016,7 +1020,7 @@ fn test_xobject_image_with_flat_xref_rows_pdf_loads_normally() {
 fn test_malformed_incremental_xref_subsection_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_malformed_incremental_xref_subsection_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "malformed incremental xref subsection should load after recovery: {:?}",
@@ -1032,7 +1036,7 @@ fn test_malformed_incremental_xref_subsection_pdf_loads_normally() {
 fn test_hybrid_xref_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_hybrid_xref_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "hybrid-reference PDF should load after /XRefStm merge: {:?}",
@@ -1074,7 +1078,7 @@ fn test_stream_with_indirect_length_resolves() {
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "Stream with indirect /Length should resolve: {:?}",
@@ -1136,7 +1140,7 @@ fn test_stream_with_compressed_indirect_length_resolves() {
     data.extend_from_slice(format!("startxref\n{obj6_offset}\n%%EOF").as_bytes());
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "stream with compressed indirect /Length should resolve: {:?}",
@@ -1173,7 +1177,7 @@ fn test_unresolvable_reference_returns_error() {
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(matches!(
         result,
         Err(PdfReaderError::UnresolvedObjects {
@@ -1187,7 +1191,7 @@ fn test_unresolvable_reference_returns_error() {
 fn test_image_xobject_smask_name_none_loads_normally() {
     let reader = PdfReader;
     let data = build_xobject_image_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "Image XObject with /SMask /None should load: {:?}",
@@ -1200,7 +1204,7 @@ fn test_image_xobject_smask_name_none_loads_normally() {
 fn test_malformed_xref_stream_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_malformed_xref_stream_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "xref stream with one bad unused normal entry should still load: {:?}",
@@ -1260,7 +1264,7 @@ fn test_cyclic_page_tree_does_not_overflow() {
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "Cyclic page tree should not cause an error: {:?}",
@@ -1327,7 +1331,7 @@ fn test_sampled_function_shading_loads_normally() {
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "PDF with sampled function shading should load: {:?}",
@@ -1387,7 +1391,7 @@ fn test_sampled_function_shading_with_single_name_array_color_space_loads_normal
     data.extend_from_slice(b"%%EOF");
 
     let reader = PdfReader;
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_from_bytes(data, None);
     assert!(
         result.is_ok(),
         "PDF with single-name array color space shading should load: {:?}",

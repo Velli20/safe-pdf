@@ -30,7 +30,7 @@ impl WebDocument {
     /// Parses user-provided bytes entirely within WebAssembly, decrypting them with
     /// `password` when given.
     #[wasm_bindgen(constructor)]
-    pub fn new(bytes: &[u8], password: Option<String>) -> Result<WebDocument, JsValue> {
+    pub fn new(bytes: Vec<u8>, password: Option<String>) -> Result<WebDocument, JsValue> {
         let document = PdfReader
             .read_from_bytes(bytes, password.as_deref().map(str::as_bytes))
             .map_err(error)?;

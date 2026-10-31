@@ -1,10 +1,9 @@
 use crate::{
-    external_graphics_state::ExternalGraphicsState, form::FormXObject, pattern::Pattern,
-    resources::Resources,
+    external_graphics_state::ExternalGraphicsState, form::FormXObject, image_xobject::ImageXObject,
+    pattern::Pattern, resources::Resources,
 };
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::PdfFontSpec;
-use pdf_graphics::Image;
 use pdf_object_reader::ObjectHandle;
 use pdf_shading::model::Shading;
 use std::sync::Arc;
@@ -21,10 +20,10 @@ pub enum Resource {
     },
     /// An external graphics state resource.
     ExternalGraphicsState(ObjectHandle<ExternalGraphicsState>),
-    /// An image XObject resource.
-    Image(Arc<Image>),
-    /// An image XObject whose dimensions are malformed or whose data cannot be
-    /// decoded, so it cannot be rendered.
+    /// An image XObject resource, decoded when it is drawn.
+    Image(Arc<ImageXObject>),
+    /// An image XObject whose dimensions or filter chain are malformed, so it cannot
+    /// be rendered.
     UnavailableImage,
     /// A form XObject resource.
     Form(ObjectHandle<FormXObject>),
@@ -74,12 +73,6 @@ impl Resource {
             return None;
         };
         Some(Arc::clone(color_space))
-    }
-}
-
-impl From<Image> for Resource {
-    fn from(image: Image) -> Self {
-        Self::Image(Arc::new(image))
     }
 }
 

@@ -240,12 +240,12 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
         &mut self,
         key: &[u8],
         mut decode: impl FnMut(&mut Self, &ObjectVariant) -> ReadResult<T>,
-    ) -> ReadResult<HashMap<Vec<u8>, T>> {
+    ) -> ReadResult<HashMap<PdfName, T>> {
         let entries = self.with_optional_dictionary(key, |context, dictionary| {
             let mut entries = HashMap::with_capacity(dictionary.len());
             for (name, value) in dictionary.iter() {
                 if !context.is_absent(value)? {
-                    entries.insert(name.to_vec(), decode(context, value)?);
+                    entries.insert(PdfName::from_bytes(name), decode(context, value)?);
                 }
             }
             Ok(entries)
@@ -260,11 +260,13 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
     pub fn lenient_entries<T: FromPdfObject>(
         &mut self,
         key: &[u8],
-    ) -> ReadResult<HashMap<Vec<u8>, T>> {
+    ) -> ReadResult<HashMap<PdfName, T>> {
         let entries = self.with_optional_dictionary(key, |context, dictionary| {
             Ok(dictionary
                 .iter()
-                .filter_map(|(name, value)| Some((name.to_vec(), context.access.read(value).ok()?)))
+                .filter_map(|(name, value)| {
+                    Some((PdfName::from_bytes(name), context.access.read(value).ok()?))
+                })
                 .collect())
         })?;
         Ok(entries.unwrap_or_default())

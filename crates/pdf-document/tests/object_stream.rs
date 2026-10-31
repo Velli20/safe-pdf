@@ -76,7 +76,7 @@ fn compressed_page_tree_loads_through_the_reader() {
     let data = build_object_stream_pdf();
 
     let document = reader
-        .read_from_bytes(&data, None)
+        .read_from_bytes(data, None)
         .expect("document should load");
 
     assert_eq!(document.page_count(), 1);

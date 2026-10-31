@@ -1,10 +1,11 @@
 //! Simple-font encoding tables, PDF differences, and WinAnsi text conversion.
 
 use crate::{font::GlyphName, pdf::SimpleEncoding};
-use std::{borrow::Cow, convert::TryFrom, sync::Arc};
+use std::convert::TryFrom;
 
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, inline_bytes::InlineBytes,
+    object_variant::ObjectVariant,
 };
 
 use crate::{base_encoding::BaseEncoding, error::FontError};
@@ -13,7 +14,7 @@ use crate::{base_encoding::BaseEncoding, error::FontError};
 #[derive(Debug)]
 pub struct Encoding {
     /// The base encoding table with any PDF Differences applied.
-    pub names: Vec<Cow<'static, [u8]>>,
+    pub names: Vec<InlineBytes>,
 }
 
 impl Default for Encoding {
@@ -62,18 +63,18 @@ impl FromPdfObject for Encoding {
     /// Reads a base-encoding name or an encoding dictionary in the active traversal.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         if !matches!(context.object(), ObjectVariant::Dictionary(_)) {
-            let name = Arc::<[u8]>::from_pdf_object(context)?;
+            let name = InlineBytes::from_pdf_object(context)?;
             return Ok(Self::try_from(BaseEncoding::from(name.as_ref()))?);
         }
         let mut context = context.dictionary()?;
-        let mut encoding = match context.optional::<Arc<[u8]>>(b"BaseEncoding")? {
+        let mut encoding = match context.optional::<InlineBytes>(b"BaseEncoding")? {
             Some(name) => Self::try_from(BaseEncoding::from(name.as_ref()))?,
             None => Self::default(),
         };
         if let Some(differences) = context.optional::<EncodingDifferences>(b"Differences")? {
             for (code, name) in differences.0 {
                 if let Some(slot) = encoding.names.get_mut(usize::from(code)) {
-                    *slot = Cow::Owned(name);
+                    *slot = name;
                 }
             }
         }
@@ -82,7 +83,7 @@ impl FromPdfObject for Encoding {
 }
 
 /// Valid one-byte replacements, retaining the last name assigned to each code.
-struct EncodingDifferences(std::collections::BTreeMap<u8, Vec<u8>>);
+struct EncodingDifferences(std::collections::BTreeMap<u8, InlineBytes>);
 
 impl FromPdfObject for EncodingDifferences {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
@@ -95,8 +96,7 @@ impl FromPdfObject for EncodingDifferences {
             } else {
                 // Ignore names outside the one-byte encoding table without reading them.
                 if let Ok(code) = u8::try_from(code) {
-                    let name: std::sync::Arc<[u8]> = context.at(index)?;
-                    names.insert(code, name.to_vec());
+                    names.insert(code, context.at(index)?);
                 }
                 code = code.saturating_add(1);
             }
@@ -118,12 +118,10 @@ impl SimpleEncoding {
         });
         let differences = encoding
             .names
-            .iter()
+            .into_iter()
             .enumerate()
             .filter_map(|(index, name)| {
-                u8::try_from(index)
-                    .ok()
-                    .map(|code| (code, GlyphName(Arc::from(name.as_ref()))))
+                u8::try_from(index).ok().map(|code| (code, GlyphName(name)))
             })
             .collect();
         Self {
@@ -133,9 +131,9 @@ impl SimpleEncoding {
     }
 }
 
-/// Borrows static glyph names until a PDF difference replaces them.
-fn names_from_base(base: &[&'static [u8]]) -> Vec<Cow<'static, [u8]>> {
-    base.iter().map(|&nm| Cow::Borrowed(nm)).collect()
+/// Copies static glyph names into a table that PDF differences can replace.
+fn names_from_base(base: &[&'static [u8]]) -> Vec<InlineBytes> {
+    base.iter().map(InlineBytes::from_bytes).collect()
 }
 
 /// Encodes a Unicode character as a WinAnsi byte, rejecting unsupported characters.

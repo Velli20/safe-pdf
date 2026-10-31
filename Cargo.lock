@@ -2177,6 +2177,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "bytes",
  "clap",
  "image",
  "md-5",
@@ -2386,9 +2387,6 @@ dependencies = [
 name = "pdf-jbig2"
 version = "0.1.0"
 dependencies = [
- "bitflags 2.9.1",
- "criterion",
- "num-traits",
  "pdf-ccitt",
  "pdf-mq-coder",
  "pdf-utils",
@@ -2454,6 +2452,7 @@ dependencies = [
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "criterion",
  "flate2",
  "pdf-filter",
@@ -2481,6 +2480,7 @@ dependencies = [
  "pdf-document",
  "pdf-font",
  "pdf-graphics",
+ "pdf-object-reader",
  "pdf-optional-content",
  "pdf-text-engine",
  "pdf-utils",

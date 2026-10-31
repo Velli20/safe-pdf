@@ -1,3 +1,6 @@
+use std::ops::Range;
+
+use bytes::Bytes;
 use pdf_object_reader::{
     dictionary::Dictionary, object_id::ObjectId, object_variant::ObjectVariant,
     stream::StreamObject,
@@ -39,8 +42,28 @@ impl StreamHeader {
         self.dictionary.get(b"Length")
     }
 
+    /// Combines the dictionary with the body found at `body` in `source`.
+    ///
+    /// `source` must be the input the parser read, and `body` the range returned by
+    /// [`PdfParser::parse_stream_body`] or [`PdfParser::recover_stream_body`]. The stream
+    /// shares `source`'s allocation instead of copying the body.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParserError::UnexpectedEndOfFile`] if `body` lies outside `source`.
+    pub fn into_stream_in(
+        self,
+        source: &Bytes,
+        body: Range<usize>,
+    ) -> Result<ObjectVariant, ParserError> {
+        source
+            .get(body.clone())
+            .ok_or(ParserError::UnexpectedEndOfFile)?;
+        Ok(self.into_stream(source.slice(body)))
+    }
+
     /// Combines the dictionary with its encoded body.
-    fn into_stream(self, data: Vec<u8>) -> ObjectVariant {
+    pub(crate) fn into_stream(self, data: impl Into<Bytes>) -> ObjectVariant {
         ObjectVariant::Stream(StreamObject::new_encoded(
             self.identifier.number,
             self.identifier.generation,
@@ -176,8 +199,9 @@ impl PdfParser<'_> {
     /// The identifier must have already been consumed with
     /// [`Self::parse_indirect_object_id`]. A plain value is returned with its terminator
     /// consumed. A stream stops at its `stream` keyword: its body length can depend on
-    /// other objects, so the caller determines it from the returned [`StreamHeader`] and
-    /// finishes with [`Self::parse_stream_body`] or [`Self::recover_stream_body`].
+    /// other objects, so the caller determines it from the returned [`StreamHeader`],
+    /// locates the body with [`Self::parse_stream_body`] or [`Self::recover_stream_body`],
+    /// and builds the stream with [`StreamHeader::into_stream_in`].
     pub fn parse_indirect_object_value(
         &mut self,
         identifier: ObjectId,
@@ -199,26 +223,23 @@ impl PdfParser<'_> {
         Ok(IndirectValue::Object(object))
     }
 
-    /// Reads a stream body of exactly `length` bytes, then `endstream` and `endobj`.
+    /// Locates a stream body of exactly `length` bytes, then reads `endstream` and `endobj`.
     ///
-    /// The parser must be where [`Self::parse_indirect_object_value`] left it. The bytes
-    /// are not filter decoded.
+    /// The parser must be where [`Self::parse_indirect_object_value`] left it. Returns the
+    /// body's byte range within the parser's input; the bytes are neither copied nor
+    /// filter decoded.
     ///
     /// # Errors
     ///
     /// Returns an error if the declared bytes are not available, or the `stream`,
     /// `endstream`, or `endobj` keyword is missing or malformed.
-    pub fn parse_stream_body(
-        &mut self,
-        header: StreamHeader,
-        length: usize,
-    ) -> Result<ObjectVariant, ParserError> {
-        let data = self.parse_stream(length)?;
+    pub fn parse_stream_body(&mut self, length: usize) -> Result<Range<usize>, ParserError> {
+        let body = self.parse_stream(length)?;
         self.consume_required_endobj()?;
-        Ok(header.into_stream(data))
+        Ok(body)
     }
 
-    /// Reads a stream body using `length` only as a hint, then `endobj`.
+    /// Locates a stream body using `length` only as a hint, then reads `endobj`.
     ///
     /// A declared boundary is used when it is structurally valid; a missing, stale, or
     /// otherwise incorrect one falls back to a bounded `endstream` search, as described
@@ -230,12 +251,11 @@ impl PdfParser<'_> {
     /// is missing.
     pub fn recover_stream_body(
         &mut self,
-        header: StreamHeader,
         length: Option<usize>,
-    ) -> Result<ObjectVariant, ParserError> {
-        let data = self.recovered_stream_bytes(length)?;
+    ) -> Result<Range<usize>, ParserError> {
+        let body = self.recover_stream_range(length)?;
         self.consume_required_endobj()?;
-        Ok(header.into_stream(data))
+        Ok(body)
     }
 
     /// Requires `endobj`, unless the current input is a safe malformed-file recovery boundary.
@@ -294,7 +314,8 @@ mod tests {
             IndirectValue::Stream(header) => {
                 let length = ObjectReader::new(EmptySource)
                     .required::<usize>(header.dictionary(), b"Length")?;
-                parser.parse_stream_body(header, length)?
+                let body = parser.parse_stream_body(length)?;
+                header.into_stream_in(&Bytes::copy_from_slice(parser.tokenizer.input), body)?
             }
         };
         Ok(Some((identifier, object)))
@@ -380,9 +401,12 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
         let header = stream_header(&mut parser);
 
-        let object = parser
-            .recover_stream_body(header, Some(0))
+        let body = parser
+            .recover_stream_body(Some(0))
             .expect("the structurally delimited stream should recover");
+        let object = header
+            .into_stream_in(&Bytes::from_static(input), body)
+            .unwrap();
         let ObjectVariant::Stream(stream) = object else {
             panic!("expected recovered stream");
         };
@@ -394,9 +418,9 @@ mod tests {
     fn recovering_stream_parser_requires_endobj_after_candidate() {
         let input = b"1 0 obj\n<< /Length 0 >>\nstream\npayload\nendstream\nnot-endobj";
         let mut parser = PdfParser::from(input.as_slice());
-        let header = stream_header(&mut parser);
+        stream_header(&mut parser);
 
-        let result = parser.recover_stream_body(header, Some(0));
+        let result = parser.recover_stream_body(Some(0));
 
         assert!(result.is_err());
     }

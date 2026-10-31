@@ -9,8 +9,8 @@ use crate::optional_content::{
     OptionalContentGroupId, OptionalContentMembership, OptionalContentPolicy,
     OptionalContentProperties,
 };
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
-use std::sync::Arc;
 
 /// Decodes the catalog's `/OCProperties`; alternate `/Configs` are not retained.
 impl FromPdfObject for OptionalContentProperties {
@@ -38,7 +38,7 @@ impl FromPdfObject for OptionalContentConfiguration {
 /// Reads a `/BaseState` name. An absent entry is the caller's `On` default.
 impl FromPdfObject for OptionalContentBaseState {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         match &*name {
             b"ON" => Ok(Self::On),
             b"OFF" => Ok(Self::Off),
@@ -55,7 +55,7 @@ impl FromPdfObject for OptionalContentBaseState {
 /// that follow their operation and never reach this decoder.
 impl FromPdfObject for OcgStateEntry {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         match &*name {
             b"ON" => Ok(Self::On),
             b"OFF" => Ok(Self::Off),
@@ -72,7 +72,7 @@ impl FromPdfObject for OcgStateEntry {
 /// Reads a `/P` policy name. An absent entry is the caller's `AnyOn` default.
 impl FromPdfObject for OptionalContentPolicy {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<Arc<[u8]>>()?;
+        let name = context.decode::<PdfName>()?;
         match &*name {
             b"AnyOn" => Ok(Self::AnyOn),
             b"AllOn" => Ok(Self::AllOn),
@@ -93,7 +93,7 @@ impl FromPdfObject for OptionalContentGroup {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         // A malformed name never discards an otherwise identifiable group.
-        let name = context.lenient::<Arc<[u8]>>(b"Name");
+        let name = context.lenient::<PdfName>(b"Name");
         Ok(Self {
             id: OptionalContentGroupId::new(context.object_number(), name.as_deref())?,
             name: name.map(|name| name.to_vec()),
@@ -106,7 +106,7 @@ impl FromPdfObject for OptionalContentGroup {
 impl FromPdfObject for OptionalContentGroupId {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let name = context.lenient::<Arc<[u8]>>(b"Name");
+        let name = context.lenient::<PdfName>(b"Name");
         Ok(Self::new(context.object_number(), name.as_deref())?)
     }
 }
@@ -117,7 +117,7 @@ impl FromPdfObject for OptionalContentGroupId {
 impl FromPdfObject for OptionalContentMembership {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        match context.lenient::<Arc<[u8]>>(b"Type").as_deref() {
+        match context.lenient::<PdfName>(b"Type").as_deref() {
             Some(b"OCMD") => Ok(Self {
                 // `/OCGs` is a single group or an array of them.
                 groups: context.optional_list(b"OCGs")?,
@@ -128,7 +128,7 @@ impl FromPdfObject for OptionalContentMembership {
             // A single group is a membership of that group under the default `AnyOn` policy.
             // A missing or invalid `/Type` is ignored and the dictionary read as a group.
             _ => {
-                let name = context.lenient::<Arc<[u8]>>(b"Name");
+                let name = context.lenient::<PdfName>(b"Name");
                 Ok(Self {
                     groups: vec![OptionalContentGroupId::new(
                         context.object_number(),
@@ -148,7 +148,7 @@ impl FromPdfObject for OptionalContentMembership {
 impl FromPdfObject for OcgTarget {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let group_type = context.required::<Arc<[u8]>>(b"Type")?;
+        let group_type = context.required::<PdfName>(b"Type")?;
         if group_type.as_ref() != b"OCG" {
             return Err(OptionalContentError::InvalidEntry {
                 entry: b"State",
@@ -157,7 +157,7 @@ impl FromPdfObject for OcgTarget {
             .into());
         }
         Ok(Self::Dictionary {
-            name: context.required::<Arc<[u8]>>(b"Name")?.to_vec(),
+            name: context.required(b"Name")?,
         })
     }
 }

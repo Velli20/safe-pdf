@@ -11,6 +11,7 @@ pdf-optional-content = { path = "../pdf-optional-content" }
 pdf-utils = { path = "../pdf-utils" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-document = { path = "../pdf-document" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-font = { path = "../pdf-font" }

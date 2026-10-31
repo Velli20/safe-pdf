@@ -30,4 +30,9 @@ impl Point<f32> {
         self.x += dx;
         self.y += dy;
     }
+
+    /// Returns the point at fraction `t` of the way from `self` towards `to`.
+    pub fn lerp(self, to: Self, t: f32) -> Self {
+        Self::new(self.x + (to.x - self.x) * t, self.y + (to.y - self.y) * t)
+    }
 }

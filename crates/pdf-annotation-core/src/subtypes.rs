@@ -1,4 +1,6 @@
 //! Extended live annotation payloads in page space, independent of native toolkits.
+use std::sync::Arc;
+
 use crate::{
     models::{AnnotationId, Quad},
     pdf_data::{
@@ -88,7 +90,7 @@ pub struct Stamp {
     /// Page-space stamp rectangle.
     pub bounds: Rect,
     /// Original stamp name bytes.
-    pub name: Vec<u8>,
+    pub name: Arc<[u8]>,
     /// Current style.
     pub style: ResolvedStyle,
 }
@@ -112,7 +114,7 @@ impl Stamp {
             b"Draft",
             b"ForPublicRelease",
         ];
-        NAMES.contains(&self.name.as_slice())
+        NAMES.contains(&&*self.name)
     }
 }
 

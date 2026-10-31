@@ -44,14 +44,14 @@ impl FromPdfObject for WidgetAnnotation {
 /// Field entries a widget may inherit from its `/Parent` chain.
 #[derive(Default)]
 struct FieldProperties {
-    field_type: Option<Vec<u8>>,
-    field_name: Option<Vec<u8>>,
-    alternate_name: Option<Vec<u8>>,
-    mapping_name: Option<Vec<u8>>,
+    field_type: Option<Arc<[u8]>>,
+    field_name: Option<Arc<[u8]>>,
+    alternate_name: Option<Arc<[u8]>>,
+    mapping_name: Option<Arc<[u8]>>,
     field_flags: Option<WidgetFieldFlags>,
     value: Option<WidgetFieldValue>,
     default_value: Option<WidgetFieldValue>,
-    default_appearance: Option<Vec<u8>>,
+    default_appearance: Option<Arc<[u8]>>,
     quadding: Option<i32>,
     max_length: Option<u64>,
     options: Option<Vec<WidgetChoiceOption>>,
@@ -71,32 +71,17 @@ impl FromPdfObject for FieldProperties {
         .unwrap_or_default();
 
         Ok(Self {
-            field_type: dictionary
-                .optional::<Arc<[u8]>>(b"FT")?
-                .map(|bytes| bytes.to_vec())
-                .or(parent.field_type),
-            field_name: dictionary
-                .optional::<Arc<[u8]>>(b"T")?
-                .map(|bytes| bytes.to_vec())
-                .or(parent.field_name),
-            alternate_name: dictionary
-                .optional::<Arc<[u8]>>(b"TU")?
-                .map(|bytes| bytes.to_vec())
-                .or(parent.alternate_name),
-            mapping_name: dictionary
-                .optional::<Arc<[u8]>>(b"TM")?
-                .map(|bytes| bytes.to_vec())
-                .or(parent.mapping_name),
+            field_type: dictionary.optional(b"FT")?.or(parent.field_type),
+            field_name: dictionary.optional(b"T")?.or(parent.field_name),
+            alternate_name: dictionary.optional(b"TU")?.or(parent.alternate_name),
+            mapping_name: dictionary.optional(b"TM")?.or(parent.mapping_name),
             field_flags: dictionary
                 .optional::<i32>(b"Ff")?
                 .map(WidgetFieldFlags::from_bits_truncate)
                 .or(parent.field_flags),
             value: dictionary.optional(b"V")?.or(parent.value),
             default_value: dictionary.optional(b"DV")?.or(parent.default_value),
-            default_appearance: dictionary
-                .optional::<Arc<[u8]>>(b"DA")?
-                .map(|bytes| bytes.to_vec())
-                .or(parent.default_appearance),
+            default_appearance: dictionary.optional(b"DA")?.or(parent.default_appearance),
             quadding: dictionary.optional(b"Q")?.or(parent.quadding),
             max_length: dictionary.optional(b"MaxLen")?.or(parent.max_length),
             options: dictionary.optional(b"Opt")?.or(parent.options),
@@ -110,9 +95,9 @@ impl FromPdfObject for FieldProperties {
 impl FromPdfObject for WidgetChoiceOption {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         if !matches!(context.object(), ObjectVariant::Array(_)) {
-            let bytes = context.decode::<Arc<[u8]>>()?.to_vec();
+            let bytes = context.decode::<Arc<[u8]>>()?;
             return Ok(Self {
-                export_value: bytes.clone(),
+                export_value: Arc::clone(&bytes),
                 display_value: bytes,
             });
         }
@@ -126,8 +111,8 @@ impl FromPdfObject for WidgetChoiceOption {
             .into());
         }
         Ok(Self {
-            export_value: pair.at::<Arc<[u8]>>(0)?.to_vec(),
-            display_value: pair.at::<Arc<[u8]>>(1)?.to_vec(),
+            export_value: pair.at(0)?,
+            display_value: pair.at(1)?,
         })
     }
 }
@@ -136,7 +121,7 @@ impl FromPdfObject for WidgetChoiceOption {
 impl FromPdfObject for WidgetFieldValue {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object() {
-            ObjectVariant::String(bytes) => Ok(Self::Bytes(bytes.as_bytes().to_vec())),
+            ObjectVariant::String(bytes) => Ok(Self::Bytes(bytes.bytes.to_shared())),
             ObjectVariant::Dictionary(_) | ObjectVariant::Stream(_) => Ok(Self::Dictionary),
             ObjectVariant::Array(_) => context.array()?.read_all().map(Self::Array),
             ObjectVariant::Null => Ok(Self::Null),

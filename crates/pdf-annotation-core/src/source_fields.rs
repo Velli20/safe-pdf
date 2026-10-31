@@ -249,8 +249,8 @@ impl<'a> ToggleOptions<'a> {
 /// Whether the widget currently shows `state`: by `/AS` when present, else by `/V`.
 fn is_active(source: &SourceAnnotation, widget: &WidgetAnnotation, state: &[u8]) -> bool {
     match &source.appearance_state {
-        Some(appearance) => appearance.as_slice() == state,
-        None => matches!(&widget.value, Some(WidgetFieldValue::Bytes(v)) if v.as_slice() == state),
+        Some(appearance) => **appearance == *state,
+        None => matches!(&widget.value, Some(WidgetFieldValue::Bytes(v)) if **v == *state),
     }
 }
 

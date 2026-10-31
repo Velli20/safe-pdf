@@ -1,11 +1,10 @@
 //! Action, destination, and file-specification decoding; nothing is executed.
-use std::sync::Arc;
-
 use crate::error::SourceDecodeError;
 use crate::pdf_data::{
     AnnotationAction, AnnotationDestination, DestinationTarget, ExplicitDestination,
     FileSpecification, FileSpecificationDictionary,
 };
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
     ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     object_kind::ObjectKind, object_variant::ObjectVariant, pdf_array::PdfArray,
@@ -16,7 +15,7 @@ use pdf_optional_content::{OcgStateEntry, OcgTarget};
 impl FromPdfObject for AnnotationAction {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut action = context.dictionary()?;
-        let action_type = action.required::<Arc<[u8]>>(b"S")?;
+        let action_type = action.required::<PdfName>(b"S")?;
         Ok(match action_type.as_ref() {
             b"GoTo" => Self::GoTo {
                 destination: action.required(b"D")?,
@@ -29,33 +28,29 @@ impl FromPdfObject for AnnotationAction {
                 new_window: action.lenient(b"NewWindow"),
             },
             b"URI" => Self::Uri {
-                uri: action.required::<Arc<[u8]>>(b"URI")?.to_vec(),
+                uri: action.required(b"URI")?,
                 is_map: action.optional(b"IsMap")?,
             },
             b"Launch" => Self::Launch {
                 file_specification: action.optional(b"F")?,
             },
             b"Named" => Self::Named {
-                name: action.required::<Arc<[u8]>>(b"N")?.to_vec(),
+                name: action.required(b"N")?,
             },
             b"SubmitForm" => Self::SubmitForm {
                 file_specification: action.optional(b"F")?,
-                fields: action
-                    .optional::<Vec<Arc<[u8]>>>(b"Fields")?
-                    .map(|fields| fields.iter().map(|field| field.to_vec()).collect()),
+                fields: action.optional(b"Fields")?,
                 flags: action.optional(b"Flags")?,
             },
             b"ResetForm" => Self::ResetForm {
-                fields: action
-                    .optional::<Vec<Arc<[u8]>>>(b"Fields")?
-                    .map(|fields| fields.iter().map(|field| field.to_vec()).collect()),
+                fields: action.optional(b"Fields")?,
                 flags: action.optional(b"Flags")?,
             },
             b"ImportData" => Self::ImportData {
                 file_specification: action.required(b"F")?,
             },
             b"JavaScript" => Self::JavaScript {
-                script: action.required::<Arc<[u8]>>(b"JS")?.to_vec(),
+                script: action.required(b"JS")?,
             },
             b"SetOCGState" => Self::SetOCGState {
                 state: ocg_state(ArrayContext::new(
@@ -111,7 +106,7 @@ impl FromPdfObject for ExplicitDestination {
             true => DestinationTarget::Null,
             false => DestinationTarget::try_from(page)?,
         };
-        let mode = items.at::<Arc<[u8]>>(1)?;
+        let mode = items.at::<PdfName>(1)?;
         Ok(match mode.as_ref() {
             b"XYZ" => Self::Xyz {
                 page,
@@ -187,28 +182,16 @@ impl TryFrom<&ObjectVariant> for DestinationTarget {
 impl FromPdfObject for FileSpecification {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         if !matches!(context.object(), ObjectVariant::Dictionary(_)) {
-            return Ok(Self::Path(context.decode::<Arc<[u8]>>()?.to_vec()));
+            return Ok(Self::Path(context.decode()?));
         }
         let mut dictionary = context.dictionary()?;
         Ok(Self::Dictionary(Box::new(FileSpecificationDictionary {
-            file_system: dictionary
-                .optional::<Arc<[u8]>>(b"FS")?
-                .map(|bytes| bytes.to_vec()),
-            file_name: dictionary
-                .optional::<Arc<[u8]>>(b"F")?
-                .map(|bytes| bytes.to_vec()),
-            unicode_file_name: dictionary
-                .optional::<Arc<[u8]>>(b"UF")?
-                .map(|bytes| bytes.to_vec()),
-            mac_file_name: dictionary
-                .optional::<Arc<[u8]>>(b"Mac")?
-                .map(|bytes| bytes.to_vec()),
-            dos_file_name: dictionary
-                .optional::<Arc<[u8]>>(b"DOS")?
-                .map(|bytes| bytes.to_vec()),
-            unix_file_name: dictionary
-                .optional::<Arc<[u8]>>(b"Unix")?
-                .map(|bytes| bytes.to_vec()),
+            file_system: dictionary.optional(b"FS")?,
+            file_name: dictionary.optional(b"F")?,
+            unicode_file_name: dictionary.optional(b"UF")?,
+            mac_file_name: dictionary.optional(b"Mac")?,
+            dos_file_name: dictionary.optional(b"DOS")?,
+            unix_file_name: dictionary.optional(b"Unix")?,
             volatile: dictionary.optional(b"V")?,
         })))
     }

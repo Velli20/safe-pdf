@@ -67,6 +67,9 @@ mod projection;
 pub mod requests;
 /// Session-only annotation storage.
 pub mod session_store;
+mod shape_line_ending;
+mod shape_markup;
+mod shape_path;
 /// Local-unit outlines for annotations drawn by hosts.
 pub mod shapes;
 mod widget_control;

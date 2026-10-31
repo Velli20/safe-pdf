@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 use crate::catalog::Catalog;
 use crate::diagnostic::PdfReadDiagnostic;
 use crate::document::PdfDocument;
@@ -12,7 +14,10 @@ use pdf_object_reader::{
 };
 use pdf_parser::parser::PdfParser;
 
-/// Reads PDF documents from byte slices.
+/// Reads PDF documents from byte buffers.
+///
+/// Stream bodies that stay encoded share the input buffer instead of copying it, so the
+/// document keeps the buffer alive while it holds such a stream.
 #[derive(Default)]
 pub struct PdfReader;
 
@@ -20,10 +25,11 @@ impl PdfReader {
     /// Reads a PDF and returns both the document and recoverable read diagnostics.
     pub fn read_with_report(
         &self,
-        input: &[u8],
+        input: impl Into<Bytes>,
         password: Option<&[u8]>,
     ) -> Result<PdfReadReport, PdfReaderError> {
-        let mut parser = PdfParser::from(input);
+        let input = input.into();
+        let mut parser = PdfParser::from(input.as_ref());
         self.check_version(&mut parser)?;
 
         let CrossReferenceTable {
@@ -33,11 +39,11 @@ impl PdfReader {
         let mut diagnostics = Vec::new();
         let encryption = EncryptionContext::from_trailer(
             &mut trailer,
-            &EncryptObjectLoader::new(&entries, &parser),
+            &EncryptObjectLoader::new(&entries, &input),
             password,
             &mut diagnostics,
         )?;
-        let objects = ObjectLoader::new(&entries, &parser, encryption, &mut diagnostics).load()?;
+        let objects = ObjectLoader::new(&entries, &input, encryption, &mut diagnostics).load()?;
         let document = self.read_document(&trailer, objects, &mut diagnostics)?;
 
         Ok(PdfReadReport::new(document, diagnostics))
@@ -46,7 +52,7 @@ impl PdfReader {
     /// Reads a PDF and discards recoverable diagnostics.
     pub fn read_from_bytes(
         &self,
-        input: &[u8],
+        input: impl Into<Bytes>,
         password: Option<&[u8]>,
     ) -> Result<PdfDocument, PdfReaderError> {
         self.read_with_report(input, password)

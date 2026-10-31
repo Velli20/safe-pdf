@@ -6,6 +6,7 @@ use std::any::TypeId;
 
 use crate::context::ObjectContext;
 use crate::error::{ObjectReadError, ReadResult};
+use crate::inline_bytes::InlineBytes;
 use crate::object_error::ObjectError;
 use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
@@ -316,8 +317,8 @@ impl FromPdfObject for Color {
 /// Reads a soft mask's `/S` subtype. Unrecognized names are kept as `Unknown`.
 impl FromPdfObject for MaskMode {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let name = context.decode::<std::sync::Arc<[u8]>>()?;
-        Ok(match &*name {
+        let name = context.decode::<PdfName>()?;
+        Ok(match name.as_bytes() {
             b"Alpha" => Self::Alpha,
             b"Luminosity" => Self::Luminosity,
             other => Self::Unknown(Vec::from(other)),
@@ -330,8 +331,20 @@ impl FromPdfObject for MaskMode {
 impl FromPdfObject for PdfName {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object() {
-            ObjectVariant::String(value) => Ok(Self::from_shared(&value.bytes)),
+            ObjectVariant::String(value) => Ok(Self::from(value.bytes.clone())),
             other => Err(ObjectError::TypeMismatch("Name", other.name()).into()),
+        }
+    }
+}
+
+/// Reads the bytes of a name or string, accepting producer substitutions between them.
+/// Short values are copied inline; longer ones share the object's bytes.
+impl FromPdfObject for InlineBytes {
+    #[inline]
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object() {
+            ObjectVariant::String(value) => Ok(value.bytes.clone()),
+            other => Err(ObjectError::TypeMismatch("Bytes", other.name()).into()),
         }
     }
 }
@@ -343,7 +356,7 @@ impl FromPdfObject for PdfName {
 impl FromPdfObject for std::sync::Arc<[u8]> {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object() {
-            ObjectVariant::String(value) => Ok(Self::clone(&value.bytes)),
+            ObjectVariant::String(value) => Ok(value.bytes.to_shared()),
             ObjectVariant::Stream(stream) => Ok(Self::from(stream.raw_data())),
             other => Err(ObjectError::TypeMismatch("Bytes", other.name()).into()),
         }

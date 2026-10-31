@@ -1,11 +1,11 @@
-use crate::{error::PdfPagesError, form::FormXObject, resource::Resource, resources::Resources};
+use crate::{
+    form::FormXObject, image_xobject::ImageResource, resource::Resource, resources::Resources,
+};
 use pdf_font::PdfFontSpec;
-use pdf_graphics::Image;
-use pdf_image::{PdfImage, PdfImageError};
 use pdf_object_reader::pdf_string::PdfString;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ObjectReadError, ReadResult,
-    object_variant::ObjectVariant, pdf_name::PdfName,
+    object_variant::ObjectVariant,
 };
 use std::sync::Arc;
 
@@ -75,67 +75,6 @@ impl From<FontResource> for Resource {
         Self::Font {
             font: Arc::new(font),
             resources,
-        }
-    }
-}
-
-/// An image XObject decoded into a raster, or unavailable when its dimensions are
-/// malformed or its stream data cannot be decoded into samples.
-enum ImageResource {
-    Available(Image),
-    Unavailable,
-}
-
-impl FromPdfObject for ImageResource {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let object = context.object();
-        let image = match context.read::<PdfImage>(object) {
-            Ok(image) => image,
-            Err(error) if PdfImage::is_unreadable(&error) => return Ok(Self::Unavailable),
-            Err(error) => return Err(error),
-        };
-        let SoftMaskImage(soft_mask) = context.read(object)?;
-        match image.decode(soft_mask.as_deref()) {
-            Ok(image) => Ok(Self::Available(image)),
-            Err(error) if error.is_unreadable_data() => Ok(Self::Unavailable),
-            Err(error) => Err(PdfPagesError::from(error).into()),
-        }
-    }
-}
-
-impl From<ImageResource> for Resource {
-    fn from(image: ImageResource) -> Self {
-        match image {
-            ImageResource::Available(image) => Self::from(image),
-            ImageResource::Unavailable => Self::UnavailableImage,
-        }
-    }
-}
-
-/// An image's `/SMask`.
-///
-/// `/None`, an unavailable mask, or a mask that refers back to its own image leaves the
-/// image unmasked.
-struct SoftMaskImage(Option<Arc<Image>>);
-
-impl FromPdfObject for SoftMaskImage {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let mut context = context.dictionary()?;
-        if !context.contains(b"SMask")
-            || context
-                .lenient::<PdfName>(b"SMask")
-                .is_some_and(|name| name.as_bytes() == b"None")
-        {
-            return Ok(Self(None));
-        }
-        match context.required::<Resource>(b"SMask") {
-            Ok(Resource::Image(image)) => Ok(Self(Some(image))),
-            Ok(Resource::UnavailableImage) => Ok(Self(None)),
-            Err(error) if error.is_cyclic_reference() => Ok(Self(None)),
-            Ok(_) => Err(PdfPagesError::from(PdfImageError::InvalidSoftMaskXObject).into()),
-            Err(error) => Err(error),
         }
     }
 }
@@ -222,6 +161,7 @@ mod tests {
 
         assert!(matches!(&xobject, Resource::Image(_)));
         if let Resource::Image(image) = xobject {
+            let image = image.decode().unwrap().expect("the image should decode");
             assert_eq!(image.width, 1);
             assert_eq!(image.height, 1);
             assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
@@ -299,6 +239,7 @@ mod tests {
 
         match xobject {
             Resource::Image(image) => {
+                let image = image.decode().unwrap().expect("the image should decode");
                 assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
                 assert_eq!(
                     image.data.as_ref(),
@@ -402,6 +343,7 @@ mod tests {
         let Resource::Image(image) = xobject else {
             panic!("expected a decoded image xobject");
         };
+        let image = image.decode().unwrap().expect("the image should decode");
         assert_eq!(image.data.as_ref(), &[0x2A]);
     }
 

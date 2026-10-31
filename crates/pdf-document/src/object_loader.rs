@@ -14,6 +14,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
+use bytes::Bytes;
+
 use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::encryption_context::EncryptionContext;
 use crate::error::PdfReaderError;
@@ -246,9 +248,9 @@ impl ObjectLoadQueue {
 /// owns scheduling state. Keeping those responsibilities separate makes
 /// [`Self::load`] a small orchestration loop and keeps dependency mechanics out
 /// of parsing code.
-pub(super) struct ObjectLoader<'input, 'loader> {
-    /// Random-access parser over the source PDF bytes.
-    parser: &'loader PdfParser<'input>,
+pub(super) struct ObjectLoader<'loader> {
+    /// The source PDF bytes, shared with the stream bodies sliced out of them.
+    input: &'loader Bytes,
     /// Decryption state, absent when the document's objects are stored unencrypted.
     encryption: Option<EncryptionContext>,
     /// Objects available for resolving references during subsequent parses.
@@ -261,17 +263,17 @@ pub(super) struct ObjectLoader<'input, 'loader> {
     diagnostics: &'loader mut Vec<PdfReadDiagnostic>,
 }
 
-impl<'input, 'loader> ObjectLoader<'input, 'loader> {
+impl<'loader> ObjectLoader<'loader> {
     /// Creates an object loader for one parsed cross-reference table.
     pub(super) fn new(
         entries: &BTreeMap<usize, CrossReferenceEntryType>,
-        parser: &'loader PdfParser<'input>,
+        input: &'loader Bytes,
         encryption: Option<EncryptionContext>,
         diagnostics: &'loader mut Vec<PdfReadDiagnostic>,
     ) -> Self {
         let plan = LoadPlan::from_entries(entries);
         Self {
-            parser,
+            input,
             encryption,
             objects: ObjectCollection::with_capacity(plan.object_capacity),
             direct: ObjectReader::new(EmptySource),
@@ -362,8 +364,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
     /// that parsing was intentionally skipped after a recoverable decryption
     /// failure or that the parsed value did not insert an addressable object.
     fn load_object(&mut self, byte_offset: usize) -> Result<Option<usize>, PdfReaderError> {
-        let mut parser = self
-            .parser
+        let mut parser = PdfParser::from(self.input.as_ref())
             .at_offset(byte_offset)
             .map_err(PdfReaderError::from)?;
         let identifier = parser.parse_indirect_object_id().ok_or(
@@ -375,7 +376,8 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             IndirectValue::Object(object) => object,
             IndirectValue::Stream(header) => {
                 let length = self.stream_length(&header)?;
-                parser.recover_stream_body(header, length)?
+                let body = parser.recover_stream_body(length)?;
+                header.into_stream_in(self.input, body)?
             }
         };
 

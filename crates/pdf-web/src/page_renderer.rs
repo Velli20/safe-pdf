@@ -109,7 +109,7 @@ mod tests {
         WebPageRenderer,
     ) {
         let document = pdf_document::reader::PdfReader
-            .read_from_bytes(bytes, None)
+            .read_from_bytes(bytes.to_vec(), None)
             .unwrap();
         let renderer = WebPageRenderer::new(PdfRenderer::new(document));
         let page = renderer.document().pages.first().unwrap();

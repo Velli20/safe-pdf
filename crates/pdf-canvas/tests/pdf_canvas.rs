@@ -13,6 +13,7 @@ use pdf_graphics::{BlendMode, PixelFormat, rect::Rect};
 use pdf_image::PdfImage;
 use pdf_object_reader::{
     EmptySource, ObjectHandle, dictionary::Dictionary, object_variant::ObjectVariant,
+    pdf_name::PdfName,
 };
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
@@ -35,7 +36,7 @@ fn render(
 fn form_resource(name: &str, stream: ContentStream) -> Resources {
     Resources {
         xobjects: HashMap::from([(
-            name.as_bytes().to_vec(),
+            PdfName::from_bytes(name),
             ObjectHandle::from(Resource::from(FormXObject {
                 bbox: Some(Rect {
                     left: 0.0,
@@ -54,6 +55,13 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
 
 fn image_dictionary() -> Dictionary {
     Dictionary::from_iter(std::collections::BTreeMap::from([
+        (
+            Vec::from(b"Subtype"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Image",
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        ),
         (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
         (
             Vec::from(b"ColorSpace"),
@@ -213,7 +221,7 @@ fn unavailable_image_xobject_is_a_no_op() {
     let stream = content_stream(1, b"/Im Do");
     let resources = Arc::new(Resources {
         xobjects: HashMap::from([(
-            b"Im".to_vec(),
+            PdfName::from(b"Im"),
             ObjectHandle::from(Resource::UnavailableImage),
         )]),
         ..Default::default()
@@ -231,7 +239,7 @@ fn unavailable_image_xobject_is_a_no_op() {
 #[test]
 fn inline_image_render_path_matches_image_xobject_path() {
     let image = pdf_object_reader::ObjectReader::new(pdf_object_reader::EmptySource)
-        .read::<PdfImage>(&pdf_object_reader::object_variant::ObjectVariant::Stream(
+        .read::<Resource>(&pdf_object_reader::object_variant::ObjectVariant::Stream(
             pdf_object_reader::stream::StreamObject::new(
                 1,
                 0,
@@ -239,16 +247,15 @@ fn inline_image_render_path_matches_image_xobject_path() {
                 vec![0b1010_0000],
             ),
         ))
-        .and_then(|image| Ok(image.decode(None)?))
-        .expect("image XObject should decode");
+        .expect("image XObject should be read");
     let graphics_state = Resource::ExternalGraphicsState(pdf_object_reader::ObjectHandle::from(
         ExternalGraphicsState {
             params: vec![ExternalGraphicsStateKey::BlendMode(BlendMode::Multiply)],
         },
     ));
     let resources = Arc::new(Resources {
-        ext_g_states: HashMap::from([(b"GS".to_vec(), graphics_state)]),
-        xobjects: HashMap::from([(b"Im".to_vec(), ObjectHandle::from(Resource::from(image)))]),
+        ext_g_states: HashMap::from([(PdfName::from(b"GS"), graphics_state)]),
+        xobjects: HashMap::from([(PdfName::from(b"Im"), ObjectHandle::from(image))]),
         ..Default::default()
     });
 

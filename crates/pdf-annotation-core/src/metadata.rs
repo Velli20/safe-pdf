@@ -1,4 +1,6 @@
 //! Retained source data is distinct from authoritative live annotation values.
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 bitflags::bitflags! {
@@ -135,7 +137,7 @@ pub struct FieldMetadata {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct UnsupportedField {
     /// Source field type, including signature, push-button, or unknown types.
-    pub field_type: Vec<u8>,
+    pub field_type: Arc<[u8]>,
     /// Current retained value, distinct from an absent value.
     pub value: Option<crate::pdf_data::WidgetFieldValue>,
 }

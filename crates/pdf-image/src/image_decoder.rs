@@ -21,8 +21,11 @@ const IMAGE_BUDGET: PixelBudget = PixelBudget {
 
 impl PdfImage {
     /// Decodes the image into a raster, applying `soft_mask` as its opacity.
+    ///
+    /// An image XObject's filter chain runs here, so its samples exist only while the
+    /// returned raster does.
     pub fn decode(&self, soft_mask: Option<&Image>) -> Result<Image, PdfImageError> {
-        let (payload, metadata) = (self.payload.clone(), &self.metadata);
+        let (payload, metadata) = (self.payload.decode()?, &self.metadata);
         // A non-zero /SMaskInData puts the image's own opacity in charge, and PDF
         // forbids an /SMask beside it, so a stray one is dropped rather than
         // multiplied into alpha that already describes the image.
@@ -74,7 +77,7 @@ fn decode_reduced_image(
         return Ok(render_ready_image(reduced, None, &bands.reduced_metadata()));
     }
     let decoded_samples = DecodedSamples::decode(payload, metadata)?;
-    render_ready_image(decoded_samples, None, metadata).reduced(factor)
+    Ok(render_ready_image(decoded_samples, None, metadata).reduced(factor)?)
 }
 
 /// Builds a render image from decoded samples whose soft mask, if any, has the image's size.

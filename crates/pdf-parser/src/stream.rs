@@ -1,26 +1,31 @@
+use std::ops::Range;
+
 use crate::{error::ParserError, parser::PdfParser};
 
 impl PdfParser<'_> {
-    /// Reads a raw stream body of exactly `length` bytes.
+    /// Locates a raw stream body of exactly `length` bytes.
     ///
-    /// Expects the input to be positioned at the `stream` keyword. Reads exactly `length`
-    /// bytes, then validates and consumes `endstream`. Filter decoding is the caller's
-    /// responsibility.
+    /// Expects the input to be positioned at the `stream` keyword. Skips exactly `length`
+    /// bytes, then validates and consumes `endstream`. Returns the byte range of the body
+    /// within the parser's input, so the caller can share the bytes rather than copy them.
+    /// Filter decoding is the caller's responsibility.
     ///
     /// # Errors
     ///
     /// Returns an error if the declared bytes are not available, or the `stream` or
     /// `endstream` keyword is missing or malformed.
-    pub(crate) fn parse_stream(&mut self, length: usize) -> Result<Vec<u8>, ParserError> {
+    pub(crate) fn parse_stream(&mut self, length: usize) -> Result<Range<usize>, ParserError> {
         const STREAM_START: &[u8] = b"stream";
         const STREAM_END: &[u8] = b"endstream";
 
         self.read_keyword(STREAM_START)?;
-        let stream_data = self.tokenizer.read_exactly(length)?.to_vec();
+        let data_start = self.position();
+        self.tokenizer.read_exactly(length)?;
+        let data_end = self.position();
         self.try_read_end_of_line_marker();
         self.read_keyword(STREAM_END)?;
 
-        Ok(stream_data)
+        Ok(data_start..data_end)
     }
 }
 
@@ -61,8 +66,8 @@ mod tests {
         input.extend_from_slice(b"\nendstream");
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(payload.len()).unwrap();
+        let range = parser.parse_stream(payload.len()).unwrap();
 
-        assert_eq!(result, payload);
+        assert_eq!(input.get(range).unwrap(), payload);
     }
 }

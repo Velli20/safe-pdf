@@ -1,7 +1,7 @@
 //! Embedded program selection and format handling, separate from font metadata.
 
+use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
-use std::sync::Arc;
 
 use crate::{
     error::FontError,
@@ -100,7 +100,7 @@ impl FromPdfObject for RawTrueTypeProgram {
 impl FromPdfObject for SimpleCffProgram {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.stream()?;
-        let subtype = context.dictionary().optional::<Arc<[u8]>>(b"Subtype")?;
+        let subtype = context.dictionary().optional::<PdfName>(b"Subtype")?;
         let format = match subtype.as_deref().unwrap_or(b"OpenType") {
             b"Type1C" | b"CIDFontType0C" => FontProgramFormat::Cff,
             b"OpenType" => FontProgramFormat::OpenTypeCff,
@@ -124,7 +124,7 @@ impl FromPdfObject for CidCffProgram {
     /// Type1C is accepted for producers that use that label for CID-keyed data.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.stream()?;
-        let subtype = context.dictionary().optional::<Arc<[u8]>>(b"Subtype")?;
+        let subtype = context.dictionary().optional::<PdfName>(b"Subtype")?;
         let format = match subtype.as_deref().unwrap_or(b"OpenType") {
             b"Type1C" | b"CIDFontType0C" => FontProgramFormat::CidCff,
             b"OpenType" => FontProgramFormat::OpenTypeCff,

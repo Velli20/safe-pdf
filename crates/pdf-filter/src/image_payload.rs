@@ -8,6 +8,7 @@
 
 use bytes::Bytes;
 use pdf_ccitt::CCITTFaxParams;
+use pdf_jbig2::document::DecodeLimits;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     object_kind::ObjectKind, object_variant::ObjectVariant, pdf_array::PdfArray,
@@ -30,30 +31,93 @@ pub enum ImagePayload {
     Jpx(Bytes),
 }
 
-/// Reads an image stream's payload.
-///
-/// A stream whose filter chain was already applied is only classified: a
-/// `JPXDecode` stream is deliberately left encoded by the object collection,
-/// because only the structured image path can read a JPEG 2000 codestream, yet
-/// it still reports its filters as applied.
+/// Reads an image stream's payload by applying its filter chain.
 impl FromPdfObject for ImagePayload {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(context.decode::<EncodedPayload>()?.decode()?)
+    }
+}
+
+/// A stream's bytes with its filter chain read but not yet applied.
+///
+/// Reading resolves every entry the chain decodes with, including indirect
+/// `/DecodeParms` and `/JBIG2Globals`, so [`Self::decode`] needs no object
+/// source and can run long after the document was read.
+#[derive(Clone, Debug)]
+pub struct EncodedPayload {
+    pipeline: FilterPipeline,
+    data: Bytes,
+}
+
+/// Holds an already applied payload: samples need no further filter, and a
+/// codestream still passes through `JPXDecode`.
+impl From<ImagePayload> for EncodedPayload {
+    fn from(payload: ImagePayload) -> Self {
+        let (stages, data) = match payload {
+            ImagePayload::Samples(data) => (Vec::new(), data),
+            ImagePayload::Jpx(data) => (vec![(Filter::JPXDecode, Ok(FilterParams::None))], data),
+        };
+        Self {
+            pipeline: FilterPipeline(stages),
+            data,
+        }
+    }
+}
+
+/// Reads an image stream's filter chain without applying it.
+///
+/// A stream whose filter chain was already applied keeps only a `JPXDecode`
+/// stage, if it has one: a `JPXDecode` stream is deliberately left encoded,
+/// because only the structured image path can read a JPEG 2000 codestream.
+impl FromPdfObject for EncodedPayload {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let object = context.object();
         let mut context = context.stream()?;
         let stream = context.stream();
+        let data = stream.shared_data();
         if !stream.filters_applied() {
             // An unreadable chain is a filter failure, like a filter that fails to run.
-            let pipeline: FilterPipeline = context.read(object).map_err(FilterError::from)?;
-            return Ok(pipeline.apply(stream.shared_data())?);
+            let pipeline = context.read(object).map_err(FilterError::from)?;
+            return Ok(Self { pipeline, data });
         }
         let jpx = context
             .dictionary()
             .optional::<Filters>(Filters::KEY)?
             .is_some_and(|filters| filters.has_jpx_filter());
-        Ok(match jpx {
-            true => Self::Jpx(stream.shared_data()),
-            false => Self::Samples(stream.shared_data()),
+        let stages = match jpx {
+            true => vec![(Filter::JPXDecode, Ok(FilterParams::None))],
+            false => Vec::new(),
+        };
+        Ok(Self {
+            pipeline: FilterPipeline(stages),
+            data,
         })
+    }
+}
+
+impl EncodedPayload {
+    /// Applies the filter chain, as reading an [`ImagePayload`] would have.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FilterError`] if a filter fails, is unsupported, or follows
+    /// `JPXDecode`, except when an adjacent duplicate filter fails after its
+    /// first pass succeeded.
+    pub fn decode(&self) -> Result<ImagePayload, FilterError> {
+        self.pipeline.apply(self.data.clone())
+    }
+
+    /// Returns shared ownership of the bytes the chain applies to.
+    pub fn shared_data(&self) -> Bytes {
+        self.data.clone()
+    }
+
+    /// Returns whether the chain includes `JPXDecode`.
+    pub fn has_jpx_filter(&self) -> bool {
+        self.pipeline
+            .0
+            .iter()
+            .any(|(filter, _)| matches!(filter, Filter::JPXDecode))
     }
 }
 
@@ -78,6 +142,7 @@ impl ImagePayload {
 ///
 /// Parameters are read with the chain, but a filter whose parameters cannot be read
 /// reports that failure only when it is reached, as if it had been read then.
+#[derive(Clone, Debug)]
 pub(crate) struct FilterPipeline(Vec<(Filter, Result<FilterParams, FilterError>)>);
 
 /// Reads `/Filter`, `/DecodeParms`, and the image entries some filters need.
@@ -123,11 +188,11 @@ impl FromPdfObject for FilterPipeline {
                         };
                         (|| {
                             let width = context
-                                .optional::<u16>(b"Width")?
+                                .optional::<u32>(b"Width")?
                                 .filter(|width| *width != 0)
                                 .ok_or_else(missing_dimensions_error)?;
                             let height = context
-                                .optional::<u16>(b"Height")?
+                                .optional::<u32>(b"Height")?
                                 .filter(|height| *height != 0)
                                 .ok_or_else(missing_dimensions_error)?;
                             let globals = entry
@@ -165,11 +230,11 @@ impl FilterPipeline {
     /// Returns [`FilterError`] if a filter fails, is unsupported, or follows
     /// `JPXDecode`, except when an adjacent duplicate filter fails after its
     /// first pass succeeded.
-    pub(crate) fn apply(self, stream_data: Bytes) -> Result<ImagePayload, FilterError> {
+    pub(crate) fn apply(&self, stream_data: Bytes) -> Result<ImagePayload, FilterError> {
         let mut data = stream_data;
         let mut codestream = None;
         let mut previous = None;
-        for (filter, params) in self.0 {
+        for (filter, params) in &self.0 {
             if codestream.is_some() {
                 return Err(FilterError::UnsupportedFilter(format!(
                     "{filter} after JPXDecode"
@@ -179,11 +244,15 @@ impl FilterPipeline {
             if let Filter::JPXDecode = filter {
                 codestream = Some(data.clone());
             } else {
-                match params.and_then(|params| filter.apply(data.as_ref(), params)) {
+                let decoded = params
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(|params| filter.apply(data.as_ref(), params));
+                match decoded {
                     Ok(decoded) => data = decoded,
                     // A repeated filter can be spurious when its first pass
                     // already produced the binary data expected by the next filter.
-                    Err(_) if previous.as_ref() == Some(&filter) => {}
+                    Err(_) if previous == Some(filter) => {}
                     Err(error) => return Err(error),
                 }
             }
@@ -198,6 +267,7 @@ impl FilterPipeline {
 }
 
 /// The parameters one filter of a chain decodes with.
+#[derive(Clone, Debug)]
 pub(crate) enum FilterParams {
     /// The filter takes no parameters.
     None,
@@ -211,8 +281,8 @@ pub(crate) enum FilterParams {
     Dct { height: Option<u16> },
     /// JBIG2Decode's page size, the image's dimensions, and its shared segments.
     Jbig2 {
-        width: u16,
-        height: u16,
+        width: u32,
+        height: u32,
         globals: Option<StreamObject>,
     },
 }
@@ -273,14 +343,14 @@ impl Filter {
     ///
     /// `JPXDecode` is not a byte filter; [`FilterPipeline::apply`] handles it before
     /// reaching this method, and it is rejected here.
-    fn apply(&self, data: &[u8], params: FilterParams) -> Result<Bytes, FilterError> {
+    fn apply(&self, data: &[u8], params: &FilterParams) -> Result<Bytes, FilterError> {
         let decoded = match (self, params) {
             (Self::FlateDecode, FilterParams::Predictor(predictor)) => {
                 let decoded = Self::decode_flate(data)?;
                 if predictor.is_none() {
                     decoded
                 } else {
-                    crate::predictor::apply_predictor(&decoded, &predictor)?
+                    crate::predictor::apply_predictor(&decoded, predictor)?
                 }
             }
             (Self::LZWDecode, FilterParams::Lzw(params)) => {
@@ -292,7 +362,7 @@ impl Filter {
                 }
             }
             (Self::DCTDecode, FilterParams::Dct { height }) => {
-                Self::decode_jpeg_baseline(data, height)?
+                Self::decode_jpeg_baseline(data, *height)?
             }
             (Self::ASCII85Decode, _) => crate::ascii85::decode_ascii85(data)?,
             (Self::ASCIIHexDecode, _) => crate::asciihex::decode_ascii_hex(data),
@@ -304,15 +374,13 @@ impl Filter {
                     height,
                     globals,
                 },
-            ) => pdf_jbig2::decode(
-                data,
-                width,
-                height,
-                globals.as_ref().map(StreamObject::raw_data),
-            )?,
-            (Self::CCITTFaxDecode, FilterParams::Ccitt(params)) => {
-                pdf_ccitt::decode(data, &params)?
+            ) => {
+                let globals = globals.as_ref().map(StreamObject::raw_data);
+                let encoded = data.len().saturating_add(globals.map_or(0, <[u8]>::len));
+                let limits = DecodeLimits::for_pdf_image(*width, *height, encoded);
+                pdf_jbig2::decode_pdf(data, *width, *height, globals, limits)?
             }
+            (Self::CCITTFaxDecode, FilterParams::Ccitt(params)) => pdf_ccitt::decode(data, params)?,
             (Self::Unsupported(name), _) => {
                 return Err(FilterError::UnsupportedFilter(
                     String::from_utf8_lossy(name).into_owned(),
