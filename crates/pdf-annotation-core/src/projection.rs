@@ -96,8 +96,10 @@ pub(crate) fn project(
         triggers: annotation.triggers(),
         text: annotation.text()?,
         subtype: annotation.content.subtype_name().into_owned(),
-        // Source artwork shows the annotation as authored, so no placeholder is needed.
-        unsupported: unsupported_reason(annotation, field).filter(|_| !artwork),
+        // Source artwork or an appearance painted on the page canvas shows the annotation
+        // as authored, so no placeholder is needed.
+        unsupported: unsupported_reason(annotation, field)
+            .filter(|_| !artwork && !annotation.is_drawn_from_appearance()),
         bounds: device_regions(annotation, &bounds, viewport)?,
         origin: bounds.origin(),
         size: bounds.size(),
