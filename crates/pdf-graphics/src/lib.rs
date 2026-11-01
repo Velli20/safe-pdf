@@ -2,6 +2,7 @@ pub mod bezier;
 pub mod blend_mode;
 mod bounds_accumulator;
 pub mod canvas_paint;
+mod cmyk_to_srgb;
 pub mod color;
 pub mod dash_pattern;
 mod image;

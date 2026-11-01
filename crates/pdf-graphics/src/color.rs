@@ -1,5 +1,7 @@
 use num_traits::ToPrimitive;
 
+use crate::cmyk_to_srgb::CMYK_TO_SRGB;
+
 /// Unpremultiplied color with RGBA channel
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -11,60 +13,6 @@ pub struct Color {
     pub b: f32,
     pub a: f32,
 }
-
-/// Polynomial coefficients, one row per sRGB output channel (red, green, blue),
-/// that approximate the SWOP press profile on the 0..=255 scale. Each row
-/// weights the terms `c², cm, cy, ck, c, m², my, mk, m, y², yk, y, k², k`.
-const SWOP_TO_SRGB: [[f32; 14]; 3] = [
-    [
-        -4.387_332,
-        54.486_15,
-        18.822_905,
-        212.256_62,
-        -285.233_1,
-        1.714_976_3,
-        -5.609_674,
-        -17.873_87,
-        -5.497_006_4,
-        -2.521_734,
-        -21.248_923,
-        17.511_927,
-        -21.861_221,
-        -189.481_8,
-    ],
-    [
-        8.841_041,
-        60.118_027,
-        6.871_425_6,
-        31.159_1,
-        -79.297_08,
-        -15.310_361,
-        17.575_25,
-        131.352_51,
-        -190.945_33,
-        4.444_339,
-        9.863_286,
-        -24.867_416,
-        -20.737_326,
-        -187.804_54,
-    ],
-    [
-        0.884_252_24,
-        8.078_678,
-        30.899_783,
-        -0.238_832_39,
-        -14.183_577,
-        10.495_933,
-        63.023_785,
-        50.606_957,
-        -112.238_84,
-        0.032_960_41,
-        115.603_84,
-        -193.582_1,
-        -22.338_168,
-        -180.126_14,
-    ],
-];
 
 impl Color {
     /// Fully transparent black, which paints nothing.
@@ -130,30 +78,98 @@ impl Color {
     ///
     /// Component values are clamped to [0.0, 1.0]. Instead of the naive
     /// `(1 - c) * (1 - k)` inversion, which renders press colors too bright and
-    /// saturated, the conversion approximates the U.S. Web Coated (SWOP) press
-    /// profile with a second-order polynomial in the four components, so that
-    /// DeviceCMYK colors appear as they would on a CMYK-managed display.
+    /// saturated, the conversion approximates the Adobe-style CMYK to sRGB
+    /// conversion that viewers apply to uncalibrated DeviceCMYK, using a
+    /// fourth-order polynomial in the four components.
     /// Alpha defaults to 1.0 (opaque).
     pub fn from_cmyk(c: f32, m: f32, y: f32, k: f32) -> Self {
         let [c, m, y, k] = [c, m, y, k].map(|component| component.clamp(0.0, 1.0));
-        // Second-order terms in the order the coefficient rows expect.
-        let terms = [
+        // Products of two components, from which the higher degrees are built.
+        let [cc, cm, cy, ck, mm, my, mk, yy, yk, kk] = [
             c * c,
             c * m,
             c * y,
             c * k,
-            c,
             m * m,
             m * y,
             m * k,
-            m,
             y * y,
             y * k,
-            y,
             k * k,
-            k,
         ];
-        let [r, g, b] = SWOP_TO_SRGB.map(|coefficients| {
+        // Monomials in the order the coefficient rows expect.
+        let terms = [
+            c,
+            m,
+            y,
+            k,
+            cc,
+            cm,
+            cy,
+            ck,
+            mm,
+            my,
+            mk,
+            yy,
+            yk,
+            kk,
+            cc * c,
+            cc * m,
+            cc * y,
+            cc * k,
+            cm * m,
+            cm * y,
+            cm * k,
+            cy * y,
+            cy * k,
+            ck * k,
+            mm * m,
+            mm * y,
+            mm * k,
+            my * y,
+            my * k,
+            mk * k,
+            yy * y,
+            yy * k,
+            yk * k,
+            kk * k,
+            cc * cc,
+            cc * cm,
+            cc * cy,
+            cc * ck,
+            cc * mm,
+            cc * my,
+            cc * mk,
+            cc * yy,
+            cc * yk,
+            cc * kk,
+            cm * mm,
+            cm * my,
+            cm * mk,
+            cm * yy,
+            cm * yk,
+            cm * kk,
+            cy * yy,
+            cy * yk,
+            cy * kk,
+            ck * kk,
+            mm * mm,
+            mm * my,
+            mm * mk,
+            mm * yy,
+            mm * yk,
+            mm * kk,
+            my * yy,
+            my * yk,
+            my * kk,
+            mk * kk,
+            yy * yy,
+            yy * yk,
+            yy * kk,
+            yk * kk,
+            kk * kk,
+        ];
+        let [r, g, b] = CMYK_TO_SRGB.map(|coefficients| {
             let offset: f32 = coefficients
                 .iter()
                 .zip(terms)
