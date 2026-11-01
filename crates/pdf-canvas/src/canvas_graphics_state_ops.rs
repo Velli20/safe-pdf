@@ -120,14 +120,22 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                         let Some(bbox) = form.bbox.as_ref() else {
                             continue;
                         };
-                        if !Self::can_record_offscreen_bbox(bbox) {
+                        let matrix = form.matrix.unwrap_or_else(Transform::identity);
+                        let bounds = matrix.map_rect(bbox);
+                        if !Self::can_record_offscreen_bbox(bbox)
+                            || !Self::can_record_offscreen_bbox(&bounds)
+                        {
                             continue;
                         }
 
-                        // Render the form's content stream into the mask canvas.
+                        // Backends cover only `[0, w] x [0, h]` of mask space, so mask space
+                        // starts at the group's bounds in the current user space.
                         let recording_canvas = self.record_content_stream(
                             &form.content_stream,
-                            form.matrix,
+                            Some(
+                                Transform::from_translate(-bounds.left, -bounds.top)
+                                    .post_concatenated(&matrix),
+                            ),
                             bbox,
                             form.resources
                                 .as_ref()
@@ -137,7 +145,10 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                             None,
                         )?;
 
-                        let transform = self.current_state()?.transform;
+                        let transform = self
+                            .current_state()?
+                            .transform
+                            .post_concatenated(&Transform::from_translate(bounds.left, bounds.top));
 
                         self.current_state_mut()?.soft_mask =
                             Some(crate::mask_layer::MaskLayer::new(

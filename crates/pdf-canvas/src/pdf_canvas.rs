@@ -202,9 +202,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// bottom-left) into a typical device space, this method renders into a coordinate system
     /// whose origin is the **top-left** (device-style, like Skia).
     ///
-    /// Concretely, the recording is the size of `bbox` and starts in the stream's content
-    /// space without a Y-axis flip or translation; clipping to `bbox` is applied by
-    /// `render_content_stream`.
+    /// Concretely, the recording is the size of `bbox` mapped through `mat` and starts in
+    /// the stream's content space mapped only by `mat`, without a Y-axis flip; clipping to
+    /// `bbox` is applied by `render_content_stream` after `mat`.
     ///
     /// This matches the expectation that the consumer of the resulting `RecordingCanvas`
     /// (e.g. a shader/mask client in the backend) also uses a top-left-origin coordinate system.
@@ -213,7 +213,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ///
     /// - `content_stream`: The content stream containing the PDF operators to execute.
     /// - `mat`: Optional additional matrix (applied like a PDF `cm` / XObject `/Matrix`).
-    /// - `bbox`: The content-space bounding box that sizes the recording surface.
+    /// - `bbox`: The content-space bounding box that clips the stream and, mapped through
+    ///   `mat`, sizes the recording surface.
     /// - `resources`: Optional resource dictionary for resolving fonts, patterns, etc.
     /// - `filter`: Optional filter function to skip certain operations.
     /// - `cell_color`: Optional initial fill and stroke color, used by uncolored tiling
@@ -232,7 +233,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
         cell_color: Option<Color>,
     ) -> Result<RecordingCanvas, PdfCanvasError> {
-        let mut recording_canvas = RecordingCanvas::new(bbox.width(), bbox.height());
+        let size = mat.map_or(*bbox, |mat| mat.map_rect(bbox)).size();
+        let mut recording_canvas = RecordingCanvas::new(size.width, size.height);
         let mut initial_state = CanvasState {
             transform: Transform::identity(),
             pattern_parent_transform: Transform::identity(),
