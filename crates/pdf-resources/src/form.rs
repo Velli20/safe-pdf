@@ -39,7 +39,7 @@ impl FromPdfObject for FormXObject {
                 .map(|bbox| bbox.normalized()),
             matrix: context.optional(b"Matrix")?,
             // Retain deferred handles so recursive resource graphs can finish decoding.
-            resources: context.optional_shared(b"Resources")?,
+            resources: context.optional(b"Resources")?,
             content_stream,
         })
     }

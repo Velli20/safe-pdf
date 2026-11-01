@@ -23,27 +23,36 @@ impl FromPdfObject for SoftMask {
     /// The `/G` group must be a form XObject stream. An absent `/TR` is the identity.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        // A dictionary-only form would read as an empty group and mask out everything
-        // painted under it, so the group must be a stream. The group may be the form being
-        // decoded, so it is checked on its resolved value: an eager read of /G would reenter
-        // the active path.
-        if let Some(group) = context.resolve_entry(b"G")? {
-            let actual = group.kind();
-            if actual != ObjectKind::Stream {
-                return Err(ObjectReadError::TypeMismatch {
-                    expected: ObjectKind::Stream,
-                    actual,
-                });
-            }
-            if let XObjectSubtype::Image = context.read::<XObjectSubtype>(group.value())? {
-                return Err(PdfPagesError::SoftMaskGroupNotForm.into());
-            }
-        }
+        let SoftMaskGroup(shape) = context.required(b"G")?;
         Ok(Self {
             mask_type: context.required(b"S")?,
-            shape: context.required_shared(b"G")?,
+            shape,
             transfer: context.optional(b"TR")?.unwrap_or_default(),
         })
+    }
+}
+
+/// A soft mask's `/G` transparency group, which must be a form XObject stream.
+///
+/// A dictionary-only form would read as an empty group and mask out everything painted
+/// under it, so the group must be a stream.
+struct SoftMaskGroup(ObjectHandle<FormXObject>);
+
+impl FromPdfObject for SoftMaskGroup {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let group = context.object();
+        if !matches!(group, ObjectVariant::Stream(_)) {
+            return Err(ObjectReadError::TypeMismatch {
+                expected: ObjectKind::Stream,
+                actual: group.kind(),
+            });
+        }
+        if let XObjectSubtype::Image = context.read::<XObjectSubtype>(group)? {
+            return Err(PdfPagesError::SoftMaskGroupNotForm.into());
+        }
+        Ok(Self(context.shared()?))
     }
 }
 
@@ -269,8 +278,11 @@ mod tests {
             Ok(_) => panic!("an image cannot be used as an ExtGState soft-mask group"),
         };
 
+        let pdf_object_reader::ObjectReadError::At { source, .. } = error else {
+            panic!("the error should name the /G entry, got {error:?}");
+        };
         assert!(matches!(
-            error,
+            *source,
             pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<PdfPagesError>(), Some(PdfPagesError::SoftMaskGroupNotForm))
         ));
     }

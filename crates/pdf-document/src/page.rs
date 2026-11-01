@@ -1,4 +1,4 @@
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult};
 use std::sync::Arc;
 
 use pdf_annotation_core::{PageAnnotations, SourceAnnotation};
@@ -167,7 +167,7 @@ impl FromPdfObject for PdfPage {
         let crop_box = context.lenient(b"CropBox");
         let rotation = context.optional::<i32>(b"Rotate")?;
         let resources = context
-            .optional_shared::<Resources>(b"Resources")?
+            .optional::<ObjectHandle<Resources>>(b"Resources")?
             .map(|handle| handle.get())
             .transpose()?;
         let annotations = context

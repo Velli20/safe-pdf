@@ -40,24 +40,22 @@ impl FromPdfObject for Resources {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         Ok(Self {
-            fonts: context
-                .optional_entries(b"Font", |context, value| context.read_shared(value))?,
-            ext_g_states: context.optional_entries(b"ExtGState", |context, value| {
-                context
-                    .read_shared(value)
-                    .map(Resource::ExternalGraphicsState)
+            fonts: context.optional_entries(b"Font", Ok)?,
+            ext_g_states: context.optional_entries(b"ExtGState", |state| {
+                Ok(Resource::ExternalGraphicsState(state))
             })?,
-            patterns: context.optional_entries(b"Pattern", |context, value| {
-                context.read_shared(value).map(Resource::Pattern)
+            patterns: context
+                .optional_entries(b"Pattern", |pattern| Ok(Resource::Pattern(pattern)))?,
+            xobjects: context.optional_entries(b"XObject", Ok)?,
+            shadings: context.optional_entries(b"Shading", |shading: ObjectHandle<Shading>| {
+                Ok(Resource::Shading(shading.get()?))
             })?,
-            xobjects: context
-                .optional_entries(b"XObject", |context, value| context.read_shared(value))?,
-            shadings: context.optional_entries(b"Shading", |context, value| {
-                Ok(Resource::Shading(context.read_shared(value)?.get()?))
-            })?,
-            color_spaces: context.optional_entries(b"ColorSpace", |context, value| {
-                Ok(Resource::ColorSpace(context.read_shared(value)?.get()?))
-            })?,
+            color_spaces: context.optional_entries(
+                b"ColorSpace",
+                |color_space: ObjectHandle<ColorSpace>| {
+                    Ok(Resource::ColorSpace(color_space.get()?))
+                },
+            )?,
             // Other property lists, such as tagged content's, are skipped.
             optional_content: context.lenient_entries(b"Properties")?,
         })

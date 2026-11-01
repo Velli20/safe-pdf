@@ -131,7 +131,7 @@ impl FromPdfObject for Pattern {
                 matrix,
                 // Keep a deferred handle so resources that refer back to this pattern can finish decoding.
                 resources: context
-                    .optional_shared::<Resources>(b"Resources")?
+                    .optional::<ObjectHandle<Resources>>(b"Resources")?
                     .unwrap_or_else(|| ObjectHandle::from(Resources::default())),
                 content_stream: context.read::<ContentStream>(object)?,
             }),

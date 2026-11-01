@@ -206,6 +206,15 @@ pub trait ObjectAccess {
     fn read_shared_indirect<T>(&mut self, id: ObjectId) -> ReadResult<ObjectHandle<T>>
     where
         T: FromPdfObject + Send + Sync + 'static;
+
+    /// Reads the object a decoder reached through `id` as a shared `T`, first ending the
+    /// eager scope that decoder (cycle key `key`) holds on the reference chain from `id`.
+    ///
+    /// Recursion back to that object then meets the typed cache's pending handle rather
+    /// than a cycle error. The decoder must not read anything further afterwards.
+    fn read_shared_reached<T>(&mut self, id: ObjectId, key: TypeId) -> ReadResult<ObjectHandle<T>>
+    where
+        T: FromPdfObject + Send + Sync + 'static;
 }
 
 /// Borrows a reader and holds the active state of one logical traversal.
@@ -346,6 +355,21 @@ where
     {
         self.read_shared(&ObjectVariant::Reference(id))
     }
+
+    fn read_shared_reached<T>(&mut self, id: ObjectId, key: TypeId) -> ReadResult<ObjectHandle<T>>
+    where
+        T: FromPdfObject + Send + Sync + 'static,
+    {
+        // Each link's mark is removed at most once, so the walk ends even on a malformed chain.
+        let mut link = id;
+        while self.active_ids.remove(&(link, key)) {
+            match self.load_object(link)?.value() {
+                ObjectVariant::Reference(next) => link = *next,
+                _ => break,
+            }
+        }
+        self.read_shared_indirect(id)
+    }
 }
 
 impl<S, C> ReadSession<'_, S, C>
@@ -356,7 +380,8 @@ where
     /// Follows a reference chain and decodes its target in a child traversal scope.
     ///
     /// Kept out of [`ObjectAccess::read`] so the direct-value path stays small enough to inline.
-    fn read_reference<T: FromPdfObject>(&mut self, mut id: ObjectId) -> ReadResult<T> {
+    fn read_reference<T: FromPdfObject>(&mut self, requested: ObjectId) -> ReadResult<T> {
+        let mut id = requested;
         // The child owns its traversal scope. Parent state remains intact on errors and unwinding.
         let mut child = ReadSession {
             reader: self.reader,
@@ -373,6 +398,10 @@ where
                 _ => break object,
             }
         };
-        T::from_pdf_object(ObjectContext::new(object.value(), &mut child))
+        T::from_pdf_object(ObjectContext::referenced(
+            object.value(),
+            (requested, T::cycle_key()),
+            &mut child,
+        ))
     }
 }

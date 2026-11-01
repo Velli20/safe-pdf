@@ -100,14 +100,14 @@
 //! impl FromPdfObject for Resource {
 //!     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self>
 //!     {
-//!         Ok(Self { parent: context.dictionary()?.optional_shared(b"Parent")? })
+//!         Ok(Self { parent: context.dictionary()?.optional(b"Parent")? })
 //!     }
 //! }
 //!
 //! fn resource_edges(
 //!     context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
 //! ) -> ReadResult<Option<ObjectHandle<Resource>>> {
-//!     context.dictionary()?.optional_shared(b"Parent")
+//!     context.dictionary()?.optional(b"Parent")
 //! }
 //!
 //! fn read_resource<S: ObjectSource>(source: S) -> ReadResult<()> {
