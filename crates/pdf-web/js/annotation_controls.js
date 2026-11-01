@@ -159,10 +159,20 @@ export class FormControl extends AnnotationComponent {
     else if (p.input_type === 'checkbox' || p.input_type === 'radio' || p.tag === 'button') this.updateButton(p);
     else this.updateText(p);
     if (this.node instanceof HTMLInputElement || this.node instanceof HTMLTextAreaElement || this.node instanceof HTMLSelectElement) this.node.required = p.required;
-    const angle = ((p.rotation % 360) + 360) % 360;
     this.node.style.lineHeight = String(LINE_SPACING);
-    this.node.style.transformOrigin = 'center';
-    this.node.style.transform = angle ? `rotate(${-angle}deg)` : '';
+    this.updateRotation(p);
+  }
+
+  /** Rotates the control by its `/MK /R` angle; quarter turns swap its sides so the rotated box still covers the widget rectangle.
+   * @param {import('./annotation_contract').WidgetControl} p */
+  updateRotation(p) {
+    const angle = ((p.rotation % 360) + 360) % 360, style = this.node.style;
+    const { width, height } = this.entry.size, quarter = angle === 90 || angle === 270;
+    style.width = quarter ? `${height}px` : '';
+    style.height = quarter ? `${width}px` : '';
+    style.transformOrigin = 'center';
+    const shift = quarter ? `translate(${(width - height) / 2}px, ${(height - width) / 2}px) ` : '';
+    style.transform = angle ? `${shift}rotate(${-angle}deg)` : '';
   }
 
   /** @param {import('./annotation_contract').WidgetControl} p */
