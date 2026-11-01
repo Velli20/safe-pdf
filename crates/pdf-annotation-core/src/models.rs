@@ -6,10 +6,10 @@ use crate::SourceAnnotation;
 use crate::kind::AnnotationKind;
 use crate::style::{ResolvedStyle, resolve_source_style};
 use crate::{AnnotationLayerResult, fields::Field};
-use pdf_graphics::{color::Color, polyline::Polyline};
+use pdf_graphics::polyline::Polyline;
 
-/// Current sidecar schema; version six stores live annotation bounds as normalized rectangle edges.
-pub const SCHEMA_VERSION: u32 = 6;
+/// Current sidecar schema; version seven stores one live style per styled payload.
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Host-supplied identity associating a sidecar with one PDF document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,14 +54,10 @@ pub type Quad = pdf_graphics::quad::Quad<f32>;
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct Highlight {
-    /// Optional precise live style, taking precedence over compact color/width.
-    /// Content replacement replaces this style too; retained source never overrides it.
-    #[serde(default)]
-    pub style: Option<crate::style::ResolvedStyle>,
+    /// Live style; its color fills the regions and its opacity is the annotation opacity.
+    pub style: ResolvedStyle,
     /// Nonempty collection of nondegenerate selection quadrilaterals.
     pub quads: Vec<Quad>,
-    /// Fill color used by the host renderer; alpha is the annotation opacity.
-    pub color: Color,
 }
 
 /// Text attached to an anchor; the host chooses the note widget and appearance.
@@ -72,16 +68,13 @@ pub struct TextNote {
     /// Live note icon, open/state/intent, and extension metadata, when supplied.
     #[serde(default)]
     pub properties: Option<Box<crate::pdf_data::TextAnnotation>>,
-    /// Optional precise live style, taking precedence over compact color/width.
-    /// Content replacement replaces this style too; retained source never overrides it.
-    #[serde(default)]
-    pub style: Option<crate::style::ResolvedStyle>,
+    /// Live style; its color suggests the note marker color and its opacity is the
+    /// annotation opacity.
+    pub style: ResolvedStyle,
     /// Position of the note anchor on its page.
     pub anchor: Point,
     /// Unicode note content; empty notes are allowed.
     pub text: String,
-    /// Suggested color for the note marker; alpha is the annotation opacity.
-    pub color: Color,
 }
 
 /// Completed freehand strokes; collecting pointer samples belongs to the GUI.
@@ -89,17 +82,11 @@ pub struct TextNote {
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct Ink {
-    /// Optional precise live style, taking precedence over compact color/width.
-    /// Content replacement replaces this style too; retained source never overrides it.
-    #[serde(default)]
-    pub style: Option<crate::style::ResolvedStyle>,
+    /// Live style; strokes use its color and [`ResolvedStyle::stroke_width`].
+    pub style: ResolvedStyle,
     /// Open strokes, each containing at least two points; empty only for source ink drawn
     /// from its appearance.
     pub strokes: Vec<Polyline>,
-    /// Finite, strictly positive stroke width in page user-space units.
-    pub width: f32,
-    /// Stroke color; alpha is the annotation opacity.
-    pub color: Color,
 }
 /// Creation input without an identity, which only Core allocates.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -167,25 +154,6 @@ pub struct DocumentData {
     pub annotations: Vec<Annotation>,
 }
 
-pub(crate) fn validate_point(point: Point) -> Result<(), crate::error::ValidationError> {
-    if point.is_finite() {
-        Ok(())
-    } else {
-        Err(crate::error::ValidationError::NonFiniteGeometry)
-    }
-}
-
-pub(crate) fn validate_quad(quad: &Quad) -> Result<(), crate::error::ValidationError> {
-    for corner in &quad.corners {
-        validate_point(*corner)?;
-    }
-    if quad.is_convex() {
-        Ok(())
-    } else {
-        Err(crate::error::ValidationError::InvalidHighlight)
-    }
-}
-
 impl Annotation {
     /// Retained PDF record this annotation was adopted from; absent for host-created ones.
     pub fn source(&self) -> Option<&crate::pdf_data::SourceAnnotation> {
@@ -241,10 +209,7 @@ impl Annotation {
     pub fn is_drawn_from_appearance(&self) -> bool {
         match &self.content {
             AnnotationKind::Ink(ink) => ink.strokes.is_empty(),
-            AnnotationKind::Caret(_) | AnnotationKind::Unknown(_) => self
-                .source()
-                .and_then(|source| source.appearance.as_ref())
-                .is_some_and(|appearance| appearance.normal.is_some()),
+            AnnotationKind::Caret(_) | AnnotationKind::Unknown(_) => self.has_normal_appearance(),
             _ => false,
         }
     }
@@ -266,11 +231,7 @@ impl Annotation {
 
     /// Decoded source `/Contents` for kinds whose Core payload carries no text.
     pub(crate) fn source_text(&self) -> AnnotationLayerResult<String> {
-        self.source()
-            .map(SourceAnnotation::contents)
-            .transpose()
-            .map(Option::unwrap_or_default)
-            .map_err(Into::into)
+        self.source_or_default(SourceAnnotation::contents)
     }
 
     /// Whether the host may edit the content: plain free text, or a widget's field value.
@@ -284,22 +245,13 @@ impl Annotation {
 
     /// Style resolved from the retained source; default for host-created annotations.
     fn source_style(&self) -> AnnotationLayerResult<ResolvedStyle> {
-        self.source()
-            .map(resolve_source_style)
-            .transpose()
-            .map(Option::unwrap_or_default)
-            .map_err(Into::into)
+        self.source_or_default(resolve_source_style)
     }
 
-    /// Live payload style; free text overlays its own style on the retained source.
+    /// Live payload style, else the style resolved from the retained source.
     pub(crate) fn style(&self) -> AnnotationLayerResult<ResolvedStyle> {
-        match &self.content {
-            AnnotationKind::FreeText(v) => {
-                let mut style = self.source_style()?;
-                v.style.apply_to(&mut style);
-                Ok(style)
-            }
-            content => content.live_style().map_or_else(|| self.source_style(), Ok),
-        }
+        self.content
+            .live_style()
+            .map_or_else(|| self.source_style(), Ok)
     }
 }

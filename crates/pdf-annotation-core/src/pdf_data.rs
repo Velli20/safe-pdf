@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{metadata::AnnotationFlags, models::Quad};
 use pdf_graphics::{DashPattern, color::Color, polyline::Polyline, rect::Rect};
 use pdf_object_reader::pdf_object::PdfObject;
-use pdf_optional_content::{OcgStateEntry, OptionalContentMembership};
+use pdf_optional_content::{OcgState, OptionalContentMembership};
 
 bitflags::bitflags! {
     /// Widget form field flags parsed from the inherited `/Ff` entry.
@@ -465,7 +465,7 @@ pub enum AnnotationAction {
     /// A SetOCGState action.
     SetOCGState {
         /// The `/State` operations and their group targets, in source order.
-        state: Vec<OcgStateEntry>,
+        state: OcgState,
         /// Whether to preserve radio-button relationships between groups.
         /// Omission means `true` when the action is executed.
         preserve_rb: Option<bool>,
@@ -550,19 +550,6 @@ pub struct CircleAnnotation {
     pub border_effect: Option<BorderEffect>,
     /// The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
     pub difference_rect: Option<Rect>,
-}
-
-/// Owned FreeTextAlignment data retained from the source PDF.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
-pub enum FreeTextAlignment {
-    /// Align lines with the left edge of the padded content area.
-    Left,
-    /// Center lines within the padded content area.
-    Center,
-    /// Align lines with the right edge of the padded content area.
-    Right,
 }
 
 /// Owned FreeTextAnnotation data retained from the source PDF.
@@ -846,9 +833,7 @@ pub struct WidgetAnnotation {
     /// The quadding mode.
     pub quadding: Option<i32>,
     /// Maximum number of text characters.
-    #[serde(with = "crate::wire::optional")]
-    #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub max_length: Option<u64>,
+    pub max_length: Option<u32>,
     /// Options available to a choice field.
     pub options: Option<Vec<WidgetChoiceOption>>,
     /// Explicitly selected choice option indices from `/I`.
@@ -935,7 +920,7 @@ pub struct SourceAnnotation {
     #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
     pub object_number: Option<u64>,
     /// Opacity applied by native presentation.
-    pub opacity: f64,
+    pub opacity: f32,
     /// The annotation subtype name.
     pub subtype: Arc<[u8]>,
     /// The optional annotation rectangle from `/Rect`, in PDF page user space

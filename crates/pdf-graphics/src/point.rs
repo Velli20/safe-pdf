@@ -19,16 +19,17 @@ impl<T> Point<T> {
     }
 }
 
+impl crate::geometry::Translate for Point<f32> {
+    fn translate(&mut self, delta: Point) {
+        self.x += delta.x;
+        self.y += delta.y;
+    }
+}
+
 impl Point<f32> {
     /// Whether both coordinates are finite.
     pub fn is_finite(self) -> bool {
         self.x.is_finite() && self.y.is_finite()
-    }
-
-    /// Moves the point by the given displacement.
-    pub fn translate(&mut self, dx: f32, dy: f32) {
-        self.x += dx;
-        self.y += dy;
     }
 
     /// Returns the point at fraction `t` of the way from `self` towards `to`.

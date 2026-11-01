@@ -4,15 +4,13 @@
 //! the configuration and the others are checked against it. Buttons contribute one
 //! option per distinct on-state, so each widget also learns which option it toggles.
 use crate::{
-    error::ValidationError,
+    error::SourceAdoptionError,
     fields::{
         ButtonField, CheckboxGroupField, ChoiceOption, ComboBoxField, ComboValue, FieldId,
         FieldKind, ListBoxField, ListSelection, NewField, OptionId, RadioField, TextField,
     },
     metadata::{FieldMetadata, UnsupportedField},
-    pdf_data::{
-        NativeAnnotation, SourceAnnotation, WidgetAnnotation, WidgetFieldFlags, WidgetFieldValue,
-    },
+    pdf_data::{SourceAnnotation, WidgetAnnotation, WidgetFieldFlags, WidgetFieldValue},
     source_properties::decode_text,
     widgets::WidgetBinding,
 };
@@ -53,14 +51,16 @@ impl SourceFieldGroup {
 /// # Errors
 /// Returns `InvalidSourceField` for an empty group, a non-widget member, widgets that
 /// disagree on configuration or value, or button states that conflict; `InvalidTextString`
-/// for undecodable names, captions, or labels; `InvalidMetadata` for index overflow.
+/// for undecodable names, captions, or labels; `IndexOverflow` for index overflow.
 pub fn resolve_source_field(
     sources: &[&SourceAnnotation],
-) -> Result<SourceFieldGroup, ValidationError> {
+) -> Result<SourceFieldGroup, SourceAdoptionError> {
     let widgets = widgets(sources)?;
-    let first = *widgets.first().ok_or(ValidationError::InvalidSourceField {
-        reason: "empty field group",
-    })?;
+    let first = *widgets
+        .first()
+        .ok_or(SourceAdoptionError::InvalidSourceField {
+            reason: "empty field group",
+        })?;
     check_consistent(first, &widgets)?;
     let flags = first.field_flags.unwrap_or_default();
     let (content, options) = if first.is_push_button() {
@@ -93,14 +93,15 @@ pub fn resolve_source_field(
 /// Borrows every member's widget record, rejecting any other annotation kind.
 fn widgets<'a>(
     sources: &[&'a SourceAnnotation],
-) -> Result<Vec<&'a WidgetAnnotation>, ValidationError> {
+) -> Result<Vec<&'a WidgetAnnotation>, SourceAdoptionError> {
     sources
         .iter()
-        .map(|source| match &source.kind {
-            NativeAnnotation::Widget(widget) => Ok(widget.as_ref()),
-            _ => Err(ValidationError::InvalidSourceField {
-                reason: "expected source widget",
-            }),
+        .map(|source| {
+            source
+                .widget()
+                .ok_or(SourceAdoptionError::InvalidSourceField {
+                    reason: "expected source widget",
+                })
         })
         .collect()
 }
@@ -109,21 +110,21 @@ fn widgets<'a>(
 fn check_consistent(
     first: &WidgetAnnotation,
     widgets: &[&WidgetAnnotation],
-) -> Result<(), ValidationError> {
+) -> Result<(), SourceAdoptionError> {
     for other in widgets {
         if first.field_type != other.field_type
             || first.field_flags != other.field_flags
             || first.options != other.options
             || first.max_length != other.max_length
         {
-            return Err(ValidationError::InvalidSourceField {
+            return Err(SourceAdoptionError::InvalidSourceField {
                 reason: "inconsistent field configuration",
             });
         }
         if !first.is_button()
             && (first.value != other.value || first.selected_indices != other.selected_indices)
         {
-            return Err(ValidationError::InvalidSourceField {
+            return Err(SourceAdoptionError::InvalidSourceField {
                 reason: "inconsistent field values",
             });
         }
@@ -132,13 +133,13 @@ fn check_consistent(
 }
 
 /// Live text value from `/V`; text and choice fields reject non-string values.
-fn text_value(widget: &WidgetAnnotation) -> Result<String, ValidationError> {
+fn text_value(widget: &WidgetAnnotation) -> Result<String, SourceAdoptionError> {
     match &widget.value {
         None | Some(WidgetFieldValue::Null) => Ok(String::new()),
         Some(WidgetFieldValue::Bytes(bytes)) => decode_text(Some(bytes)),
         Some(WidgetFieldValue::Array(_)) if widget.is_multi_select() => Ok(String::new()),
         _ if matches!(widget.field_type.as_deref(), Some(b"Tx" | b"Ch")) => {
-            Err(ValidationError::InvalidSourceField {
+            Err(SourceAdoptionError::InvalidSourceField {
                 reason: "non-text field value",
             })
         }
@@ -150,16 +151,20 @@ fn text_value(widget: &WidgetAnnotation) -> Result<String, ValidationError> {
 fn field_kind(
     widget: &WidgetAnnotation,
     flags: WidgetFieldFlags,
-) -> Result<FieldKind, ValidationError> {
+) -> Result<FieldKind, SourceAdoptionError> {
     match widget.field_type.as_deref() {
-        Some(b"Tx") => text_field(widget, text_value(widget)?),
-        Some(b"Ch") => choice_field(widget, flags, text_value(widget)?),
+        Some(b"Tx") => Ok(FieldKind::Text(TextField {
+            mode: widget.text_mode(),
+            max_length: widget.max_length,
+            value: text_value(widget)?,
+        })),
+        Some(b"Ch") => choice_field(widget, flags),
         _ => Ok(unsupported(widget)),
     }
 }
 
 /// Push button showing its normal caption from `/MK /CA`.
-fn push_button(widget: &WidgetAnnotation) -> Result<FieldKind, ValidationError> {
+fn push_button(widget: &WidgetAnnotation) -> Result<FieldKind, SourceAdoptionError> {
     let caption = widget
         .appearance_characteristics
         .as_ref()
@@ -174,7 +179,7 @@ fn toggle_group(
     first: &WidgetAnnotation,
     sources: &[&SourceAnnotation],
     widgets: &[&WidgetAnnotation],
-) -> Result<(FieldKind, Vec<Option<OptionId>>), ValidationError> {
+) -> Result<(FieldKind, Vec<Option<OptionId>>), SourceAdoptionError> {
     // Checkboxes and radios-in-unison share an option between widgets with the same state.
     let share_states = !first.is_radio_button() || first.is_radios_in_unison();
     let mut toggles = ToggleOptions::default();
@@ -216,7 +221,7 @@ impl<'a> ToggleOptions<'a> {
         &mut self,
         state: &'a [u8],
         share_states: bool,
-    ) -> Result<OptionId, ValidationError> {
+    ) -> Result<OptionId, SourceAdoptionError> {
         let repeated = share_states
             .then(|| self.states.iter().position(|known| *known == state))
             .flatten();
@@ -235,9 +240,9 @@ impl<'a> ToggleOptions<'a> {
     }
 
     /// Records `option` as the group's on-state; a second distinct on-state is a conflict.
-    fn mark_active(&mut self, option: OptionId) -> Result<(), ValidationError> {
+    fn mark_active(&mut self, option: OptionId) -> Result<(), SourceAdoptionError> {
         if self.selected.is_some_and(|previous| previous != option) {
-            return Err(ValidationError::InvalidSourceField {
+            return Err(SourceAdoptionError::InvalidSourceField {
                 reason: "conflicting button appearance states",
             });
         }
@@ -254,44 +259,27 @@ fn is_active(source: &SourceAnnotation, widget: &WidgetAnnotation, state: &[u8])
     }
 }
 
-/// Text field with its entry mode and optional length limit.
-fn text_field(widget: &WidgetAnnotation, value: String) -> Result<FieldKind, ValidationError> {
-    let max_length = widget
-        .max_length
-        .map(u32::try_from)
-        .transpose()
-        .map_err(|_| ValidationError::InvalidMetadata {
-            field: "max length",
-        })?;
-    Ok(FieldKind::Text(TextField {
-        mode: widget.text_mode(),
-        max_length,
-        value,
-    }))
-}
-
-/// List box or combo box from `/Opt`, `/I` or `/V`, and the edit flag.
+/// List box or combo box from `/Opt`, `/I` or `/V`, and the edit flag; only combos read `/V` text.
 fn choice_field(
     widget: &WidgetAnnotation,
     flags: WidgetFieldFlags,
-    value: String,
-) -> Result<FieldKind, ValidationError> {
+) -> Result<FieldKind, SourceAdoptionError> {
     let options = choice_options(widget)?;
     let selected = selected_options(widget, &options)?;
     if !widget.is_multi_select() && selected.len() > 1 {
-        return Err(ValidationError::InvalidSourceField {
+        return Err(SourceAdoptionError::InvalidSourceField {
             reason: "multiple values in single choice",
         });
     }
-    Ok(if widget.is_listbox() {
-        list_box(widget, options, selected)
+    if widget.is_listbox() {
+        Ok(list_box(widget, options, selected))
     } else {
-        combo_box(flags, options, selected, value)
-    })
+        Ok(combo_box(flags, options, selected, text_value(widget)?))
+    }
 }
 
 /// Choice options in `/Opt` order, identified by their position.
-fn choice_options(widget: &WidgetAnnotation) -> Result<Vec<ChoiceOption>, ValidationError> {
+fn choice_options(widget: &WidgetAnnotation) -> Result<Vec<ChoiceOption>, SourceAdoptionError> {
     widget
         .options
         .iter()
@@ -311,20 +299,19 @@ fn choice_options(widget: &WidgetAnnotation) -> Result<Vec<ChoiceOption>, Valida
 fn selected_options(
     widget: &WidgetAnnotation,
     options: &[ChoiceOption],
-) -> Result<Vec<OptionId>, ValidationError> {
+) -> Result<Vec<OptionId>, SourceAdoptionError> {
     widget
         .selected_option_indices()?
         .into_iter()
         .map(|index| {
-            let index = usize::try_from(index).map_err(|_| ValidationError::InvalidMetadata {
+            let index = usize::try_from(index).map_err(|_| SourceAdoptionError::IndexOverflow {
                 field: "option index",
             })?;
-            options
-                .get(index)
-                .map(|option| option.id)
-                .ok_or(ValidationError::InvalidSourceField {
+            options.get(index).map(|option| option.id).ok_or(
+                SourceAdoptionError::InvalidSourceField {
                     reason: "choice option index",
-                })
+                },
+            )
         })
         .collect()
 }
@@ -370,10 +357,10 @@ fn unsupported(widget: &WidgetAnnotation) -> FieldKind {
 }
 
 /// Option identity for a position in the option list.
-fn option_id(index: usize) -> Result<OptionId, ValidationError> {
+fn option_id(index: usize) -> Result<OptionId, SourceAdoptionError> {
     u32::try_from(index)
         .map(OptionId)
-        .map_err(|_| ValidationError::InvalidMetadata {
+        .map_err(|_| SourceAdoptionError::IndexOverflow {
             field: "option index",
         })
 }

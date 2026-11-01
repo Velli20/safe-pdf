@@ -1,9 +1,10 @@
 use crate::{
     BoundsAccumulator,
+    geometry::{Bounds, Translate},
     pdf_path::PdfPath,
     point::Point,
     rect::Rect,
-    transform::{Transform, TransformError},
+    transform::Transform,
 };
 
 use num_traits::ToPrimitive;
@@ -50,17 +51,6 @@ impl<T> Polyline<T> {
     pub fn close(&mut self) {
         self.closed = true;
     }
-
-    /// Returns a copy with `f` applied to every vertex, keeping the closure flag.
-    pub fn map(&self, f: impl FnMut(Point<T>) -> Point<T>) -> Self
-    where
-        T: Copy,
-    {
-        Self {
-            points: self.points.iter().copied().map(f).collect(),
-            closed: self.closed,
-        }
-    }
 }
 
 impl<T: Copy> From<&Rect<T>> for Polyline<T> {
@@ -78,34 +68,35 @@ impl<T: Copy> From<&Rect<T>> for Polyline<T> {
     }
 }
 
-impl Polyline<f32> {
-    /// Moves every vertex by `delta` in the current coordinate space.
-    pub fn translate(&mut self, delta: Point) {
+impl Bounds for Polyline<f32> {
+    /// Single points and straight lines keep their degenerate rectangles.
+    fn bounds(&self) -> Option<Rect> {
+        let mut bounds = BoundsAccumulator::new();
+        for &point in &self.points {
+            if !point.is_finite() {
+                return None;
+            }
+            bounds.include(point);
+        }
+        bounds.finish()
+    }
+}
+
+impl Translate for Polyline<f32> {
+    fn translate(&mut self, delta: Point) {
         for point in &mut self.points {
-            point.x += delta.x;
-            point.y += delta.y;
+            point.translate(delta);
         }
     }
+}
 
+impl Polyline<f32> {
     /// Maps vertices in place, with the same unchecked semantics as `PdfPath::transform`.
     pub fn transform(&mut self, transform: &Transform) {
         for point in &mut self.points {
             let (x, y) = transform.transform_point(point.x, point.y);
             *point = Point::new(x, y);
         }
-    }
-
-    /// Returns transformed axis-aligned bounds without allocating.
-    ///
-    /// Empty geometry returns `None`; single points and straight lines retain their
-    /// degenerate rectangles. Nonfinite transforms, inputs, or outputs return an error.
-    pub fn bounds(&self, transform: &Transform) -> Result<Option<Rect>, TransformError> {
-        transform.validate()?;
-        let mut bounds = BoundsAccumulator::new();
-        for &point in &self.points {
-            bounds.include(transform.try_map_point(point)?);
-        }
-        Ok(bounds.finish())
     }
 
     /// Materializes path verbs, adding a closing verb only for nonempty closed geometry.
@@ -121,22 +112,6 @@ impl Polyline<f32> {
             }
         }
         path
-    }
-
-    /// Axis-aligned rectangle enclosing every vertex; `None` for empty geometry.
-    ///
-    /// Unlike [`Polyline::bounds`], vertices are taken as-is: no transform is
-    /// applied and nonfinite coordinates propagate into the result unvalidated.
-    pub fn vertex_bounds(&self) -> Option<Rect> {
-        self.points
-            .iter()
-            .map(|point| Rect {
-                left: point.x,
-                top: point.y,
-                right: point.x,
-                bottom: point.y,
-            })
-            .reduce(|bounds, point| bounds.union(&point))
     }
 
     /// Creates an open zigzag around the baseline from `a` to `b`.
@@ -208,11 +183,11 @@ mod tests {
         for closed in [false, true] {
             let line = Polyline::new(Vec::new(), closed);
             assert!(line.to_pdf_path().verbs.is_empty());
-            assert_eq!(line.bounds(&Transform::identity()).unwrap(), None);
+            assert_eq!(line.bounds(), None);
         }
         let line = Polyline::<f32>::new(vec![Point::new(-2.0, 3.0)], true);
         assert_eq!(
-            line.bounds(&Transform::identity()).unwrap(),
+            line.bounds(),
             Some(Rect {
                 left: -2.0,
                 top: 3.0,
@@ -233,30 +208,17 @@ mod tests {
             right: 2.0,
             bottom: 2.0,
         });
-        assert_eq!(line.bounds(&transform).unwrap(), expected);
         line.transform(&transform);
         assert_eq!(line.points(), &[Point::new(2.0, 2.0), Point::new(2.0, 0.0)]);
         assert!(line.is_closed());
-        assert_eq!(line.bounds(&Transform::identity()).unwrap(), expected);
+        assert_eq!(line.bounds(), expected);
     }
 
     #[test]
-    fn bounds_reject_invalid_coordinates_and_overflow() {
+    fn bounds_reject_invalid_coordinates() {
         for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             let line = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(invalid, 1.0)], false);
-            assert_eq!(
-                line.bounds(&Transform::identity()),
-                Err(TransformError::NonFinite)
-            );
-            assert_eq!(
-                Polyline::<f32>::default().bounds(&Transform::from_translate(0.0, invalid)),
-                Err(TransformError::NonFinite)
-            );
+            assert_eq!(line.bounds(), None);
         }
-        let line = Polyline::new(vec![Point::new(f32::MAX, 0.0)], false);
-        assert_eq!(
-            line.bounds(&Transform::from_scale(2.0, 1.0)),
-            Err(TransformError::NonFinite)
-        );
     }
 }

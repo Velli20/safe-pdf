@@ -9,6 +9,9 @@ pub enum AnnotationLayerError {
     /// Core geometry or metadata validation failed before dispatch.
     #[error(transparent)]
     Validation(#[from] crate::error::ValidationError),
+    /// A retained source annotation or field could not be adopted.
+    #[error(transparent)]
+    SourceAdoption(#[from] crate::error::SourceAdoptionError),
     /// Host coordinate conversion failed.
     #[error(transparent)]
     Transform(#[from] pdf_graphics::transform::TransformError),

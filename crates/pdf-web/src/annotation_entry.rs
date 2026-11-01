@@ -71,10 +71,10 @@ fn css_border(entry: &AnnotationEntry) -> String {
     if painted || drawn_from_shapes(&entry.content) || style.border_width <= 0.0 {
         return String::new();
     }
-    let line = if style.dash.is_empty() {
-        "solid"
-    } else {
+    let line = if style.dash.as_ref().is_some_and(|dash| !dash.is_empty()) {
         "dashed"
+    } else {
+        "solid"
     };
     format!(
         "{}px {line} {}",
@@ -83,17 +83,18 @@ fn css_border(entry: &AnnotationEntry) -> String {
     )
 }
 
-/// Formats an opaque color as `rgb(r g b)`; `None` is `transparent`.
+/// Formats a color as `rgb(r g b / a)`; `None` is `transparent`.
 pub fn css_color(color: Option<Color>) -> String {
     let Some(color) = color else {
         return "transparent".into();
     };
     let channel = |v: f32| (v * 255.0).round().to_u8().unwrap_or(0);
     format!(
-        "rgb({} {} {})",
+        "rgb({} {} {} / {})",
         channel(color.r),
         channel(color.g),
-        channel(color.b)
+        channel(color.b),
+        color.a
     )
 }
 

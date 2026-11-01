@@ -376,6 +376,14 @@ impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
         self.array
     }
 
+    /// Returns the identifier of an element stored as an indirect reference.
+    pub fn reference_at(&self, index: usize) -> Option<ObjectId> {
+        match self.array.get(index) {
+            Some(ObjectVariant::Reference(id)) => Some(*id),
+            _ => None,
+        }
+    }
+
     /// Reads an element, reporting an out-of-bounds error for an invalid index.
     #[inline]
     pub fn at<T: FromPdfObject>(&mut self, index: usize) -> ReadResult<T> {

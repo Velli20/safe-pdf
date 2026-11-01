@@ -40,7 +40,7 @@ impl FromPdfObject for SourceAnnotation {
             id: 0,
             object_number: None,
             opacity: dictionary
-                .optional::<f64>(b"CA")?
+                .optional::<f32>(b"CA")?
                 .filter(|v| v.is_finite())
                 .unwrap_or(1.0)
                 .clamp(0.0, 1.0),

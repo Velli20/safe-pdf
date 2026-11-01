@@ -7,7 +7,6 @@ use crate::{
     entry::AnnotationEntry,
     events::{Change, Event},
     import::{self, ImportedDocument, LayoutHint},
-    kind::AnnotationKind,
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
     metadata::AnnotationFlags,
     models::{Annotation, AnnotationId, Point, Revision},
@@ -17,7 +16,7 @@ use crate::{
 };
 use pdf_graphics::{rect::Rect, viewport::PageViewport};
 use pdf_object_reader::diagnostic::PdfReadDiagnostic;
-use pdf_optional_content::{OcgStateEntry, OptionalContentProperties, OptionalContentState};
+use pdf_optional_content::{OcgState, OptionalContentProperties, OptionalContentState};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -164,10 +163,7 @@ impl AnnotationOverlay {
         page: u32,
         pressed: Option<AnnotationId>,
     ) -> AnnotationLayerResult<Vec<PaintedAppearance>> {
-        let view = self.document.engine.view();
-        if page >= view.data().document.page_count {
-            return Err(AnnotationLayerError::PageOutOfRange(page));
-        }
+        let view = self.page_view(page)?;
         self.page_annotations(&view, page)
             .into_iter()
             .filter_map(|annotation| {
@@ -181,8 +177,7 @@ impl AnnotationOverlay {
     /// Returns the source artwork of the displayed stamp `id` at its live bounds, for
     /// drawing into the stamp's own presentation; `None` for other annotations.
     pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
-        let view = self.document.engine.view();
-        PaintedAppearance::artwork(view.annotation(id)?, &self.optional_content)
+        PaintedAppearance::artwork(self.annotation(id)?, &self.optional_content)
     }
 
     /// Validates a GUI context, clamps interactive dragging, and dispatches one edit.
@@ -240,9 +235,6 @@ impl AnnotationOverlay {
         trigger: ActionTrigger,
     ) -> AnnotationLayerResult<ActionReceipt> {
         let action = self
-            .document
-            .engine
-            .view()
             .annotation(id)
             .ok_or(AnnotationLayerError::InvalidInput("action annotation"))?
             .trigger_action(trigger);
@@ -338,7 +330,7 @@ impl AnnotationOverlay {
     /// Applies `state` and reports the pages holding an annotation that depends on
     /// a group whose visibility changed. The engine view is released before the
     /// caller evicts the snapshots those pages own.
-    fn apply_optional_content(&mut self, state: &[OcgStateEntry]) -> BTreeSet<u32> {
+    fn apply_optional_content(&mut self, state: &OcgState) -> BTreeSet<u32> {
         let changed = self.optional_content.apply(state);
         if changed.is_empty() {
             return BTreeSet::new();
@@ -351,8 +343,7 @@ impl AnnotationOverlay {
             .iter()
             .filter(|annotation| {
                 annotation
-                    .source()
-                    .and_then(|source| source.optional_content.as_ref())
+                    .optional_content()
                     .is_some_and(|content| content.depends_on(&changed))
             })
             .map(|annotation| annotation.page.0)
@@ -383,10 +374,7 @@ impl AnnotationOverlay {
         viewport: &PageViewport,
         viewport_revision: u32,
     ) -> AnnotationLayerResult<PreparedAnnotations> {
-        let view = self.document.engine.view();
-        if page >= view.data().document.page_count {
-            return Err(AnnotationLayerError::PageOutOfRange(page));
-        }
+        let view = self.page_view(page)?;
         let annotations = self.page_annotations(&view, page);
         let popup_parents = popup_parents(&annotations);
         let entries = annotations
@@ -465,10 +453,7 @@ impl AnnotationOverlay {
         if viewport_revision != target.viewport_revision || !mounted {
             return Err(AnnotationLayerError::StaleRevision);
         }
-        self.document
-            .engine
-            .view()
-            .annotation(target.annotation_id)
+        self.annotation(target.annotation_id)
             .filter(|annotation| annotation.page.0 == target.page)
             .ok_or(AnnotationLayerError::InvalidInput("annotation target"))
     }
@@ -501,11 +486,21 @@ impl AnnotationOverlay {
     }
 
     fn page_of(&self, id: AnnotationId) -> Option<u32> {
-        self.document
-            .engine
-            .view()
-            .annotation(id)
-            .map(|annotation| annotation.page.0)
+        self.annotation(id).map(|annotation| annotation.page.0)
+    }
+
+    /// Borrow a live annotation by identity.
+    fn annotation(&self, id: AnnotationId) -> Option<&Annotation> {
+        self.document.engine.view().annotation(id)
+    }
+
+    /// The live view, once `page` is known to exist.
+    fn page_view(&self, page: u32) -> AnnotationLayerResult<DocumentView<'_>> {
+        let view = self.document.engine.view();
+        if page >= view.data().document.page_count {
+            return Err(AnnotationLayerError::PageOutOfRange(page));
+        }
+        Ok(view)
     }
 
     /// Records which annotations `event` touched and returns the pages to refresh.
@@ -555,10 +550,8 @@ impl AnnotationOverlay {
 fn popup_parents(annotations: &[&Annotation]) -> BTreeSet<u64> {
     annotations
         .iter()
-        .filter_map(|annotation| match &annotation.content {
-            AnnotationKind::Popup(popup) => popup.parent.map(|id| id.0),
-            _ => None,
-        })
+        .filter_map(|annotation| annotation.content.popup_parent())
+        .map(|id| id.0)
         .collect()
 }
 
@@ -569,10 +562,7 @@ fn popup_parents(annotations: &[&Annotation]) -> BTreeSet<u64> {
 /// `TargetMismatch` when the operation names another annotation or field, or the
 /// annotation's flags and kind prohibit that edit.
 fn authorize(annotation: &Annotation, operation: &Operation) -> AnnotationLayerResult<()> {
-    let bound_field = match &annotation.content {
-        AnnotationKind::Widget(widget) => Some(widget.binding.field()),
-        _ => None,
-    };
+    let bound_field = annotation.content.bound_field();
     let permitted = match operation {
         Operation::Translate { id, .. } => *id == annotation.id && annotation.can_translate(),
         Operation::SetFreeTextText { id, .. } => {

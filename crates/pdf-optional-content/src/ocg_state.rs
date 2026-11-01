@@ -26,20 +26,38 @@ pub enum OcgTarget {
     },
 }
 
-/// Owned `/State` element of a `SetOCGState` action.
-///
-/// The `/State` array is a flat sequence in which each operation governs the
-/// group targets that follow it, so elements are retained in their source order.
+/// Optional content group operation of a `SetOCGState` `/State` array.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
+pub enum OcgOperation {
+    /// `/ON`: the governed groups are turned on.
+    On,
+    /// `/OFF`: the governed groups are turned off.
+    Off,
+    /// `/Toggle`: the governed groups have their state reversed.
+    Toggle,
+}
+
+/// One operation of a `SetOCGState` `/State` array with the group targets that follow it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
-pub enum OcgStateEntry {
-    /// `/ON`: the groups that follow are turned on.
-    On,
-    /// `/OFF`: the groups that follow are turned off.
-    Off,
-    /// `/Toggle`: the groups that follow have their state reversed.
-    Toggle,
-    /// A group governed by the preceding operation.
-    Group(OcgTarget),
+pub struct OcgStateChange {
+    /// The operation applied to every group in `groups`.
+    pub operation: OcgOperation,
+    /// The group targets the operation governs, in source order; never empty.
+    pub groups: Vec<OcgTarget>,
+}
+
+/// Owned `/State` array of a `SetOCGState` action.
+///
+/// The array is a flat sequence in which each operation governs the group targets
+/// that follow it; it is retained as those changes in source order.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
+pub struct OcgState {
+    /// The changes in the order they are applied.
+    pub changes: Vec<OcgStateChange>,
 }

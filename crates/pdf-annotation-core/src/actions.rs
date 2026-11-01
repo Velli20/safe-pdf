@@ -3,9 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     models::Annotation,
-    pdf_data::{
-        AnnotationAction, HideTarget, NativeAnnotation, WidgetAdditionalActions, WidgetAnnotation,
-    },
+    pdf_data::{AnnotationAction, HideTarget, WidgetAdditionalActions, WidgetAnnotation},
 };
 use pdf_object_reader::text_string;
 
@@ -98,14 +96,6 @@ impl Annotation {
             }
             HideTarget::FieldName(name) => widget.is_some_and(|widget| widget.is_named(name)),
             HideTarget::Unresolved => false,
-        }
-    }
-
-    /// The retained source widget record, if this annotation was adopted from one.
-    fn source_widget(&self) -> Option<&WidgetAnnotation> {
-        match &self.source()?.kind {
-            NativeAnnotation::Widget(widget) => Some(widget),
-            _ => None,
         }
     }
 }

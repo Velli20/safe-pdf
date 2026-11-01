@@ -25,7 +25,7 @@ pub mod widgets;
 /// Styled free-text payloads and native editing constraints.
 pub mod free_text;
 
-/// Annotation payload vocabulary with validation, translation, and live bounds.
+/// Annotation payload vocabulary with translation and live bounds.
 pub mod kind;
 /// Source snapshots and live annotation capabilities.
 pub mod metadata;
@@ -38,11 +38,11 @@ pub use pdf_data::{
     PolygonAnnotation, PopupAnnotation, SourceAnnotation, SquareAnnotation, SquigglyAnnotation,
     StampAnnotation, StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
 };
+mod finite_values;
 /// Device-independent style conversion and interpretation.
 pub mod style;
 /// Extended annotation geometry and semantic payloads.
 pub mod subtypes;
-mod validation;
 
 mod source_decode;
 mod source_decode_actions;
@@ -57,11 +57,16 @@ mod wire;
 
 /// Triggers that run annotation actions.
 pub mod actions;
+mod annotation_source;
 /// Source appearances hosts paint on the page canvas.
 pub mod appearance_paint;
+mod document_lookup;
+mod document_validation;
 /// Backend-neutral annotation entries projected into one host viewport.
 pub mod entry;
+mod field_validation;
 mod import;
+mod kind_validation;
 /// Errors at the backend-neutral annotation layer boundary.
 pub mod layer_error;
 /// Document-owned Core editing with per-viewport prepared entries.
@@ -71,9 +76,6 @@ mod projection;
 pub mod requests;
 /// Session-only annotation storage.
 pub mod session_store;
-mod shape_line_ending;
-mod shape_markup;
-mod shape_path;
 /// Local-unit outlines for annotations drawn by hosts.
 pub mod shapes;
 mod widget_control;

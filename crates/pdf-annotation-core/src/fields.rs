@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::FieldValidationError;
-
 /// Core-allocated document-local identity, distinct from an annotation identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
@@ -89,18 +87,6 @@ pub struct CheckboxGroupField {
     pub selected: Option<OptionId>,
 }
 
-impl CheckboxGroupField {
-    pub(crate) fn validate_selection(
-        &self,
-        selected: Option<OptionId>,
-    ) -> Result<(), FieldValidationError> {
-        if let Some(id) = selected {
-            option_position(&self.options, id)?;
-        }
-        Ok(())
-    }
-}
-
 /// Exclusive option selection with optional repeated views of each option.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
@@ -150,6 +136,17 @@ pub enum ComboValue {
     Option(OptionId),
     /// Single-line text, allowed only for editable combos; empty text is a draft.
     Text(String),
+}
+
+impl ComboValue {
+    /// Whether nothing is selected or entered; empty draft text counts as empty.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Empty => true,
+            Self::Option(_) => false,
+            Self::Text(text) => text.is_empty(),
+        }
+    }
 }
 
 /// A dropdown with optional arbitrary text entry.
@@ -244,42 +241,6 @@ pub enum FieldIssueKind {
 }
 
 impl FieldKind {
-    pub(crate) fn validate(&self) -> Result<(), crate::error::FieldValidationError> {
-        use crate::error::FieldValidationError as Error;
-        let options = match self {
-            Self::Text(text) => return text.validate_value(&text.value),
-            Self::Checkbox(_) | Self::Button(_) | Self::Unsupported(_) => return Ok(()),
-            Self::CheckboxGroup(group) => {
-                if group.options.is_empty() {
-                    return Err(Error::EmptyCheckboxOptions);
-                }
-                &group.options
-            }
-            Self::Radio(radio) => {
-                if radio.options.is_empty() {
-                    return Err(Error::EmptyRadioOptions);
-                }
-                &radio.options
-            }
-            Self::ListBox(list) => &list.options,
-            Self::ComboBox(combo) => &combo.options,
-        };
-        let mut seen = std::collections::HashSet::new();
-        for option in options {
-            if !seen.insert(option.id.0) {
-                return Err(Error::DuplicateOption(option.id));
-            }
-        }
-        match self {
-            Self::CheckboxGroup(group) => group.validate_selection(group.selected)?,
-            Self::Radio(radio) => radio.validate_selection(radio.selected)?,
-            Self::ListBox(list) => list.validate_selection(&list.selection)?,
-            Self::ComboBox(combo) => combo.validate_value(&combo.value)?,
-            Self::Text(_) | Self::Checkbox(_) | Self::Button(_) | Self::Unsupported(_) => {}
-        }
-        Ok(())
-    }
-
     pub(crate) fn is_empty(&self) -> bool {
         // Required values are submission issues, not errors while editing drafts.
         match self {
@@ -298,96 +259,9 @@ impl FieldKind {
                 ListSelection::Single(value) => value.is_none(),
                 ListSelection::Multiple(values) => values.is_empty(),
             },
-            Self::ComboBox(combo) => match &combo.value {
-                ComboValue::Empty => true,
-                ComboValue::Option(_) => false,
-                ComboValue::Text(text) => text.is_empty(),
-            },
+            Self::ComboBox(combo) => combo.value.is_empty(),
         }
     }
-}
-
-impl TextField {
-    pub(crate) fn validate_value(&self, value: &str) -> Result<(), FieldValidationError> {
-        if let Some(max) = self.max_length
-            && u64::try_from(value.chars().count()).unwrap_or(u64::MAX) > u64::from(max)
-        {
-            return Err(FieldValidationError::TextTooLong { max });
-        }
-        if self.mode != TextMode::Multiline && value.contains(['\r', '\n']) {
-            return Err(FieldValidationError::LineBreakNotAllowed);
-        }
-        Ok(())
-    }
-}
-
-impl RadioField {
-    pub(crate) fn validate_selection(
-        &self,
-        selected: Option<OptionId>,
-    ) -> Result<(), FieldValidationError> {
-        if let Some(id) = selected {
-            option_position(&self.options, id)?;
-        }
-        Ok(())
-    }
-}
-
-impl ListBoxField {
-    pub(crate) fn validate_selection(
-        &self,
-        selection: &ListSelection,
-    ) -> Result<(), FieldValidationError> {
-        if std::mem::discriminant(&self.selection) != std::mem::discriminant(selection) {
-            return Err(FieldValidationError::SelectionModeMismatch);
-        }
-        match selection {
-            ListSelection::Single(selected) => {
-                if let Some(id) = selected {
-                    option_position(&self.options, *id)?;
-                }
-            }
-            ListSelection::Multiple(selected) => {
-                // Unlike the legacy editor, Core rejects rather than normalizes input.
-                let mut previous = None;
-                for id in selected {
-                    let index = option_position(&self.options, *id)?;
-                    if previous.is_some_and(|previous| previous >= index) {
-                        return Err(FieldValidationError::InvalidListSelection);
-                    }
-                    previous = Some(index);
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl ComboBoxField {
-    pub(crate) fn validate_value(&self, value: &ComboValue) -> Result<(), FieldValidationError> {
-        match value {
-            ComboValue::Option(id) => {
-                option_position(&self.options, *id)?;
-            }
-            ComboValue::Text(text) => {
-                if !self.editable {
-                    return Err(FieldValidationError::CustomTextNotAllowed);
-                }
-                if text.contains(['\r', '\n']) {
-                    return Err(FieldValidationError::LineBreakNotAllowed);
-                }
-            }
-            ComboValue::Empty => {}
-        }
-        Ok(())
-    }
-}
-
-fn option_position(options: &[ChoiceOption], id: OptionId) -> Result<usize, FieldValidationError> {
-    options
-        .iter()
-        .position(|option| option.id == id)
-        .ok_or(FieldValidationError::UnknownOption(id))
 }
 
 #[cfg(test)]
@@ -509,7 +383,7 @@ mod tests {
                 allow_clear: true
             })
             .validate(),
-            Err(FieldValidationError::EmptyRadioOptions)
+            Err(FieldValidationError::EmptyOptions)
         ));
         for value in ["\r", "\n"] {
             assert!(matches!(

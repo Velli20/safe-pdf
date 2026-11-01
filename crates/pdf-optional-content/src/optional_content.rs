@@ -6,7 +6,7 @@
 //! Visibility is host presentation state: it never enters the sidecar and never
 //! advances the document revision.
 use crate::error::OptionalContentError;
-use crate::ocg_state::{OcgStateEntry, OcgTarget};
+use crate::ocg_state::{OcgOperation, OcgState, OcgTarget};
 use crate::visibility_expression::VisibilityExpression;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -219,29 +219,18 @@ impl OptionalContentState {
     /// Each operation governs the group targets that follow it. A target naming a
     /// group the document never declared is tracked from here on, so an action can
     /// still hide a group missing from `/OCProperties`.
-    pub fn apply(&mut self, state: &[OcgStateEntry]) -> BTreeSet<OptionalContentGroupId> {
+    pub fn apply(&mut self, state: &OcgState) -> BTreeSet<OptionalContentGroupId> {
         let mut changed = BTreeSet::new();
-        let mut operation = None;
-        for entry in state {
-            match entry {
-                OcgStateEntry::On => operation = Some(OcgStateEntry::On),
-                OcgStateEntry::Off => operation = Some(OcgStateEntry::Off),
-                OcgStateEntry::Toggle => operation = Some(OcgStateEntry::Toggle),
-                // Decoding rejects a target that precedes any operation, so an
-                // absent operation here is unreachable rather than an error.
-                OcgStateEntry::Group(target) => {
-                    let Some(operation) = &operation else {
-                        continue;
+        for change in &state.changes {
+            for target in &change.groups {
+                for id in self.resolve(target) {
+                    let value = match change.operation {
+                        OcgOperation::On => true,
+                        OcgOperation::Off => false,
+                        OcgOperation::Toggle => !self.group_visible(&id),
                     };
-                    for id in self.resolve(target) {
-                        let value = match operation {
-                            OcgStateEntry::Off => false,
-                            OcgStateEntry::Toggle => !self.group_visible(&id),
-                            _ => true,
-                        };
-                        if self.visible.insert(id.clone(), value) != Some(value) {
-                            changed.insert(id);
-                        }
+                    if self.visible.insert(id.clone(), value) != Some(value) {
+                        changed.insert(id);
                     }
                 }
             }

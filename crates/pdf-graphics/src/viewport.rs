@@ -1,6 +1,7 @@
 //! Validated page geometry and logical-device to bitmap mappings.
 
 use crate::{
+    geometry::Bounds,
     point::Point,
     quad::Quad,
     rect::Rect,
@@ -122,7 +123,7 @@ impl PageViewport {
         for corner in &mut corners {
             *corner = self.map_page_point(*corner)?;
         }
-        Ok(Quad { corners }.bounds())
+        Quad { corners }.bounds().ok_or(ViewportError::Bounds)
     }
 
     /// Maps a y-down local frame anchored at page point `origin` into logical device

@@ -3,14 +3,14 @@
 //! A group is identified by the object number of its dictionary, so group references are
 //! resolved only to read that number and the group's `/Name`.
 use crate::error::OptionalContentError;
-use crate::ocg_state::{OcgStateEntry, OcgTarget};
+use crate::ocg_state::{OcgOperation, OcgState, OcgStateChange, OcgTarget};
 use crate::optional_content::{
     OptionalContentBaseState, OptionalContentConfiguration, OptionalContentGroup,
     OptionalContentGroupId, OptionalContentMembership, OptionalContentPolicy,
     OptionalContentProperties,
 };
 use pdf_object_reader::pdf_name::PdfName;
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
+use pdf_object_reader::{ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 /// Decodes the catalog's `/OCProperties`; alternate `/Configs` are not retained.
 impl FromPdfObject for OptionalContentProperties {
@@ -51,9 +51,8 @@ impl FromPdfObject for OptionalContentBaseState {
     }
 }
 
-/// Reads a `/State` operation name; group targets are decoded from the objects
-/// that follow their operation and never reach this decoder.
-impl FromPdfObject for OcgStateEntry {
+/// Reads a `/State` operation name.
+impl FromPdfObject for OcgOperation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let name = context.decode::<PdfName>()?;
         match &*name {
@@ -158,6 +157,76 @@ impl FromPdfObject for OcgTarget {
         }
         Ok(Self::Dictionary {
             name: context.required(b"Name")?,
+        })
+    }
+}
+
+/// Decodes the `/State` array of a `SetOCGState` action.
+///
+/// Each operation name starts a change that governs the group targets following it, so
+/// the array splits at its names; every change must govern at least one group.
+impl FromPdfObject for OcgState {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut items = context.array()?;
+        let mut start = 0;
+        let changes = items
+            .array()
+            .chunk_by(|_, next| !next.is_name())
+            .map(|chunk| {
+                let change = OcgStateChange::read(&mut items, start, chunk.len());
+                start = start.saturating_add(chunk.len());
+                change
+            })
+            .collect::<ReadResult<_>>()?;
+        Ok(Self { changes })
+    }
+}
+
+impl OcgStateChange {
+    /// Reads the operation at `start` and the `length - 1` group targets after it.
+    fn read<A: ObjectAccess + ?Sized>(
+        items: &mut ArrayContext<'_, A>,
+        start: usize,
+        length: usize,
+    ) -> ReadResult<Self> {
+        if !items.array().get(start).is_some_and(|item| item.is_name()) {
+            return Err(OptionalContentError::InvalidEntry {
+                entry: b"State",
+                reason: "group target precedes any optional content operation".to_owned(),
+            }
+            .into());
+        }
+        if length < 2 {
+            return Err(OptionalContentError::InvalidEntry {
+                entry: b"State",
+                reason: "optional content operation has no group target".to_owned(),
+            }
+            .into());
+        }
+        let end = start.saturating_add(length);
+        Ok(Self {
+            operation: items.at(start)?,
+            groups: (start.saturating_add(1)..end)
+                .map(|index| OcgTarget::read(items, index))
+                .collect::<ReadResult<_>>()?,
+        })
+    }
+}
+
+impl OcgTarget {
+    /// Reads the group target at `index`. A group reference keeps its identity
+    /// unresolved; a direct dictionary is decoded for its `/Name`.
+    fn read<A: ObjectAccess + ?Sized>(
+        items: &mut ArrayContext<'_, A>,
+        index: usize,
+    ) -> ReadResult<Self> {
+        let Some(id) = items.reference_at(index) else {
+            return items.at(index);
+        };
+        Ok(Self::Reference {
+            number: u64::try_from(id.number).map_err(|_| OptionalContentError::ResourceLimit)?,
+            generation: u64::try_from(id.generation)
+                .map_err(|_| OptionalContentError::ResourceLimit)?,
         })
     }
 }

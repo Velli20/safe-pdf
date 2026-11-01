@@ -12,7 +12,7 @@ const svgElement = (tag, attributes) => {
 
 /** @param {import('./annotation_contract').ShapePaint} paint */
 const paintAttributes = paint => ({
-  fill: rgb(paint.fill), stroke: rgb(paint.stroke), 'stroke-width': paint.width, 'stroke-dasharray': paint.dash.join(' '),
+  fill: rgb(paint.fill), stroke: rgb(paint.stroke), 'stroke-width': paint.width, 'stroke-dasharray': paint.dash?.join(' ') ?? 'none',
   'fill-opacity': paint.fill?.a ?? 1, 'stroke-opacity': paint.stroke?.a ?? 1,
   ...(paint.round ? { 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } : {}),
 });
@@ -33,11 +33,6 @@ export function drawSvg(entry) {
       case 'ellipse': {
         const { left, top, right, bottom } = shape.bounds;
         svg.append(svgElement('ellipse', { ...paint, cx: (left + right) / 2, cy: (top + bottom) / 2, rx: (right - left) / 2, ry: (bottom - top) / 2 }));
-        break;
-      }
-      case 'rect': {
-        const { left, top, right, bottom } = shape.bounds;
-        svg.append(svgElement('rect', { ...paint, x: left, y: top, width: right - left, height: bottom - top }));
         break;
       }
     }

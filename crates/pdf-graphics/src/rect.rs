@@ -1,4 +1,4 @@
-use crate::{point::Point, size::Size, transform::Transform};
+use crate::{geometry::Translate, point::Point, size::Size, transform::Transform};
 
 /// An axis-aligned rectangle whose edge coordinate type defaults to `f32`.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -17,6 +17,16 @@ pub struct Rect<T = f32> {
     pub right: T,
     /// The bottom edge of the rectangle.
     pub bottom: T,
+}
+
+impl Translate for Rect<f32> {
+    /// Moves all edges without normalizing or validating.
+    fn translate(&mut self, delta: Point) {
+        self.left += delta.x;
+        self.right += delta.x;
+        self.top += delta.y;
+        self.bottom += delta.y;
+    }
 }
 
 impl Rect<f32> {
@@ -110,14 +120,6 @@ impl Rect<f32> {
         }
     }
 
-    /// Moves all edges by the given displacement without normalizing or validating.
-    pub fn translate(&mut self, dx: f32, dy: f32) {
-        self.left += dx;
-        self.right += dx;
-        self.top += dy;
-        self.bottom += dy;
-    }
-
     /// Clamps a displacement so this normalized rectangle stays inside `page` on each axis.
     /// Oversized rectangles are frozen on that axis; the other axis can still move.
     ///
@@ -143,7 +145,7 @@ impl Rect<f32> {
             y: clamp(self.top, self.bottom, page.top, page.bottom, delta.y)?,
         };
         let mut moved = *self;
-        moved.translate(result.x, result.y);
+        moved.translate(result);
         moved.is_valid().then_some(result)
     }
 
@@ -168,23 +170,6 @@ impl Rect<f32> {
             .max(0.0)
             .max(p.x - self.right)
             .hypot((self.top - p.y).max(0.0).max(p.y - self.bottom))
-    }
-
-    /// Converts a point into local top-left units of this rectangle: the origin is
-    /// `(left, bottom)` and y grows towards `top`.
-    pub fn to_local(&self, point: Point) -> Point {
-        Point::new(point.x - self.left, self.bottom - point.y)
-    }
-
-    /// Local box `[0, width] × [0, height]` shrunk by `inset` on each side; the far
-    /// edges never cross the near ones.
-    pub fn local_inset(&self, inset: f32) -> Self {
-        Self {
-            left: inset,
-            top: inset,
-            right: (self.width() - inset).max(inset),
-            bottom: (self.height() - inset).max(inset),
-        }
     }
 
     /// Returns the scale transform produced by dividing this rectangle's size by another.

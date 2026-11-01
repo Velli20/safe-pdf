@@ -40,18 +40,15 @@ impl From<SourceDecodeError> for pdf_object_reader::ObjectReadError {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum FieldValidationError {
-    /// An export-state checkbox group must contain an option.
-    #[error("checkbox groups require at least one option")]
-    EmptyCheckboxOptions,
+    /// Checkbox-group and radio configurations require at least one option.
+    #[error("checkbox groups and radio fields require at least one option")]
+    EmptyOptions,
     /// Option identities within one field must be unique.
     #[error("duplicate field option: {0:?}")]
     DuplicateOption(OptionId),
     /// A value references an option absent from its field.
     #[error("unknown field option: {0:?}")]
     UnknownOption(OptionId),
-    /// Radio configuration requires at least one option.
-    #[error("radio fields require at least one option")]
-    EmptyRadioOptions,
     /// Multiple list selection must contain distinct IDs in option-list order.
     #[error("list selection must be unique and follow option-list order")]
     InvalidListSelection,
@@ -76,56 +73,35 @@ pub enum FieldValidationError {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ValidationError {
-    /// Retained PDF metadata contains a number that JSON cannot preserve.
-    #[error("retained metadata numbers must be finite")]
-    NonFiniteMetadata,
-    /// Source button has no usable non-Off appearance state or checkbox fallback.
-    #[error("source button {source_id} has no on-state")]
-    MissingButtonOnState {
-        /// Historical page-local source annotation identity, not a Core ID.
-        source_id: u64,
-    },
-    /// Source annotation has no `/Rect` although its kind requires one.
-    #[error("source annotation {source_id} has no rectangle")]
-    MissingRect {
-        /// Historical page-local source annotation identity, not a Core ID.
-        source_id: u64,
-    },
-    /// Positive bounds require finite coordinates, dimensions, and maximum corners.
+    /// A number is NaN or infinite, which JSON cannot preserve.
+    #[error("annotation numbers must be finite")]
+    NonFinite,
+    /// Containers nest deeper than the supported limit.
+    #[error("annotation data nests too deeply")]
+    TooDeep,
+    /// Bounds require finite edges and positive extents.
     #[error("annotation bounds must be finite and positive")]
     InvalidBounds,
-    /// A path does not have the required vertex count or geometry.
+    /// A path does not have the required vertex count or closure.
     #[error("invalid annotation path: {field}")]
     InvalidPath {
         /// Geometry property that failed validation.
         field: &'static str,
     },
-    /// Retained metadata violates its serializable representation.
+    /// Retained data violates its representation.
     #[error("invalid retained metadata: {field}")]
     InvalidMetadata {
         /// Rejected metadata property.
         field: &'static str,
     },
-    /// A coordinate or translation component is not finite.
-    #[error("geometry must contain only finite coordinates")]
-    NonFiniteGeometry,
-    /// Highlights require nonempty, nondegenerate convex quadrilaterals.
-    #[error("highlight regions must be nonempty convex quadrilaterals")]
-    InvalidHighlight,
+    /// Markup and link regions must be nonempty convex quadrilaterals.
+    #[error("annotation regions must be nonempty convex quadrilaterals")]
+    InvalidQuads,
     /// Ink strokes require at least two points each, and ink without strokes requires a
     /// source rectangle.
     #[error("ink requires strokes with at least two points each, or a source rectangle")]
     InvalidInk,
-    /// A retained PDF text string has no Unicode interpretation.
-    #[error("undecodable PDF text string: {0}")]
-    InvalidTextString(#[from] pdf_object_reader::text_string::TextStringError),
-    /// The widgets sharing one source field disagree or describe an unusable field.
-    #[error("invalid source field: {reason}")]
-    InvalidSourceField {
-        /// Why the field group cannot be normalized.
-        reason: &'static str,
-    },
-    /// Width or opacity is outside the documented range or is not finite.
+    /// A color, width, opacity, inset, or font property is outside its range.
     #[error("invalid annotation style: {field}")]
     InvalidStyle {
         /// Name of the invalid style field.
@@ -148,9 +124,6 @@ pub enum ValidationError {
     /// Host document identities must not be empty.
     #[error("document identity must not be empty")]
     EmptyDocumentId,
-    /// A widget requires positive extents and finite minimum and maximum corners.
-    #[error("widget bounds must be finite and have positive extents")]
-    InvalidWidgetBounds,
     /// Field content failed validation independently of required-value completeness.
     #[error(transparent)]
     Field(#[from] FieldValidationError),
@@ -163,6 +136,48 @@ pub enum ValidationError {
     /// A widget's binding kind or radio option is incompatible with its field.
     #[error("widget binding is incompatible with field {0:?}")]
     InvalidWidgetBinding(FieldId),
+}
+
+/// A retained source annotation cannot be adopted as a Core payload or field.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum SourceAdoptionError {
+    /// Source button has no usable non-Off appearance state or checkbox fallback.
+    #[error("source button {source_id} has no on-state")]
+    MissingButtonOnState {
+        /// Page-local source annotation identity, not a Core ID.
+        source_id: u64,
+    },
+    /// Source annotation has no `/Rect` although its kind requires one.
+    #[error("source annotation {source_id} has no rectangle")]
+    MissingRect {
+        /// Page-local source annotation identity, not a Core ID.
+        source_id: u64,
+    },
+    /// Source `/Rect` is empty or nonfinite once its edges are ordered.
+    #[error("source annotation {source_id} has an unusable rectangle")]
+    InvalidRect {
+        /// Page-local source annotation identity, not a Core ID.
+        source_id: u64,
+    },
+    /// A retained PDF text string has no Unicode interpretation.
+    #[error("undecodable PDF text string: {0}")]
+    InvalidTextString(#[from] pdf_object_reader::text_string::TextStringError),
+    /// The widgets sharing one source field disagree or describe an unusable field.
+    #[error("invalid source field: {reason}")]
+    InvalidSourceField {
+        /// Why the field group cannot be normalized.
+        reason: &'static str,
+    },
+    /// A source count or index does not fit Core's representation.
+    #[error("source {field} exceeds Core limits")]
+    IndexOverflow {
+        /// Overflowing source property.
+        field: &'static str,
+    },
+    /// The resolved style or payload is invalid.
+    #[error(transparent)]
+    Validation(#[from] ValidationError),
 }
 
 /// Failures shared by command dispatch, loading, and explicit persistence.
@@ -239,4 +254,10 @@ pub enum CoreError<E: std::error::Error + 'static> {
     /// The host storage backend failed; pending edits remain available.
     #[error("annotation storage failed: {0}")]
     Storage(#[source] E),
+}
+
+impl<E: std::error::Error + 'static> From<FieldValidationError> for CoreError<E> {
+    fn from(error: FieldValidationError) -> Self {
+        Self::Validation(error.into())
+    }
 }

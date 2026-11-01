@@ -4,7 +4,6 @@ use crate::{
     fields::{ChoiceOption, ComboValue, Field, FieldKind, ListSelection, OptionId, TextMode},
     kind::AnnotationKind,
     models::Annotation,
-    pdf_data::NativeAnnotation,
     widgets::WidgetBinding,
 };
 use num_traits::ToPrimitive;
@@ -19,14 +18,7 @@ pub(crate) fn control(annotation: &Annotation, field: &Field) -> Option<WidgetCo
         WidgetBinding::RadioOption { option, .. }
         | WidgetBinding::CheckboxOption { option, .. } => Some(option),
     };
-    let source = annotation
-        .metadata
-        .source
-        .as_deref()
-        .and_then(|source| match &source.kind {
-            NativeAnnotation::Widget(widget) => Some(widget.as_ref()),
-            _ => None,
-        });
+    let source = annotation.source_widget();
     let definition = &field.definition;
     let mut model = WidgetControl {
         tag: ControlTag::Input,
@@ -136,12 +128,7 @@ pub(crate) fn control(annotation: &Annotation, field: &Field) -> Option<WidgetCo
             | ControlKind::CheckboxGroup
             | ControlKind::Radio
             | ControlKind::Button
-    ) && annotation
-        .metadata
-        .source
-        .as_deref()
-        .and_then(|source| source.appearance.as_ref())
-        .is_some_and(|appearance| appearance.normal.is_some());
+    ) && annotation.has_normal_appearance();
     Some(model)
 }
 

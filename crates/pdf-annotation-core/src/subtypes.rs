@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use crate::{
     models::{AnnotationId, Quad},
-    pdf_data::{
-        AnnotationAction, AnnotationDestination, BorderEffect, LineEndingStyle, LinkHighlightMode,
-    },
+    pdf_data::{AnnotationAction, AnnotationDestination, LineEndingStyle, LinkHighlightMode},
     style::ResolvedStyle,
 };
 use pdf_graphics::{polyline::Polyline, rect::Rect};
@@ -26,7 +24,7 @@ pub struct PathAnnotation {
     pub style: ResolvedStyle,
 }
 
-/// Rectangular or elliptical shape, with PDF decoration metadata retained.
+/// Rectangular or elliptical shape.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
@@ -35,10 +33,6 @@ pub struct BoxAnnotation {
     pub bounds: Rect,
     /// Current stroke/fill style.
     pub style: ResolvedStyle,
-    /// Optional border effect, which may be unsupported by a host.
-    pub border_effect: Option<BorderEffect>,
-    /// Optional left, top, right, bottom difference rectangle.
-    pub insets: Option<Rect>,
 }
 
 /// Underline, squiggly, or strikeout regions, in Core perimeter order.

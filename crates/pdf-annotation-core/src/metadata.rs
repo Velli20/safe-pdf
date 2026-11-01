@@ -113,11 +113,6 @@ impl AnnotationMetadata {
     pub fn no_rotate(&self) -> bool {
         self.flags.contains(AnnotationFlags::NO_ROTATE)
     }
-
-    pub(crate) fn validate(&self) -> Result<(), crate::error::ValidationError> {
-        crate::validation::validate(self)?;
-        Ok(())
-    }
 }
 
 /// Historical PDF field state. Live normalized values remain in `FieldKind`.
