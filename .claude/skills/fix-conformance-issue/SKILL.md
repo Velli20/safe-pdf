@@ -5,9 +5,20 @@ description: Fix a GitHub issue filed by the conformance workflow (label `confor
 
 # Fix a conformance issue
 
-Conformance issues are filed by `.github/workflows/conformance.yml`. Each one carries a key
-(`conf2-…`), a signature, the suspect source location, the failing cases, and a JSON block
-under "For agents" with the same data. Read that block first.
+Conformance issues are filed by [pdf-conformance](https://github.com/Velli20/pdf-conformance),
+a separate repository that checks Safe-PDF against the PDFium and pdf.js corpora. Each issue
+carries a key (`conf2-…`), a signature, the suspect source location, the failing cases, and a
+JSON block under "For agents" with the same data. Read that block first.
+
+The harness lives in pdf-conformance and builds Safe-PDF's crates from its `safe-pdf/`
+directory. Point that at this checkout once, so the harness runs your changes:
+
+```sh
+git clone https://github.com/Velli20/pdf-conformance ../pdf-conformance   # once
+ln -sfn "$PWD" ../pdf-conformance/safe-pdf                                # once
+```
+
+Run the `cargo conformance` commands below from `../pdf-conformance`. Make the fix here.
 
 ## 1. Reproduce
 
@@ -17,7 +28,7 @@ cargo conformance repro <key>
 
 This checks out only the issue's PDFs and compares Safe-PDF against the PDFium images
 published on GitHub Pages; it needs no PDFium build. Output lands in
-`target/conformance/<corpus>/`: start from `TRIAGE.md`, then
+`../pdf-conformance/target/conformance/<corpus>/`: start from `TRIAGE.md`, then
 `cases/<case dir>/summary.md` for each case. If `repro` cannot reach GitHub Pages or the
 upstream corpus, say so and work from the images and details in the issue.
 
@@ -37,15 +48,17 @@ wrongly.
   constructed on the failing path, not only where it is defined.
 - **`mismatch`**: open `pN-compare.png` and the region crops. The region table says what
   differs (`missing_ink`, `extra_ink`, `color_shift`, `reshaped`, `offset`) and which
-  Safe-PDF draw calls touch it; `pN-content.txt` lists the page's operators.
+  Safe-PDF draw calls touch it; `pN-content.txt` lists the page's operators. The issue and
+  `summary.md` also say how far Safe-PDF is from pdf.js and WebKit on each failing page. When
+  both agree with Safe-PDF (label `reference-disputed`), PDFium may be the one that is wrong:
+  check the PDF specification before changing Safe-PDF.
 - **`crash` / `timeout`**: the panic location or the stage is in the signature. Stages
-  `inventory`, `compare`, `regions` and `write` belong to the harness in
-  `tools/conformance/`, not to Safe-PDF (label `harness`). `safe-record` interprets the
-  page into a recording and `safe-replay` draws that recording, so they point at different
-  code. The summary's "Safe-PDF render" line gives each step's time and the recording's replay
-  cost and nesting. `pN-streams.txt` lists the Form XObjects, Type 3 glyph procedures, tiling
-  patterns and soft masks the page can draw through, with cycles marked `↻ cycle`. Start a
-  timeout there.
+  `inventory`, `compare`, `regions` and `write` belong to the harness in pdf-conformance, not
+  to Safe-PDF (label `harness`). `safe-record` interprets the page into a recording and
+  `safe-replay` draws that recording, so they point at different code. The summary's
+  "Safe-PDF render" line gives each step's time and the recording's replay cost and nesting.
+  `pN-streams.txt` lists the Form XObjects, Type 3 glyph procedures, tiling patterns and soft
+  masks the page can draw through, with cycles marked `↻ cycle`. Start a timeout there.
 
 Compare with how PDFium or pdf.js handle the same input when the PDF is malformed:
 Safe-PDF aims to render what they render.
@@ -60,6 +73,8 @@ Safe-PDF aims to render what they render.
   `cargo fmt`.
 
 ## 4. Verify
+
+From `../pdf-conformance`:
 
 ```sh
 cargo conformance verify <key>

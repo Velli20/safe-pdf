@@ -16,7 +16,6 @@ cargo run --example skia --features skia -- examples/assets/webgl.pdf  # Run vie
 cargo xtask emscripten --features skia-wasm # Build WASM target
 cargo xtask web-canvas --profile debug      # Fast build for the Canvas 2D web example
 cargo xtask web-canvas --profile debug --serve --port 8080 # Build and serve at http://127.0.0.1:8080
-cargo conformance repro <issue key>         # Rerun a conformance issue's cases (no PDFium needed)
 cargo fuzz run parse_object                 # Fuzz the parser
 ```
 
@@ -86,16 +85,15 @@ CI runs on push/PR to main (`.github/workflows/ci.yml`):
 2. Minimal feature build (no optional features)
 3. Web Canvas (wasm-bindgen) build of `examples/web-canvas`, deployed to GitHub Pages on push to `main`
 
-Conformance (`.github/workflows/conformance.yml`) checks the PDFium and pdf.js corpora against
-PDFium. On every pull request it reads both corpora (`--read-only`: open each document and
-compare page counts, no rendering), compares the reads with the base commit's, and comments on
-the pull request when a document reads worse or better. On `main` (merged pull requests and
-manual runs) it also renders the PDFium corpus against PDFium's annotation-free render (the
-pdf.js corpus is only read), keeps one GitHub issue per failure cause across both corpora,
-closes issues whose failure is gone, and publishes the viewers to GitHub Pages under
-`/conformance/`. On `main` the PDFium corpus is also rendered with `--renderer web`: the
-browser stack (`pdf-web`, Canvas 2D plus its annotation layer) in headless Chrome, compared
-with PDFium's render including annotations and form fields, reported as `pdfium-web`. To
-fix a conformance issue, follow `.claude/skills/fix-conformance-issue/SKILL.md`
-(`cargo conformance repro <key>`, then `cargo conformance verify <key>`). See
-`tools/conformance/README.md`.
+Conformance runs in a separate repository, [pdf-conformance](https://github.com/Velli20/pdf-conformance),
+which builds Safe-PDF's crates from a checkout and compares Safe-PDF with PDFium, showing pdf.js
+and WebKit next to failing pages for context. `.github/workflows/conformance-dispatch.yml` sends
+it each pull request and each push to `main`. On a pull request it reads both corpora (open each
+document and compare page counts with PDFium, no rendering), compares the reads with the base
+commit's, comments on the pull request when a document reads worse or better, and sets the
+`conformance/reads` status. On `main` it also renders the PDFium corpus with the Skia renderer
+(against PDFium's annotation-free render) and with the browser stack (`pdf-web` with its
+annotation layer, against PDFium's render with annotations and form fields), keeps one issue
+here per failure cause, closes issues whose failure is gone, and publishes the viewers to
+<https://velli20.github.io/pdf-conformance/>. To fix a conformance issue, follow
+`.claude/skills/fix-conformance-issue/SKILL.md`.
