@@ -127,6 +127,7 @@ pub fn compare(reference: &RgbaImage, safe: &RgbaImage, ignore: &[[u32; 4]]) -> 
             reference_ink: ratio(reference_ink),
             safe_ink: ratio(safe_ink),
             ignored: ratio(ignored),
+            annotation_mismatch: 0.0,
         },
         diff,
         mask,

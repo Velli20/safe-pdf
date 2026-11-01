@@ -92,6 +92,10 @@ pub struct Metrics {
     /// Fraction of pixels not compared because annotations cover them in the reference.
     #[serde(default)]
     pub ignored: f64,
+    /// Fraction of pixels that differ inside annotation rectangles, which the web renderer's
+    /// annotation layer draws. Zero for renders without annotations.
+    #[serde(default)]
+    pub annotation_mismatch: f64,
 }
 
 /// How a differing region deviates from the reference.
@@ -155,6 +159,10 @@ pub struct Region {
     pub safe_text: String,
     /// Safe-PDF drawing calls overlapping the region, largest overlap first.
     pub draws: Vec<DrawRef>,
+    /// Kind of the annotation the region lies in, such as `Widget (checkbox)`, when the
+    /// difference is drawn by the annotation layer rather than the page content.
+    #[serde(default)]
+    pub annotation: Option<String>,
 }
 
 /// Output of one page worker.

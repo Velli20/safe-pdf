@@ -663,13 +663,14 @@ fn regions(text: &mut String, output: &PageOutput) -> Result<()> {
     }
     writeln!(
         text,
-        "| Region | Class | Page space | Differing px | PDFium text | Safe-PDF text |\n|---|---|---|---|---|---|"
+        "| Region | Class | Annotation | Page space | Differing px | PDFium text | Safe-PDF text |\n|---|---|---|---|---|---|---|"
     )?;
     for (rank, region) in output.regions.iter().enumerate().take(4) {
         writeln!(
             text,
-            "| {rank} | {} | {} | {} | {} | {} |",
+            "| {rank} | {} | {} | {} | {} | {} | {} |",
             region.class.as_str(),
+            region.annotation.as_deref().unwrap_or_default(),
             region
                 .page_space
                 .map(|[l, b, r, t]| format!("[{l:.0}, {b:.0}, {r:.0}, {t:.0}]"))
@@ -960,6 +961,7 @@ mod tests {
                     cases: vec!["clippath".to_owned()],
                     likely_crates: Vec::new(),
                 }],
+                annotations: BTreeMap::new(),
                 cases: vec![case],
             },
             results: BTreeMap::from([("clippath".to_owned(), result)]),

@@ -2193,6 +2193,7 @@ dependencies = [
  "image",
  "md-5",
  "num-traits",
+ "pdf-annotation-core",
  "pdf-canvas",
  "pdf-document",
  "pdf-font",
