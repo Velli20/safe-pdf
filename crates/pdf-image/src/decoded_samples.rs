@@ -139,8 +139,18 @@ impl DecodedSamples {
         }
 
         let num_pixels = metadata.size.width().saturating_mul(metadata.size.height());
-        let num_color_components = Self::decoded_dct_component_count(raw_data.as_ref(), num_pixels)
-            .or_else(|| Self::decoded_single_pixel_component_count(raw_data.as_ref()))?;
+        let declared_components = match &metadata.color_space {
+            Some(ColorSpace::Indexed(_)) | None => 1,
+            Some(color_space) => color_space.num_color_components(),
+        };
+        // Samples with the color space's own components are not preconverted: they
+        // are decoded like any other samples, through `/Decode` and the color space.
+        let num_color_components =
+            match Self::decoded_dct_component_count(raw_data.as_ref(), num_pixels) {
+                Some(components) if components == declared_components => return None,
+                Some(components) => components,
+                None => Self::decoded_single_pixel_component_count(raw_data.as_ref())?,
+            };
 
         let image_data = if raw_data.len() == num_color_components && num_pixels > 1 {
             raw_data.repeat(num_pixels).into()
