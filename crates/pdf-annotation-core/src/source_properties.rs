@@ -1,5 +1,5 @@
 //! Interpretation of retained source metadata, without mutation or parser access.
-use crate::error::ValidationError;
+use crate::error::SourceAdoptionError;
 use crate::fields::TextMode;
 use crate::kind::SourceLayout;
 use crate::pdf_data::*;
@@ -8,64 +8,45 @@ use pdf_graphics::rect::Rect;
 /// Decode an optional PDF text string; absence yields an empty string.
 ///
 /// Returns `InvalidTextString` for bytes without a Unicode interpretation.
-pub(crate) fn decode_text(bytes: Option<&[u8]>) -> Result<String, ValidationError> {
+pub(crate) fn decode_text(bytes: Option<&[u8]>) -> Result<String, SourceAdoptionError> {
     Ok(pdf_object_reader::text_string::decode(
         bytes.unwrap_or_default(),
     )?)
 }
 
-impl FreeTextAlignment {
-    /// Interpret PDF `/Q`, returning `None` for an unknown integer. Does not panic.
-    pub const fn from_quadding(value: i32) -> Option<Self> {
-        match value {
-            0 => Some(Self::Left),
-            1 => Some(Self::Center),
-            2 => Some(Self::Right),
-            _ => None,
-        }
-    }
-
-    /// Return the PDF `/Q` integer represented by this alignment. Does not panic.
-    pub const fn quadding(&self) -> i32 {
-        match self {
-            Self::Left => 0,
-            Self::Center => 1,
-            Self::Right => 2,
-        }
-    }
-}
-
 impl BorderStyle {
     /// Resolve retained `/W`: absent means one page unit and negative means zero.
-    /// Returns `InvalidStyle` for a nonfinite width; does not mutate metadata or panic.
-    pub fn resolved_width(&self) -> Result<f32, ValidationError> {
-        let width = self.width.unwrap_or(1.0);
-        if !width.is_finite() {
-            return Err(ValidationError::InvalidStyle {
-                field: "border width",
-            });
-        }
-        Ok(width.max(0.0))
+    /// Does not mutate metadata or panic.
+    pub fn resolved_width(&self) -> f32 {
+        self.width.unwrap_or(1.0).max(0.0)
     }
 }
 
 impl SourceAnnotation {
+    /// The widget record, when this is a widget annotation.
+    pub(crate) fn widget(&self) -> Option<&WidgetAnnotation> {
+        match &self.kind {
+            NativeAnnotation::Widget(widget) => Some(widget),
+            _ => None,
+        }
+    }
+
     /// Decode the retained `/Contents`; absent contents yield an empty string.
-    pub fn contents(&self) -> Result<String, ValidationError> {
+    pub fn contents(&self) -> Result<String, SourceAdoptionError> {
         decode_text(self.contents.as_deref())
     }
 
     /// Normalize the source `/Rect` into validated bounds, whatever its edge order.
     ///
-    /// Returns `MissingRect` when the record has no rectangle and `InvalidBounds`
+    /// Returns `MissingRect` when the record has no rectangle and `InvalidRect`
     /// when the normalized rectangle is nonfinite or empty. Does not panic.
-    pub fn bounds(&self) -> Result<Rect, ValidationError> {
+    pub fn bounds(&self) -> Result<Rect, SourceAdoptionError> {
         let rect = self
             .rect
-            .ok_or(ValidationError::MissingRect { source_id: self.id })?
+            .ok_or(SourceAdoptionError::MissingRect { source_id: self.id })?
             .normalized();
         if !rect.is_valid() {
-            return Err(ValidationError::InvalidBounds);
+            return Err(SourceAdoptionError::InvalidRect { source_id: self.id });
         }
         Ok(rect)
     }
@@ -103,7 +84,7 @@ impl SourceAnnotation {
     /// use the first non-Off name. Checkboxes without one use `Yes`. The caller must
     /// supply a button annotation. Returns `MissingButtonOnState` when no state can
     /// be resolved. This method borrows source bytes and does not panic.
-    pub fn button_on_state(&self) -> Result<&[u8], ValidationError> {
+    pub fn button_on_state(&self) -> Result<&[u8], SourceAdoptionError> {
         let states = self
             .appearance
             .as_ref()
@@ -122,7 +103,7 @@ impl SourceAnnotation {
         if matches!(&self.kind, NativeAnnotation::Widget(widget) if widget.is_checkbox()) {
             return Ok(b"Yes");
         }
-        Err(ValidationError::MissingButtonOnState { source_id: self.id })
+        Err(SourceAdoptionError::MissingButtonOnState { source_id: self.id })
     }
 }
 
@@ -216,9 +197,9 @@ impl WidgetAnnotation {
     ///
     /// Inferred values use the first matching export value, then sort/deduplicate
     /// indices as the legacy reader does. Core value commands intentionally require
-    /// ordered distinct option identities instead. Returns `InvalidMetadata` if a
+    /// ordered distinct option identities instead. Returns `IndexOverflow` if a
     /// platform index cannot fit u64; does not mutate state or panic.
-    pub fn selected_option_indices(&self) -> Result<Vec<u64>, ValidationError> {
+    pub fn selected_option_indices(&self) -> Result<Vec<u64>, SourceAdoptionError> {
         if let Some(indices) = &self.selected_indices {
             return Ok(indices.clone());
         }
@@ -238,8 +219,8 @@ impl WidgetAnnotation {
                     .position(|option| option.export_value == *value)
             {
                 indices.push(u64::try_from(index).map_err(|_| {
-                    ValidationError::InvalidMetadata {
-                        field: "choice index exceeds u64",
+                    SourceAdoptionError::IndexOverflow {
+                        field: "choice index",
                     }
                 })?);
             }

@@ -107,22 +107,20 @@ fn widget(
 /// Ink without strokes draws its source normal appearance, selected by `/AS`, at its
 /// source rectangle.
 fn drawn_from_appearance(annotation: &Annotation) -> Option<PaintedAppearance> {
-    let source = annotation.source()?;
-    let normal = source.appearance.as_ref()?.normal.clone()?;
-    Some(PaintedAppearance {
-        normal,
-        state: source.appearance_state.as_deref().map(<[u8]>::to_vec),
-        rect: source.rect?.normalized(),
-    })
+    source_normal_appearance(annotation, annotation.source()?.rect?)
 }
 
 /// A stamp draws its source normal appearance, selected by `/AS`, at its live bounds.
 fn stamp(annotation: &Annotation, stamp: &Stamp) -> Option<PaintedAppearance> {
+    source_normal_appearance(annotation, stamp.bounds)
+}
+
+/// The source normal appearance, selected by `/AS`, drawn at `rect`.
+fn source_normal_appearance(annotation: &Annotation, rect: Rect) -> Option<PaintedAppearance> {
     let source = annotation.source()?;
-    let normal = source.appearance.as_ref()?.normal.clone()?;
     Some(PaintedAppearance {
-        normal,
+        normal: source.appearance.as_ref()?.normal.clone()?,
         state: source.appearance_state.as_deref().map(<[u8]>::to_vec),
-        rect: stamp.bounds.normalized(),
+        rect: rect.normalized(),
     })
 }

@@ -5,7 +5,6 @@ use crate::{
     entry::AnnotationEntry,
     fields::{Field, FieldKind},
     import::LayoutHint,
-    kind::AnnotationKind as Kind,
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
     models::{Annotation, Revision},
     pdf_data::AnnotationAction,
@@ -19,12 +18,14 @@ pub(crate) fn widget_field<'a>(
     annotation: &Annotation,
     view: &DocumentView<'a>,
 ) -> AnnotationLayerResult<Option<&'a Field>> {
-    let Kind::Widget(widget) = &annotation.content else {
-        return Ok(None);
-    };
-    view.field(widget.binding.field())
-        .map(Some)
-        .ok_or(AnnotationLayerError::InvalidInput("widget field"))
+    annotation
+        .content
+        .bound_field()
+        .map(|id| {
+            view.field(id)
+                .ok_or(AnnotationLayerError::InvalidInput("widget field"))
+        })
+        .transpose()
 }
 
 /// Why the host should show a placeholder: the payload's reason, else unsupported field semantics.
@@ -65,8 +66,7 @@ pub(crate) fn displayed(annotation: &Annotation, optional_content: &OptionalCont
     // conditions are independent: either one alone suppresses display.
     annotation.is_visible()
         && annotation
-            .source()
-            .and_then(|source| source.optional_content.as_ref())
+            .optional_content()
             .is_none_or(|content| optional_content.is_visible(content))
 }
 

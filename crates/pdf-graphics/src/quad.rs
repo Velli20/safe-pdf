@@ -1,4 +1,10 @@
-use crate::{point::Point, polyline::Polyline, rect::Rect};
+use crate::{
+    BoundsAccumulator,
+    geometry::{Bounds, Translate},
+    point::Point,
+    polyline::Polyline,
+    rect::Rect,
+};
 
 /// Quadrilateral with four corners in perimeter order.
 #[derive(Debug, Clone, PartialEq)]
@@ -20,31 +26,32 @@ impl<T: Copy> From<&Quad<T>> for Polyline<T> {
     }
 }
 
+impl Bounds for Quad<f32> {
+    /// Rectangle enclosing all four corners, with `left`/`top` the minima.
+    fn bounds(&self) -> Option<Rect> {
+        if !self.is_finite() {
+            return None;
+        }
+        let mut bounds = BoundsAccumulator::new();
+        for &corner in &self.corners {
+            bounds.include(corner);
+        }
+        bounds.finish()
+    }
+}
+
+impl Translate for Quad<f32> {
+    fn translate(&mut self, delta: Point) {
+        for corner in &mut self.corners {
+            corner.translate(delta);
+        }
+    }
+}
+
 impl Quad<f32> {
     /// Whether every corner is finite.
     pub fn is_finite(&self) -> bool {
         self.corners.iter().all(|corner| corner.is_finite())
-    }
-
-    /// Axis-aligned rectangle enclosing all four corners, with `left`/`top` the minima.
-    pub fn bounds(&self) -> Rect {
-        let [first, rest @ ..] = self.corners;
-        rest.iter().fold(
-            Rect {
-                left: first.x,
-                top: first.y,
-                right: first.x,
-                bottom: first.y,
-            },
-            |bounds, corner| {
-                bounds.union(&Rect {
-                    left: corner.x,
-                    top: corner.y,
-                    right: corner.x,
-                    bottom: corner.y,
-                })
-            },
-        )
     }
 
     /// Whether the perimeter turns consistently in one direction, so the

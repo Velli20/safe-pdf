@@ -98,7 +98,7 @@ script: Array<number>, } } | { "SetOCGState": {
 /**
  * The `/State` operations and their group targets, in source order.
  */
-state: Array<OcgStateEntry>,
+state: OcgState,
 /**
  * Whether to preserve radio-button relationships between groups.
  * Omission means `true` when the action is executed.
@@ -310,7 +310,7 @@ dash_pattern: Array<number> | null, };
 export type BorderStyleName = "Solid" | "Dashed" | "Beveled" | "Inset" | "Underline" | { "Unknown": Array<number> };
 
 /**
- * Rectangular or elliptical shape, with PDF decoration metadata retained.
+ * Rectangular or elliptical shape.
  */
 export type BoxAnnotation = {
 /**
@@ -320,15 +320,7 @@ bounds: Rect,
 /**
  * Current stroke/fill style.
  */
-style: ResolvedStyle,
-/**
- * Optional border effect, which may be unsupported by a host.
- */
-border_effect: BorderEffect | null,
-/**
- * Optional left, top, right, bottom difference rectangle.
- */
-insets: Rect | null, };
+style: ResolvedStyle, };
 
 /**
  * Push button that triggers a host-owned action and never holds a value.
@@ -683,7 +675,7 @@ text: string,
 /**
  * Current text and border style.
  */
-style: FreeTextStyle,
+style: ResolvedStyle,
 /**
  * Rich text retained without claiming a rich-text editor or renderer.
  */
@@ -735,48 +727,6 @@ difference_rect: Rect | null,
 intent: Array<number> | null, };
 
 /**
- * Solid free-text border in page units.
- */
-export type FreeTextBorder = {
-/**
- * Unquantized opaque sRGB color.
- */
-color: Color,
-/**
- * Nonnegative border width.
- */
-width: number, };
-
-/**
- * Explicit native free-text style, independent of retained PDF source metadata.
- */
-export type FreeTextStyle = {
-/**
- * Plain PDF font resource name; no slash or PDF delimiters.
- */
-font_name: Array<number>,
-/**
- * Strictly positive font size in page units.
- */
-font_size: number,
-/**
- * Unquantized opaque text sRGB color.
- */
-text_color: Color,
-/**
- * Optional solid border.
- */
-border: FreeTextBorder | null,
-/**
- * Nonnegative left, top, right, bottom text insets, in that order.
- */
-insets: Rect,
-/**
- * Horizontal text alignment.
- */
-alignment: Alignment, };
-
-/**
  * One `/T` entry of a hide action.
  */
 export type HideTarget = { "FieldName": Array<number> } | { "Object": {
@@ -790,18 +740,13 @@ number: string, } } | "Unresolved";
  */
 export type Highlight = {
 /**
- * Optional precise live style, taking precedence over compact color/width.
- * Content replacement replaces this style too; retained source never overrides it.
+ * Live style; its color fills the regions and its opacity is the annotation opacity.
  */
-style: ResolvedStyle | null,
+style: ResolvedStyle,
 /**
  * Nonempty collection of nondegenerate selection quadrilaterals.
  */
-quads: Array<Quad>,
-/**
- * Fill color used by the host renderer; alpha is the annotation opacity.
- */
-color: Color, };
+quads: Array<Quad>, };
 
 /**
  * Owned HighlightAnnotation data retained from the source PDF.
@@ -825,23 +770,14 @@ constant_opacity: number | null, };
  */
 export type Ink = {
 /**
- * Optional precise live style, taking precedence over compact color/width.
- * Content replacement replaces this style too; retained source never overrides it.
+ * Live style; strokes use its color and [`ResolvedStyle::stroke_width`].
  */
-style: ResolvedStyle | null,
+style: ResolvedStyle,
 /**
  * Open strokes, each containing at least two points; empty only for source ink drawn
  * from its appearance.
  */
-strokes: Array<Polyline>,
-/**
- * Finite, strictly positive stroke width in page user-space units.
- */
-width: number,
-/**
- * Stroke color; alpha is the annotation opacity.
- */
-color: Color, };
+strokes: Array<Polyline>, };
 
 /**
  * Owned InkAnnotation data retained from the source PDF.
@@ -1061,12 +997,34 @@ required: boolean,
 content: FieldKind, };
 
 /**
- * Owned `/State` element of a `SetOCGState` action.
- *
- * The `/State` array is a flat sequence in which each operation governs the
- * group targets that follow it, so elements are retained in their source order.
+ * Optional content group operation of a `SetOCGState` `/State` array.
  */
-export type OcgStateEntry = "On" | "Off" | "Toggle" | { "Group": OcgTarget };
+export type OcgOperation = "On" | "Off" | "Toggle";
+
+/**
+ * Owned `/State` array of a `SetOCGState` action.
+ *
+ * The array is a flat sequence in which each operation governs the group targets
+ * that follow it; it is retained as those changes in source order.
+ */
+export type OcgState = {
+/**
+ * The changes in the order they are applied.
+ */
+changes: Array<OcgStateChange>, };
+
+/**
+ * One operation of a `SetOCGState` `/State` array with the group targets that follow it.
+ */
+export type OcgStateChange = {
+/**
+ * The operation applied to every group in `groups`.
+ */
+operation: OcgOperation,
+/**
+ * The group targets the operation governs, in source order; never empty.
+ */
+groups: Array<OcgTarget>, };
 
 /**
  * Owned optional content group target of a `SetOCGState` `/State` element.
@@ -1433,15 +1391,16 @@ bottom: number, };
  */
 export type ResolvedStyle = {
 /**
- * Opaque text or stroke sRGB color with channels in the range zero through one.
+ * Text or stroke sRGB color with channels in the range zero through one; transparent
+ * for an empty PDF color array.
  */
 color: Color,
 /**
- * Optional opaque interior fill.
+ * Optional interior fill.
  */
 background: Color | null,
 /**
- * Optional opaque border color.
+ * Optional border color.
  */
 border_color: Color | null,
 /**
@@ -1449,9 +1408,9 @@ border_color: Color | null,
  */
 border_width: number,
 /**
- * Nonnegative dash lengths; empty means solid.
+ * Nonnegative dash lengths; `None` is solid.
  */
-dash: Array<number>,
+dash: Array<number> | null,
 /**
  * Opacity in the range zero through one.
  */
@@ -1493,14 +1452,6 @@ bounds: Rect,
 /**
  * Paint for the outline and interior.
  */
-paint: ShapePaint, } | { "shape": "rect",
-/**
- * Rectangle edges.
- */
-bounds: Rect,
-/**
- * Paint for the outline and interior.
- */
 paint: ShapePaint, };
 
 /**
@@ -1520,9 +1471,9 @@ fill: Color | null,
  */
 width: number,
 /**
- * Dash lengths; empty means solid.
+ * Dash lengths; `None` is solid.
  */
-dash: Array<number>,
+dash: Array<number> | null,
 /**
  * Round caps and joins instead of the host default.
  */
@@ -1751,10 +1702,10 @@ export type TextNote = {
  */
 properties: TextAnnotation | null,
 /**
- * Optional precise live style, taking precedence over compact color/width.
- * Content replacement replaces this style too; retained source never overrides it.
+ * Live style; its color suggests the note marker color and its opacity is the
+ * annotation opacity.
  */
-style: ResolvedStyle | null,
+style: ResolvedStyle,
 /**
  * Position of the note anchor on its page.
  */
@@ -1762,11 +1713,7 @@ anchor: Point,
 /**
  * Unicode note content; empty notes are allowed.
  */
-text: string,
-/**
- * Suggested color for the note marker; alpha is the annotation opacity.
- */
-color: Color, };
+text: string, };
 
 /**
  * An affine transformation matrix.
@@ -2061,7 +2008,7 @@ quadding: number | null,
 /**
  * Maximum number of text characters.
  */
-max_length: string | null,
+max_length: number | null,
 /**
  * Options available to a choice field.
  */

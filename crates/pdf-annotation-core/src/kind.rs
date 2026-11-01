@@ -1,16 +1,17 @@
-//! Core-owned annotation vocabulary with its validation, translation, and bounds.
+//! Core-owned annotation vocabulary with its translation and live bounds.
 
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use crate::{
     error::ValidationError,
-    models::{Highlight, Ink, Point, Quad, TextNote, validate_point, validate_quad},
+    fields::FieldId,
+    models::{AnnotationId, Highlight, Ink, Point, Quad, TextNote},
     pdf_data::LineEndingStyle,
     style::ResolvedStyle,
     widgets::Widget,
 };
-use pdf_graphics::rect::Rect;
+use pdf_graphics::{Bounds, Translate, rect::Rect};
 
 /// Source `/Rect` retained beside a live annotation and the page point it was measured against.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -66,15 +67,6 @@ pub enum AnnotationKind {
     Unknown(Box<crate::subtypes::UnknownAnnotation>),
 }
 
-/// Union of every quad's bounds; markup without quads has no geometry.
-fn quads_bounds(quads: &[Quad]) -> Result<Rect, ValidationError> {
-    quads
-        .iter()
-        .map(Quad::bounds)
-        .reduce(|a, b| a.union(&b))
-        .ok_or(ValidationError::InvalidHighlight)
-}
-
 impl AnnotationKind {
     /// Live page-space bounds of this payload.
     ///
@@ -84,7 +76,7 @@ impl AnnotationKind {
     /// from its strokes and width.
     ///
     /// # Errors
-    /// Returns `InvalidHighlight` for markup without quads, `InvalidInk` for ink without
+    /// Returns `InvalidQuads` for markup without quads, `InvalidInk` for ink without
     /// strokes or a source layout, and `InvalidBounds` when the result is not a finite, positive rectangle.
     pub fn bounds(&self, layout: Option<&SourceLayout>) -> Result<Rect, ValidationError> {
         let result = match self {
@@ -95,12 +87,7 @@ impl AnnotationKind {
             Self::Stamp(v) => v.bounds,
             Self::Caret(v) => v.bounds,
             Self::Popup(v) => v.bounds,
-            Self::Unknown(v) => v.bounds.unwrap_or(Rect {
-                left: 0.0,
-                top: 0.0,
-                right: 1.0,
-                bottom: 1.0,
-            }),
+            Self::Unknown(v) => v.bounds.unwrap_or(Rect::UNIT_RECT),
             Self::Widget(v) => v.bounds,
             Self::TextNote(v) => Rect {
                 left: v.anchor.x,
@@ -108,8 +95,10 @@ impl AnnotationKind {
                 right: v.anchor.x + layout.map_or(24.0, |l| l.rect.width()),
                 bottom: v.anchor.y + layout.map_or(24.0, |l| l.rect.height()),
             },
-            Self::Highlight(v) => quads_bounds(&v.quads)?,
-            Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => quads_bounds(&v.quads)?,
+            Self::Highlight(v) => v.quads.bounds().ok_or(ValidationError::InvalidQuads)?,
+            Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => {
+                v.quads.bounds().ok_or(ValidationError::InvalidQuads)?
+            }
             Self::Ink(v) => {
                 let first = v.strokes.iter().flat_map(|stroke| &stroke.points).next();
                 if let Some(l) = layout
@@ -117,17 +106,12 @@ impl AnnotationKind {
                 {
                     let mut b = l.rect;
                     if let Some(first) = first {
-                        b.translate(first.x - l.anchor.x, first.y - l.anchor.y);
+                        b.translate(Point::new(first.x - l.anchor.x, first.y - l.anchor.y));
                     }
                     b
                 } else {
-                    let half = v.width / 2.0;
-                    let b = v
-                        .strokes
-                        .iter()
-                        .filter_map(|stroke| stroke.vertex_bounds())
-                        .reduce(|a, b| a.union(&b))
-                        .ok_or(ValidationError::InvalidInk)?;
+                    let half = v.style.stroke_width() / 2.0;
+                    let b = v.strokes.bounds().ok_or(ValidationError::InvalidInk)?;
                     Rect {
                         left: b.left - half,
                         top: b.top - half,
@@ -208,6 +192,22 @@ impl AnnotationKind {
         }
     }
 
+    /// Field a widget is bound to; `None` for every other payload.
+    pub fn bound_field(&self) -> Option<FieldId> {
+        match self {
+            Self::Widget(widget) => Some(widget.binding.field()),
+            _ => None,
+        }
+    }
+
+    /// Live parent of a popup; `None` for parentless popups and other payloads.
+    pub fn popup_parent(&self) -> Option<AnnotationId> {
+        match self {
+            Self::Popup(popup) => popup.parent,
+            _ => None,
+        }
+    }
+
     /// Decoded stamp name or note icon name; empty for other payloads.
     pub fn label(&self) -> String {
         match self {
@@ -224,224 +224,47 @@ impl AnnotationKind {
 
     /// Current presentation style owned by this payload.
     ///
-    /// Compact highlight, note, and ink payloads derive one from their color and
-    /// width; widgets without a style use the default. Free text composes its style
-    /// over the retained source, and caret, popup, and unknown payloads carry none,
-    /// so those return `None`.
+    /// Widgets without a style use the default; caret, popup, and unknown payloads
+    /// carry none, so those return `None`.
     pub fn live_style(&self) -> Option<ResolvedStyle> {
         Some(match self {
+            Self::Highlight(v) => v.style.clone(),
+            Self::TextNote(v) => v.style.clone(),
+            Self::Ink(v) => v.style.clone(),
+            Self::FreeText(v) => v.style.clone(),
             Self::Link(v) => v.style.clone(),
             Self::Line(v) | Self::Polygon(v) | Self::PolyLine(v) => v.style.clone(),
             Self::Square(v) | Self::Circle(v) => v.style.clone(),
             Self::Stamp(v) => v.style.clone(),
             Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => v.style.clone(),
             Self::Widget(v) => v.style.clone().unwrap_or_default(),
-            Self::Highlight(v) => v
-                .style
-                .clone()
-                .unwrap_or_else(|| ResolvedStyle::from_compact(v.color, 0.0)),
-            Self::TextNote(v) => v
-                .style
-                .clone()
-                .unwrap_or_else(|| ResolvedStyle::from_compact(v.color, 0.0)),
-            Self::Ink(v) => v
-                .style
-                .clone()
-                .unwrap_or_else(|| ResolvedStyle::from_compact(v.color, v.width)),
-            Self::FreeText(_) | Self::Caret(_) | Self::Popup(_) | Self::Unknown(_) => return None,
+            Self::Caret(_) | Self::Popup(_) | Self::Unknown(_) => return None,
         })
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
-        let color = match self {
-            Self::Highlight(highlight) => {
-                if let Some(style) = &highlight.style {
-                    style.validate()?;
-                }
-                if highlight.quads.is_empty() {
-                    return Err(ValidationError::InvalidHighlight);
-                }
-                for quad in &highlight.quads {
-                    validate_quad(quad)?;
-                }
-                highlight.color
-            }
-            Self::TextNote(note) => {
-                if let Some(style) = &note.style {
-                    style.validate()?;
-                }
-                crate::validation::validate(&note.properties)?;
-                validate_point(note.anchor)?;
-                note.color
-            }
-            Self::Ink(ink) => {
-                if let Some(style) = &ink.style {
-                    style.validate()?;
-                }
-                // A source ink without strokes is drawn from its appearance instead.
-                if ink
-                    .strokes
-                    .iter()
-                    .any(|stroke| stroke.closed || stroke.points.len() < 2)
-                {
-                    return Err(ValidationError::InvalidInk);
-                }
-                for point in ink.strokes.iter().flat_map(|stroke| &stroke.points) {
-                    validate_point(*point)?;
-                }
-                if !ink.width.is_finite() || ink.width <= 0.0 {
-                    return Err(ValidationError::InvalidStyle { field: "width" });
-                }
-                ink.color
-            }
-            Self::Widget(widget) => {
-                if let Some(style) = &widget.style {
-                    style.validate()?;
-                }
-                if !widget.bounds.is_valid() {
-                    return Err(ValidationError::InvalidWidgetBounds);
-                }
-                return Ok(());
-            }
-            value => return value.validate_extended(),
-        };
-        if ![color.r, color.g, color.b, color.a]
-            .iter()
-            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
-        {
-            return Err(ValidationError::InvalidStyle { field: "color" });
-        }
-        Ok(())
-    }
-
-    fn validate_extended(&self) -> Result<(), ValidationError> {
-        match self {
-            Self::FreeText(v) => v.validate(),
-            Self::Line(v) | Self::Polygon(v) | Self::PolyLine(v) => {
-                let count = v.vertices.points.len();
-                let valid = match self {
-                    Self::Line(_) => count == 2,
-                    Self::Polygon(_) => count >= 3,
-                    _ => count >= 2,
-                };
-                if !valid || v.vertices.closed != matches!(self, Self::Polygon(_)) {
-                    return Err(ValidationError::InvalidPath { field: "vertices" });
-                }
-                if !v.bounds.is_valid() {
-                    return Err(ValidationError::InvalidBounds);
-                }
-                for point in &v.vertices.points {
-                    validate_point(*point)?;
-                }
-                v.style.validate()
-            }
-            Self::Square(v) | Self::Circle(v) => {
-                if !v.bounds.is_valid() {
-                    return Err(ValidationError::InvalidBounds);
-                }
-                if v.insets
-                    .is_some_and(|r| [r.left, r.top, r.right, r.bottom].iter().any(|v| *v < 0.0))
-                {
-                    return Err(ValidationError::InvalidStyle {
-                        field: "shape insets",
-                    });
-                }
-                v.style.validate()
-            }
-            Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => {
-                if v.quads.is_empty() {
-                    return Err(ValidationError::InvalidHighlight);
-                }
-                for quad in &v.quads {
-                    validate_quad(quad)?;
-                }
-                v.style.validate()
-            }
-            Self::Link(v) => {
-                if !v.bounds.is_valid() {
-                    return Err(ValidationError::InvalidBounds);
-                }
-                for quad in v.quads.iter().flatten() {
-                    validate_quad(quad)?;
-                }
-                v.style.validate()
-            }
-            Self::Stamp(v) => {
-                if !v.bounds.is_valid() {
-                    return Err(ValidationError::InvalidBounds);
-                }
-                v.style.validate()
-            }
-            Self::Caret(v) => {
-                if !v.bounds.is_valid() {
-                    return Err(ValidationError::InvalidBounds);
-                }
-                Ok(())
-            }
-            Self::Popup(v) => {
-                if !v.bounds.is_valid() {
-                    return Err(ValidationError::InvalidBounds);
-                }
-                Ok(())
-            }
-            Self::Unknown(v) => {
-                if v.subtype.is_empty() {
-                    return Err(ValidationError::InvalidMetadata {
-                        field: "unknown subtype name",
-                    });
-                }
-                if v.bounds.is_some_and(|bounds| !bounds.is_valid()) {
-                    return Err(ValidationError::InvalidBounds);
-                }
-                Ok(())
-            }
-            Self::Highlight(_) | Self::TextNote(_) | Self::Ink(_) | Self::Widget(_) => Ok(()),
-        }?;
-        crate::validation::validate(self)
-    }
-
-    pub(crate) fn translate(&mut self, delta: Point) -> Result<(), ValidationError> {
-        validate_point(delta)?;
+    /// Move every geometry point by `delta`; the caller validates the result.
+    pub(crate) fn translate(&mut self, delta: Point) {
         // Page clamping belongs to the host: Core has no page dimensions.
         match &mut *self {
-            Self::Highlight(value) => {
-                for point in value.quads.iter_mut().flat_map(|quad| &mut quad.corners) {
-                    point.translate(delta.x, delta.y);
-                }
-            }
-            Self::TextNote(value) => value.anchor.translate(delta.x, delta.y),
-            Self::Ink(value) => {
-                for line in value.strokes.iter_mut() {
-                    line.translate(delta);
-                }
-            }
-            Self::Widget(value) => value.bounds.translate(delta.x, delta.y),
+            Self::Highlight(value) => value.quads.translate(delta),
+            Self::TextNote(value) => value.anchor.translate(delta),
+            Self::Ink(value) => value.strokes.translate(delta),
+            Self::Widget(value) => value.bounds.translate(delta),
             Self::FreeText(v) => v.translate(delta),
             Self::Line(v) | Self::Polygon(v) | Self::PolyLine(v) => {
-                v.bounds.translate(delta.x, delta.y);
+                v.bounds.translate(delta);
                 v.vertices.translate(delta);
             }
-            Self::Square(v) | Self::Circle(v) => v.bounds.translate(delta.x, delta.y),
-            Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => {
-                for point in v.quads.iter_mut().flat_map(|q| &mut q.corners) {
-                    point.translate(delta.x, delta.y);
-                }
-            }
+            Self::Square(v) | Self::Circle(v) => v.bounds.translate(delta),
+            Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => v.quads.translate(delta),
             Self::Link(v) => {
-                v.bounds.translate(delta.x, delta.y);
-                for point in v.quads.iter_mut().flatten().flat_map(|q| &mut q.corners) {
-                    point.translate(delta.x, delta.y);
-                }
+                v.bounds.translate(delta);
+                v.quads.translate(delta);
             }
-            Self::Stamp(v) => v.bounds.translate(delta.x, delta.y),
-            Self::Caret(v) => v.bounds.translate(delta.x, delta.y),
-            Self::Popup(v) => v.bounds.translate(delta.x, delta.y),
-            Self::Unknown(v) => {
-                if let Some(bounds) = &mut v.bounds {
-                    bounds.translate(delta.x, delta.y);
-                }
-            }
+            Self::Stamp(v) => v.bounds.translate(delta),
+            Self::Caret(v) => v.bounds.translate(delta),
+            Self::Popup(v) => v.bounds.translate(delta),
+            Self::Unknown(v) => v.bounds.translate(delta),
         }
-        self.validate()
     }
 }

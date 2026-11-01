@@ -4,19 +4,19 @@
 //! geometry and properties it owns. Widgets need the binding their field group
 //! assigned and popups the live identity of their parent.
 use crate::{
-    error::ValidationError,
-    free_text::{FreeText, FreeTextStyle},
+    error::SourceAdoptionError,
+    free_text::FreeText,
     kind::AnnotationKind,
     metadata::AnnotationMetadata,
-    models::{AnnotationId, Highlight, Ink, NewAnnotation, PageIndex, Point, Quad, TextNote},
+    models::{AnnotationId, Highlight, Ink, NewAnnotation, PageIndex, Point, TextNote},
     pdf_data::*,
-    style::{ResolvedStyle, resolve_source_style},
+    style::resolve_source_style,
     subtypes::{
         BoxAnnotation, Caret, Link, Markup, PathAnnotation, Popup, Stamp, UnknownAnnotation,
     },
     widgets::{Widget, WidgetBinding},
 };
-use pdf_graphics::{polyline::Polyline, rect::Rect};
+use pdf_graphics::polyline::Polyline;
 
 impl NewAnnotation {
     /// Draft adopting `source` onto `page`, retaining the source in its metadata.
@@ -28,7 +28,7 @@ impl NewAnnotation {
         source: &SourceAnnotation,
         binding: Option<WidgetBinding>,
         parent: Option<AnnotationId>,
-    ) -> Result<Self, ValidationError> {
+    ) -> Result<Self, SourceAdoptionError> {
         Ok(Self {
             page,
             metadata: AnnotationMetadata::from_source(source),
@@ -43,218 +43,119 @@ impl AnnotationKind {
     /// Widgets require `binding`; popups take their live `parent`, if any.
     ///
     /// # Errors
-    /// Returns style and validation errors from the retained metadata, `MissingRect` or
-    /// `InvalidBounds` for kinds that need a usable rectangle, `InvalidTextString` for
+    /// Returns `Validation` for an unusable resolved style, `MissingRect` or
+    /// `InvalidRect` for kinds that need a usable rectangle, `InvalidTextString` for
     /// undecodable contents, and `InvalidSourceField` for a widget without a binding.
+    /// The payload itself is validated when the engine accepts it.
     pub fn from_source(
         source: &SourceAnnotation,
         binding: Option<WidgetBinding>,
         parent: Option<AnnotationId>,
-    ) -> Result<Self, ValidationError> {
+    ) -> Result<Self, SourceAdoptionError> {
         let style = resolve_source_style(source)?;
         Ok(match &source.kind {
-            NativeAnnotation::Text(v) => Self::TextNote(text_note(source, v, &style)?),
-            NativeAnnotation::Highlight(v) => Self::Highlight(highlight(v, &style)?),
-            NativeAnnotation::Underline(v) => Self::Underline(markup(&v.quad_points, &style)),
-            NativeAnnotation::Squiggly(v) => Self::Squiggly(markup(&v.quad_points, &style)),
-            NativeAnnotation::StrikeOut(v) => Self::StrikeOut(markup(&v.quad_points, &style)),
-            NativeAnnotation::Ink(v) => Self::Ink(ink(v, &style)?),
-            NativeAnnotation::FreeText(v) => Self::FreeText(Box::new(free_text(source, v, style)?)),
-            NativeAnnotation::Link(v) => Self::Link(Box::new(link(source, v, style)?)),
-            NativeAnnotation::Line(v) => Self::Line(Box::new(line(source, v, style)?)),
-            NativeAnnotation::Polygon(v) => {
-                Self::Polygon(Box::new(path(source, &v.vertices, &v.line_endings, style)?))
-            }
-            NativeAnnotation::PolyLine(v) => {
-                Self::PolyLine(Box::new(path(source, &v.vertices, &v.line_endings, style)?))
-            }
-            NativeAnnotation::Square(v) => Self::Square(Box::new(shape(
-                source,
-                &v.border_effect,
-                v.difference_rect,
+            // Notes are anchored at the top-left corner of their source rectangle.
+            NativeAnnotation::Text(v) => Self::TextNote(TextNote {
+                properties: Some(v.clone()),
+                anchor: source.bounds()?.origin(),
+                text: source.contents()?,
                 style,
-            )?)),
-            NativeAnnotation::Circle(v) => Self::Circle(Box::new(shape(
-                source,
-                &v.border_effect,
-                v.difference_rect,
+            }),
+            NativeAnnotation::Highlight(v) => Self::Highlight(Highlight {
+                quads: v.quad_points.clone(),
                 style,
-            )?)),
-            NativeAnnotation::Stamp(v) => Self::Stamp(Box::new(stamp(source, v, style)?)),
+            }),
+            NativeAnnotation::Underline(v) => Self::Underline(Markup {
+                quads: v.quad_points.clone(),
+                style,
+            }),
+            NativeAnnotation::Squiggly(v) => Self::Squiggly(Markup {
+                quads: v.quad_points.clone(),
+                style,
+            }),
+            NativeAnnotation::StrikeOut(v) => Self::StrikeOut(Markup {
+                quads: v.quad_points.clone(),
+                style,
+            }),
+            NativeAnnotation::Ink(v) => Self::Ink(Ink {
+                strokes: v.ink_list.strokes.clone(),
+                style,
+            }),
+            NativeAnnotation::FreeText(v) => Self::FreeText(Box::new(FreeText {
+                bounds: source.bounds()?,
+                text: source.contents()?,
+                style,
+                rich_contents: v.rich_contents.clone(),
+                callout: v.callout_line.clone(),
+                border_effect: v.border_effect.clone(),
+            })),
+            NativeAnnotation::Link(v) => Self::Link(Box::new(Link {
+                bounds: source.bounds()?,
+                quads: v.quad_points.clone(),
+                highlight_mode: v.highlight_mode.clone(),
+                destination: v.destination.clone(),
+                action: v.action.clone(),
+                style,
+            })),
+            // Line endpoints become an open two-vertex path.
+            NativeAnnotation::Line(v) => {
+                let [x, y, x2, y2] = v.line;
+                Self::Line(Box::new(PathAnnotation {
+                    bounds: source.bounds()?,
+                    vertices: Polyline::new(vec![Point { x, y }, Point { x: x2, y: y2 }], false),
+                    endings: v.line_endings.clone(),
+                    style,
+                }))
+            }
+            // Polygon and polyline vertices are retained as parsed, including closure.
+            NativeAnnotation::Polygon(v) => Self::Polygon(Box::new(PathAnnotation {
+                bounds: source.bounds()?,
+                vertices: v.vertices.clone(),
+                endings: v.line_endings.clone(),
+                style,
+            })),
+            NativeAnnotation::PolyLine(v) => Self::PolyLine(Box::new(PathAnnotation {
+                bounds: source.bounds()?,
+                vertices: v.vertices.clone(),
+                endings: v.line_endings.clone(),
+                style,
+            })),
+            NativeAnnotation::Square(_) => Self::Square(Box::new(BoxAnnotation {
+                bounds: source.bounds()?,
+                style,
+            })),
+            NativeAnnotation::Circle(_) => Self::Circle(Box::new(BoxAnnotation {
+                bounds: source.bounds()?,
+                style,
+            })),
+            // A stamp without a name keeps an empty name rather than approximating one.
+            NativeAnnotation::Stamp(v) => Self::Stamp(Box::new(Stamp {
+                bounds: source.bounds()?,
+                name: v.name.clone().unwrap_or_default(),
+                style,
+            })),
             NativeAnnotation::Caret(v) => Self::Caret(Box::new(Caret {
                 bounds: source.bounds()?,
                 properties: *v.clone(),
             })),
-            NativeAnnotation::Popup(v) => Self::Popup(popup(source, v, parent)?),
-            NativeAnnotation::Widget(_) => Self::Widget(widget(source, style, binding)?),
-            NativeAnnotation::Unknown { subtype } => {
-                Self::Unknown(Box::new(unknown(source, subtype)?))
-            }
+            NativeAnnotation::Popup(v) => Self::Popup(Popup {
+                bounds: source.bounds()?,
+                parent,
+                open: v.open.unwrap_or(false),
+                text: source.contents()?,
+            }),
+            NativeAnnotation::Widget(_) => Self::Widget(Widget {
+                style: Some(style),
+                bounds: source.bounds()?,
+                binding: binding.ok_or(SourceAdoptionError::InvalidSourceField {
+                    reason: "widget without field binding",
+                })?,
+            }),
+            // Unknown subtypes keep their bounds only when the source has a rectangle at all.
+            NativeAnnotation::Unknown { subtype } => Self::Unknown(Box::new(UnknownAnnotation {
+                subtype: subtype.to_vec(),
+                bounds: source.rect.map(|_| source.bounds()).transpose()?,
+            })),
         })
     }
-}
-
-/// Note anchored at the top-left corner of its source rectangle.
-fn text_note(
-    source: &SourceAnnotation,
-    v: &TextAnnotation,
-    style: &ResolvedStyle,
-) -> Result<TextNote, ValidationError> {
-    let rect = source.bounds()?;
-    Ok(TextNote {
-        properties: Some(Box::new(v.clone())),
-        style: Some(style.clone()),
-        anchor: rect.origin(),
-        text: source.contents()?,
-        color: style.rgba_color()?,
-    })
-}
-
-fn highlight(v: &HighlightAnnotation, style: &ResolvedStyle) -> Result<Highlight, ValidationError> {
-    Ok(Highlight {
-        style: Some(style.clone()),
-        quads: v.quad_points.clone(),
-        color: style.rgba_color()?,
-    })
-}
-
-/// Underline, squiggly, and strikeout regions share one payload.
-fn markup(quads: &[Quad], style: &ResolvedStyle) -> Markup {
-    Markup {
-        quads: quads.to_vec(),
-        style: style.clone(),
-    }
-}
-
-/// Ink strokes drawn at the style's stroke width.
-fn ink(v: &InkAnnotation, style: &ResolvedStyle) -> Result<Ink, ValidationError> {
-    Ok(Ink {
-        style: Some(style.clone()),
-        strokes: v.ink_list.strokes.clone(),
-        width: style.stroke_width(),
-        color: style.rgba_color()?,
-    })
-}
-
-fn free_text(
-    source: &SourceAnnotation,
-    v: &FreeTextAnnotation,
-    style: ResolvedStyle,
-) -> Result<FreeText, ValidationError> {
-    Ok(FreeText {
-        bounds: source.bounds()?,
-        text: source.contents()?,
-        style: FreeTextStyle::from_resolved(&style, v.difference_rect),
-        rich_contents: v.rich_contents.clone(),
-        callout: v.callout_line.clone(),
-        border_effect: v.border_effect.clone(),
-    })
-}
-
-fn link(
-    source: &SourceAnnotation,
-    v: &LinkAnnotation,
-    style: ResolvedStyle,
-) -> Result<Link, ValidationError> {
-    Ok(Link {
-        bounds: source.bounds()?,
-        quads: v.quad_points.clone(),
-        highlight_mode: v.highlight_mode.clone(),
-        destination: v.destination.clone(),
-        action: v.action.clone(),
-        style,
-    })
-}
-
-/// Line endpoints become an open two-vertex path.
-fn line(
-    source: &SourceAnnotation,
-    v: &LineAnnotation,
-    style: ResolvedStyle,
-) -> Result<PathAnnotation, ValidationError> {
-    let [x, y, x2, y2] = v.line;
-    let vertices = Polyline::new(vec![Point { x, y }, Point { x: x2, y: y2 }], false);
-    path(source, &vertices, &v.line_endings, style)
-}
-
-/// Polygon and polyline vertices are retained as parsed, including closure.
-fn path(
-    source: &SourceAnnotation,
-    vertices: &Polyline,
-    endings: &Option<[LineEndingStyle; 2]>,
-    style: ResolvedStyle,
-) -> Result<PathAnnotation, ValidationError> {
-    Ok(PathAnnotation {
-        bounds: source.bounds()?,
-        vertices: vertices.clone(),
-        endings: endings.clone(),
-        style,
-    })
-}
-
-/// Square and circle shapes keep their border effect and difference rectangle.
-fn shape(
-    source: &SourceAnnotation,
-    border_effect: &Option<BorderEffect>,
-    insets: Option<Rect>,
-    style: ResolvedStyle,
-) -> Result<BoxAnnotation, ValidationError> {
-    Ok(BoxAnnotation {
-        bounds: source.bounds()?,
-        style,
-        border_effect: border_effect.clone(),
-        insets,
-    })
-}
-
-/// A stamp without a name keeps an empty name rather than approximating one.
-fn stamp(
-    source: &SourceAnnotation,
-    v: &StampAnnotation,
-    style: ResolvedStyle,
-) -> Result<Stamp, ValidationError> {
-    Ok(Stamp {
-        bounds: source.bounds()?,
-        name: v.name.clone().unwrap_or_default(),
-        style,
-    })
-}
-
-fn popup(
-    source: &SourceAnnotation,
-    v: &PopupAnnotation,
-    parent: Option<AnnotationId>,
-) -> Result<Popup, ValidationError> {
-    Ok(Popup {
-        bounds: source.bounds()?,
-        parent,
-        open: v.open.unwrap_or(false),
-        text: source.contents()?,
-    })
-}
-
-fn widget(
-    source: &SourceAnnotation,
-    style: ResolvedStyle,
-    binding: Option<WidgetBinding>,
-) -> Result<Widget, ValidationError> {
-    Ok(Widget {
-        style: Some(style),
-        bounds: source.bounds()?,
-        binding: binding.ok_or(ValidationError::InvalidSourceField {
-            reason: "widget without field binding",
-        })?,
-    })
-}
-
-/// Unknown subtypes keep their bounds only when the source has a rectangle at all.
-fn unknown(
-    source: &SourceAnnotation,
-    subtype: &[u8],
-) -> Result<UnknownAnnotation, ValidationError> {
-    let bounds: Option<Rect> = source.rect.map(|_| source.bounds()).transpose()?;
-    Ok(UnknownAnnotation {
-        subtype: subtype.to_vec(),
-        bounds,
-    })
 }

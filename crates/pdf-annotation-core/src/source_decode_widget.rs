@@ -56,7 +56,7 @@ struct FieldProperties {
     default_value: Option<WidgetFieldValue>,
     default_appearance: Option<Arc<[u8]>>,
     quadding: Option<i32>,
-    max_length: Option<u64>,
+    max_length: Option<u32>,
     options: Option<Vec<WidgetChoiceOption>>,
     selected_indices: Option<Vec<u64>>,
     top_index: Option<u64>,

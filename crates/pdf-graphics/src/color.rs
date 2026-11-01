@@ -25,23 +25,33 @@ impl Color {
     /// - 'r': Value of red channel. the value needs between [0.0, 1.0]
     /// - 'g': Value of green channel. the value needs between [0.0, 1.0]
     /// - 'b': Value of blue channel. the value needs between [0.0, 1.0]
-    /// - 'a': Value of alpha channel. the value needs between [0.0, 1.0]
+    /// - 'a': Value of alpha channel, clamped to [0.0, 1.0]
     pub const fn from_rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
-        Self { r, g, b, a }
+        Self::from_rgb(r, g, b).with_alpha(a)
     }
 
     pub const fn from_rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
     }
 
-    /// Returns the same color channels with alpha replaced by `a`.
+    /// Returns the same color channels with alpha replaced by `a`, clamped to [0.0, 1.0].
     pub const fn with_alpha(self, a: f32) -> Self {
-        Self { a, ..self }
+        Self {
+            a: a.clamp(0.0, 1.0),
+            ..self
+        }
     }
 
     /// Returns the same color channels at full opacity.
     pub const fn opaque(self) -> Self {
         self.with_alpha(1.0)
+    }
+
+    /// Returns whether every channel, alpha included, is finite and within `[0.0, 1.0]`.
+    pub fn is_valid(&self) -> bool {
+        [self.r, self.g, self.b, self.a]
+            .iter()
+            .all(|value| (0.0..=1.0).contains(value))
     }
 
     /// Converts the color to 8-bit RGBA channel values.
@@ -184,12 +194,14 @@ impl Color {
     ///
     /// The component count determines the device color space: one component
     /// is grayscale, three components are RGB, and four components are CMYK.
+    /// Components are clamped to `[0.0, 1.0]`, the nearest valid device value.
     /// Returns `None` for any other component count.
     #[must_use]
     pub fn from_device_components(components: &[f32]) -> Option<Self> {
+        let unit = |component: f32| component.clamp(0.0, 1.0);
         match *components {
-            [gray] => Some(Self::from_gray(gray)),
-            [r, g, b] => Some(Self::from_rgb(r, g, b)),
+            [gray] => Some(Self::from_gray(unit(gray))),
+            [r, g, b] => Some(Self::from_rgb(unit(r), unit(g), unit(b))),
             [c, m, y, k] => Some(Self::from_cmyk(c, m, y, k)),
             _ => None,
         }

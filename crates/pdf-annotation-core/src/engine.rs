@@ -3,11 +3,13 @@ use std::marker::PhantomData;
 use crate::commands::{AnnotationCommand, Operation};
 use crate::error::{CoreError, ValidationError};
 use crate::events::{Change, Event};
-use crate::fields::{Field, FieldId, FieldIssue, FieldIssueKind, FieldKind};
+use crate::field_validation::check_selected;
+use crate::fields::{Field, FieldId, FieldIssue, FieldIssueKind, FieldKind, NewField};
 use crate::kind::AnnotationKind;
 use crate::metadata::AnnotationFlags;
 use crate::models::{
-    Annotation, AnnotationId, DocumentData, DocumentDescriptor, PageIndex, Revision, SCHEMA_VERSION,
+    Annotation, AnnotationId, DocumentData, DocumentDescriptor, NewAnnotation, Point, Revision,
+    SCHEMA_VERSION,
 };
 use crate::store::AnnotationStore;
 
@@ -76,15 +78,12 @@ impl<'a> DocumentView<'a> {
 
     /// Borrow an annotation by identity, returning `None` when it is absent.
     pub fn annotation(&self, id: AnnotationId) -> Option<&'a Annotation> {
-        self.data
-            .annotations
-            .iter()
-            .find(|annotation| annotation.id == id)
+        self.data.annotation(id)
     }
 
     /// Borrow a shared field without exposing mutable state to the host.
     pub fn field(&self, id: FieldId) -> Option<&'a Field> {
-        self.data.fields.iter().find(|field| field.id == id)
+        self.data.field(id)
     }
 
     /// Report missing required values in field insertion order for host submission.
@@ -197,7 +196,7 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
                 actual: data.document,
             });
         }
-        Self::validate_document(&data)?;
+        data.validate()?;
         self.last_saved_revision = Some(data.revision);
         self.data = data;
         Ok(())
@@ -230,159 +229,15 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
                 actual: self.data.revision,
             });
         }
-        let revision = Revision(
-            self.data
-                .revision
-                .0
-                .checked_add(1)
-                .ok_or(CoreError::CounterExhausted)?,
-        );
+        let revision = Revision(next_counter(self.data.revision.0)?);
         let change = match command.operation {
-            Operation::Create { annotation } => {
-                annotation.metadata.validate()?;
-                Self::validate_annotation(&self.data, annotation.page, &annotation.content)?;
-                let next = self
-                    .data
-                    .next_annotation_id
-                    .checked_add(1)
-                    .ok_or(CoreError::CounterExhausted)?;
-                let id = AnnotationId(self.data.next_annotation_id);
-                self.data.annotations.push(Annotation {
-                    metadata: annotation.metadata,
-                    id,
-                    page: annotation.page,
-                    content: annotation.content,
-                });
-                self.data.next_annotation_id = next;
-                Change::Created(id)
-            }
-            Operation::SetFreeTextText { id, text } => {
-                let annotation = self
-                    .data
-                    .annotations
-                    .iter_mut()
-                    .find(|a| a.id == id)
-                    .ok_or(CoreError::MissingAnnotation(id))?;
-                let AnnotationKind::FreeText(value) = &mut annotation.content else {
-                    return Err(CoreError::IncompatibleEdit(id));
-                };
-                if !value.is_plain() {
-                    return Err(CoreError::UnsupportedFreeText(id));
-                }
-                if !annotation.metadata.can_edit_contents() {
-                    return Err(CoreError::AnnotationNotEditable(id));
-                }
-                // Replacing /Contents with encoded PDF bytes is obsolete here: live
-                // text is Unicode, and PDF serialization belongs to a future exporter.
-                value.text = text;
-                Change::Updated(id)
-            }
-            Operation::Translate { id, delta } => {
-                let annotation = self
-                    .data
-                    .annotations
-                    .iter_mut()
-                    .find(|annotation| annotation.id == id)
-                    .ok_or(CoreError::MissingAnnotation(id))?;
-                if !annotation.metadata.can_translate() {
-                    return Err(CoreError::AnnotationNotEditable(id));
-                }
-                let mut content = annotation.content.clone();
-                content.translate(delta)?;
-                annotation.content = content;
-                Change::Updated(id)
-            }
-            Operation::ReplaceContent { id, content } => {
-                let annotation = self
-                    .view()
-                    .annotation(id)
-                    .ok_or(CoreError::MissingAnnotation(id))?;
-                let editable = if matches!(annotation.content, AnnotationKind::Widget(_)) {
-                    annotation.metadata.can_translate()
-                } else {
-                    annotation.metadata.can_edit_contents() && annotation.metadata.can_translate()
-                };
-                if !editable {
-                    return Err(CoreError::AnnotationNotEditable(id));
-                }
-                if matches!(&annotation.content, AnnotationKind::FreeText(v) if !v.is_plain())
-                    || matches!(&content, AnnotationKind::FreeText(v) if !v.is_plain())
-                {
-                    return Err(CoreError::UnsupportedFreeText(id));
-                }
-                if std::mem::discriminant(&annotation.content) != std::mem::discriminant(&content) {
-                    return Err(CoreError::IncompatibleEdit(id));
-                }
-                if let (AnnotationKind::Widget(old), AnnotationKind::Widget(new)) =
-                    (&annotation.content, &content)
-                    && old.binding != new.binding
-                {
-                    return Err(CoreError::WidgetRebindingNotAllowed(id));
-                }
-                if let (AnnotationKind::Widget(old), AnnotationKind::Widget(new)) =
-                    (&annotation.content, &content)
-                    && old.style != new.style
-                {
-                    return Err(CoreError::IncompatibleEdit(id));
-                }
-                Self::validate_annotation(&self.data, annotation.page, &content)?;
-                if matches!(&content, AnnotationKind::Popup(v) if v.parent == Some(id)) {
-                    return Err(CoreError::InvalidPopupParent(id));
-                }
-                let annotation = self
-                    .data
-                    .annotations
-                    .iter_mut()
-                    .find(|annotation| annotation.id == id)
-                    .ok_or(CoreError::MissingAnnotation(id))?;
-                annotation.content = content;
-                Change::Updated(id)
-            }
-            Operation::Delete { id } => {
-                let annotation = self
-                    .view()
-                    .annotation(id)
-                    .ok_or(CoreError::MissingAnnotation(id))?;
-                if !annotation.metadata.can_delete() {
-                    return Err(CoreError::AnnotationNotEditable(id));
-                }
-                if self.data.annotations.iter().any(|a| matches!(&a.content, AnnotationKind::Popup(popup) if popup.parent == Some(id))) {
-                    return Err(CoreError::AnnotationInUse(id));
-                }
-                self.data
-                    .annotations
-                    .retain(|annotation| annotation.id != id);
-                Change::Deleted(id)
-            }
-            Operation::CreateField { field } => {
-                crate::validation::validate(&field)?;
-                field.content.validate().map_err(ValidationError::from)?;
-                let next = self
-                    .data
-                    .next_field_id
-                    .checked_add(1)
-                    .ok_or(CoreError::CounterExhausted)?;
-                let id = FieldId(self.data.next_field_id);
-                self.data.fields.push(Field {
-                    id,
-                    definition: field,
-                });
-                self.data.next_field_id = next;
-                Change::FieldCreated(id)
-            }
-            Operation::DeleteField { field } => {
-                if self.view().field(field).is_none() {
-                    return Err(CoreError::MissingField(field));
-                }
-                if self.data.annotations.iter().any(|annotation| {
-                    matches!(&annotation.content,
-                    AnnotationKind::Widget(widget) if widget.binding.field() == field)
-                }) {
-                    return Err(CoreError::FieldInUse(field));
-                }
-                self.data.fields.retain(|candidate| candidate.id != field);
-                Change::FieldDeleted(field)
-            }
+            Operation::Create { annotation } => self.create_annotation(annotation)?,
+            Operation::SetFreeTextText { id, text } => self.set_free_text_text(id, text)?,
+            Operation::Translate { id, delta } => self.translate(id, delta)?,
+            Operation::ReplaceContent { id, content } => self.replace_content(id, content)?,
+            Operation::Delete { id } => self.delete_annotation(id)?,
+            Operation::CreateField { field } => self.create_field(field)?,
+            Operation::DeleteField { field } => self.delete_field(field)?,
             Operation::SetHidden { hidden, shown } => self.set_hidden(hidden, shown)?,
             operation @ (Operation::SetText { field, .. }
             | Operation::SetCheckbox { field, .. }
@@ -441,77 +296,175 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
         })
     }
 
-    fn validate_annotation(
-        data: &DocumentData,
-        page: PageIndex,
-        content: &AnnotationKind,
-    ) -> Result<(), CoreError<S::Error>> {
-        if page.0 >= data.document.page_count {
-            return Err(ValidationError::InvalidPage {
-                page,
-                page_count: data.document.page_count,
-            }
-            .into());
-        }
-        content.validate()?;
-        if let AnnotationKind::Popup(popup) = content
-            && let Some(parent) = popup.parent
-        {
-            let parent = data
-                .annotations
-                .iter()
-                .find(|a| a.id == parent)
-                .ok_or(CoreError::InvalidPopupParent(parent))?;
-            if parent.page != page || matches!(parent.content, AnnotationKind::Popup(_)) {
-                return Err(CoreError::InvalidPopupParent(parent.id));
-            }
-        }
-        if let AnnotationKind::Widget(widget) = content {
-            let id = widget.binding.field();
-            let field = data
-                .fields
-                .iter()
-                .find(|field| field.id == id)
-                .ok_or(CoreError::MissingField(id))?;
-            widget.binding.validate(field)?;
-        }
-        Ok(())
+    /// Borrow an annotation by identity, or report it missing.
+    fn annotation(&self, id: AnnotationId) -> Result<&Annotation, CoreError<S::Error>> {
+        self.data
+            .annotation(id)
+            .ok_or(CoreError::MissingAnnotation(id))
     }
 
-    fn validate_document(data: &DocumentData) -> Result<(), CoreError<S::Error>> {
-        let mut fields = std::collections::HashSet::new();
-        if data.next_field_id == 0 {
-            return Err(ValidationError::InvalidNextFieldId.into());
+    /// Mutably borrow an annotation by identity, or report it missing.
+    fn annotation_mut(&mut self, id: AnnotationId) -> Result<&mut Annotation, CoreError<S::Error>> {
+        self.data
+            .annotation_mut(id)
+            .ok_or(CoreError::MissingAnnotation(id))
+    }
+
+    /// Borrow a field by identity, or report it missing.
+    fn field(&self, id: FieldId) -> Result<&Field, CoreError<S::Error>> {
+        self.data.field(id).ok_or(CoreError::MissingField(id))
+    }
+
+    /// Mutably borrow a field by identity, or report it missing.
+    fn field_mut(&mut self, id: FieldId) -> Result<&mut Field, CoreError<S::Error>> {
+        self.data.field_mut(id).ok_or(CoreError::MissingField(id))
+    }
+
+    /// Identities of the widgets bound to `field`, in annotation insertion order.
+    fn bound_widgets(&self, field: FieldId) -> impl Iterator<Item = AnnotationId> + '_ {
+        self.data
+            .annotations
+            .iter()
+            .filter(move |annotation| annotation.content.bound_field() == Some(field))
+            .map(|annotation| annotation.id)
+    }
+
+    /// Whether any popup names `id` as its parent.
+    fn has_popup_child(&self, id: AnnotationId) -> bool {
+        self.data
+            .annotations
+            .iter()
+            .any(|annotation| annotation.content.popup_parent() == Some(id))
+    }
+
+    /// Validates a draft and inserts it under a newly allocated identity.
+    fn create_annotation(
+        &mut self,
+        annotation: NewAnnotation,
+    ) -> Result<Change, CoreError<S::Error>> {
+        crate::finite_values::check(&annotation)?;
+        self.data
+            .validate_content(annotation.page, &annotation.content)?;
+        let id = AnnotationId(allocate(&mut self.data.next_annotation_id)?);
+        self.data.annotations.push(Annotation {
+            metadata: annotation.metadata,
+            id,
+            page: annotation.page,
+            content: annotation.content,
+        });
+        Ok(Change::Created(id))
+    }
+
+    /// Replaces the text of an editable, plain FreeText annotation.
+    fn set_free_text_text(
+        &mut self,
+        id: AnnotationId,
+        text: String,
+    ) -> Result<Change, CoreError<S::Error>> {
+        let annotation = self.annotation_mut(id)?;
+        let editable = annotation.can_edit_free_text();
+        let AnnotationKind::FreeText(value) = &mut annotation.content else {
+            return Err(CoreError::IncompatibleEdit(id));
+        };
+        if !editable {
+            return Err(CoreError::AnnotationNotEditable(id));
         }
-        for field in &data.fields {
-            crate::validation::validate(&field.definition)?;
-            if !fields.insert(field.id.0) {
-                return Err(ValidationError::DuplicateFieldId(field.id).into());
-            }
-            if field.id.0 >= data.next_field_id {
-                return Err(ValidationError::InvalidNextFieldId.into());
-            }
-            field
-                .definition
-                .content
-                .validate()
-                .map_err(ValidationError::from)?;
+        // Replacing /Contents with encoded PDF bytes is obsolete here: live
+        // text is Unicode, and PDF serialization belongs to a future exporter.
+        value.text = text;
+        Ok(Change::Updated(id))
+    }
+
+    /// Moves every geometry point, committing only when the whole move succeeds.
+    fn translate(&mut self, id: AnnotationId, delta: Point) -> Result<Change, CoreError<S::Error>> {
+        let annotation = self.annotation_mut(id)?;
+        if !annotation.metadata.can_translate() {
+            return Err(CoreError::AnnotationNotEditable(id));
         }
-        let mut annotations = std::collections::HashSet::new();
-        if data.next_annotation_id == 0 {
-            return Err(ValidationError::InvalidNextId.into());
+        let mut content = annotation.content.clone();
+        content.translate(delta);
+        crate::finite_values::check(&content)?;
+        content.validate()?;
+        annotation.content = content;
+        Ok(Change::Updated(id))
+    }
+
+    /// Replaces an annotation's payload with one of the same kind.
+    ///
+    /// Widgets may change bounds only; their binding and style are fixed.
+    fn replace_content(
+        &mut self,
+        id: AnnotationId,
+        content: AnnotationKind,
+    ) -> Result<Change, CoreError<S::Error>> {
+        let annotation = self.annotation(id)?;
+        let metadata = &annotation.metadata;
+        let is_widget = matches!(annotation.content, AnnotationKind::Widget(_));
+        if !(metadata.can_translate() && (is_widget || metadata.can_edit_contents())) {
+            return Err(CoreError::AnnotationNotEditable(id));
         }
-        for annotation in &data.annotations {
-            annotation.metadata.validate()?;
-            if !annotations.insert(annotation.id.0) {
-                return Err(ValidationError::DuplicateId(annotation.id).into());
-            }
-            if annotation.id.0 >= data.next_annotation_id {
-                return Err(ValidationError::InvalidNextId.into());
-            }
-            Self::validate_annotation(data, annotation.page, &annotation.content)?;
+        if [&annotation.content, &content]
+            .into_iter()
+            .any(|kind| matches!(kind, AnnotationKind::FreeText(value) if !value.is_plain()))
+        {
+            return Err(CoreError::UnsupportedFreeText(id));
         }
-        Ok(())
+        if std::mem::discriminant(&annotation.content) != std::mem::discriminant(&content) {
+            return Err(CoreError::IncompatibleEdit(id));
+        }
+        if let (AnnotationKind::Widget(old), AnnotationKind::Widget(new)) =
+            (&annotation.content, &content)
+        {
+            if old.binding != new.binding {
+                return Err(CoreError::WidgetRebindingNotAllowed(id));
+            }
+            if old.style != new.style {
+                return Err(CoreError::IncompatibleEdit(id));
+            }
+        }
+        crate::finite_values::check(&content)?;
+        self.data.validate_content(annotation.page, &content)?;
+        if content.popup_parent() == Some(id) {
+            return Err(CoreError::InvalidPopupParent(id));
+        }
+        self.annotation_mut(id)?.content = content;
+        Ok(Change::Updated(id))
+    }
+
+    /// Removes a deletable annotation that no popup references.
+    fn delete_annotation(&mut self, id: AnnotationId) -> Result<Change, CoreError<S::Error>> {
+        if !self.annotation(id)?.metadata.can_delete() {
+            return Err(CoreError::AnnotationNotEditable(id));
+        }
+        if self.has_popup_child(id) {
+            return Err(CoreError::AnnotationInUse(id));
+        }
+        self.data
+            .annotations
+            .retain(|annotation| annotation.id != id);
+        Ok(Change::Deleted(id))
+    }
+
+    /// Validates a field definition and inserts it under a newly allocated identity.
+    fn create_field(&mut self, field: NewField) -> Result<Change, CoreError<S::Error>> {
+        crate::finite_values::check(&field)?;
+        field.validate()?;
+        let id = FieldId(allocate(&mut self.data.next_field_id)?);
+        self.data.fields.push(Field {
+            id,
+            definition: field,
+        });
+        Ok(Change::FieldCreated(id))
+    }
+
+    /// Removes a field that no widget is bound to.
+    fn delete_field(&mut self, field: FieldId) -> Result<Change, CoreError<S::Error>> {
+        self.field(field)?;
+        if self.bound_widgets(field).next().is_some() {
+            return Err(CoreError::FieldInUse(field));
+        }
+        self.data.fields.retain(|candidate| candidate.id != field);
+        Ok(Change::FieldDeleted(field))
     }
 
     /// Sets the hidden flag of `hidden` and clears it on `shown`, once every
@@ -521,12 +474,8 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
         hidden: Vec<AnnotationId>,
         shown: Vec<AnnotationId>,
     ) -> Result<Change, CoreError<S::Error>> {
-        if let Some(id) = hidden
-            .iter()
-            .chain(&shown)
-            .find(|id| self.view().annotation(**id).is_none())
-        {
-            return Err(CoreError::MissingAnnotation(*id));
+        for id in hidden.iter().chain(&shown) {
+            self.annotation(*id)?;
         }
         for annotation in &mut self.data.annotations {
             if hidden.contains(&annotation.id) {
@@ -545,12 +494,7 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
         id: FieldId,
         operation: Operation,
     ) -> Result<Change, CoreError<S::Error>> {
-        let field = self
-            .data
-            .fields
-            .iter_mut()
-            .find(|field| field.id == id)
-            .ok_or(CoreError::MissingField(id))?;
+        let field = self.field_mut(id)?;
         if field.definition.read_only {
             return Err(CoreError::ReadOnlyField(id));
         }
@@ -558,16 +502,14 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
         // proposed value, borrowing options instead of cloning their labels/exports.
         match (&mut field.definition.content, operation) {
             (FieldKind::Text(text), Operation::SetText { value, .. }) => {
-                text.validate_value(&value).map_err(ValidationError::from)?;
+                text.validate_value(&value)?;
                 text.value = value;
             }
             (
                 FieldKind::CheckboxGroup(group),
                 Operation::SetCheckboxGroupSelection { selected, .. },
             ) => {
-                group
-                    .validate_selection(selected)
-                    .map_err(ValidationError::from)?;
+                check_selected(&group.options, selected)?;
                 group.selected = selected;
             }
             (FieldKind::Checkbox(checkbox), Operation::SetCheckbox { checked, .. }) => {
@@ -577,36 +519,34 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
                 if selected.is_none() && radio.selected.is_some() && !radio.allow_clear {
                     return Err(CoreError::RadioClearNotAllowed(id));
                 }
-                radio
-                    .validate_selection(selected)
-                    .map_err(ValidationError::from)?;
+                check_selected(&radio.options, selected)?;
                 radio.selected = selected;
             }
             (FieldKind::ListBox(list), Operation::SetListSelection { selection, .. }) => {
-                list.validate_selection(&selection)
-                    .map_err(ValidationError::from)?;
+                list.validate_selection(&selection)?;
                 list.selection = selection;
             }
             (FieldKind::ComboBox(combo), Operation::SetComboValue { value, .. }) => {
-                combo
-                    .validate_value(&value)
-                    .map_err(ValidationError::from)?;
+                combo.validate_value(&value)?;
                 combo.value = value
             }
             _ => return Err(CoreError::IncompatibleFieldCommand(id)),
         }
         // Shared fields obsolete copying /V into every widget; events refresh all views.
-        let widgets = self
-            .data
-            .annotations
-            .iter()
-            .filter_map(|annotation| match &annotation.content {
-                AnnotationKind::Widget(widget) if widget.binding.field() == id => {
-                    Some(annotation.id)
-                }
-                _ => None,
-            })
-            .collect();
+        let widgets = self.bound_widgets(id).collect();
         Ok(Change::FieldUpdated { field: id, widgets })
     }
+}
+
+/// Return the successor of an allocation counter, or report it exhausted.
+fn next_counter<E: std::error::Error + 'static>(value: u64) -> Result<u64, CoreError<E>> {
+    value.checked_add(1).ok_or(CoreError::CounterExhausted)
+}
+
+/// Take the counter's current value as a new identity and advance it past that value.
+/// An exhausted counter is left unchanged.
+fn allocate<E: std::error::Error + 'static>(counter: &mut u64) -> Result<u64, CoreError<E>> {
+    let id = *counter;
+    *counter = next_counter(id)?;
+    Ok(id)
 }

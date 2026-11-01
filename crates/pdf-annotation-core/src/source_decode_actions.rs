@@ -6,10 +6,9 @@ use crate::pdf_data::{
 };
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
-    ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    object_kind::ObjectKind, object_variant::ObjectVariant, pdf_array::PdfArray,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    object_kind::ObjectKind, object_variant::ObjectVariant,
 };
-use pdf_optional_content::{OcgStateEntry, OcgTarget};
 
 /// Reads an action dictionary, such as a link's or widget's `/A` entry, together
 /// with its `/Next` successors. A chain is flattened into one `Sequence` in execution
@@ -55,10 +54,7 @@ impl FromPdfObject for AnnotationAction {
                 script: action.required(b"JS")?,
             },
             b"SetOCGState" => Self::SetOCGState {
-                state: ocg_state(ArrayContext::new(
-                    &action.required::<PdfArray>(b"State")?,
-                    action.access(),
-                ))?,
+                state: action.required(b"State")?,
                 preserve_rb: action.optional(b"PreserveRB")?,
             },
             b"Rendition" => Self::Rendition {
@@ -247,63 +243,4 @@ impl FromPdfObject for FileSpecification {
             volatile: dictionary.optional(b"V")?,
         })))
     }
-}
-
-/// Decodes the `/State` array of a `SetOCGState` action.
-///
-/// Elements alternate between operation names and the group targets they govern,
-/// so the sequence is retained in source order rather than collected as names.
-/// Group references keep their unresolved identity, so elements are inspected raw.
-fn ocg_state<A: ObjectAccess + ?Sized>(
-    mut items: ArrayContext<'_, A>,
-) -> ReadResult<Vec<OcgStateEntry>> {
-    const ENTRY: &[u8] = b"State";
-
-    let mut state = Vec::with_capacity(items.array().len());
-    let mut seen_operation = false;
-    let mut pending_operation = false;
-
-    for item in items.array() {
-        if item.is_name() {
-            if pending_operation {
-                return Err(SourceDecodeError::InvalidEntry {
-                    entry: ENTRY,
-                    reason: "optional content operation has no group target".to_owned(),
-                }
-                .into());
-            }
-            state.push(items.read::<OcgStateEntry>(item)?);
-            seen_operation = true;
-            pending_operation = true;
-            continue;
-        }
-
-        if !seen_operation {
-            return Err(SourceDecodeError::InvalidEntry {
-                entry: ENTRY,
-                reason: "group target precedes any optional content operation".to_owned(),
-            }
-            .into());
-        }
-        let target = match item {
-            ObjectVariant::Reference(id) => OcgTarget::Reference {
-                number: u64::try_from(id.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
-                generation: u64::try_from(id.generation)
-                    .map_err(|_| SourceDecodeError::ResourceLimit)?,
-            },
-            _ => items.read(item)?,
-        };
-        state.push(OcgStateEntry::Group(target));
-        pending_operation = false;
-    }
-
-    if pending_operation {
-        return Err(SourceDecodeError::InvalidEntry {
-            entry: ENTRY,
-            reason: "optional content operation has no group target".to_owned(),
-        }
-        .into());
-    }
-
-    Ok(state)
 }

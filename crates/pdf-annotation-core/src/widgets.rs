@@ -56,29 +56,4 @@ impl WidgetBinding {
             | Self::CheckboxOption { field, .. } => field,
         }
     }
-
-    pub(crate) fn validate(
-        self,
-        field: &crate::fields::Field,
-    ) -> Result<(), crate::error::ValidationError> {
-        use crate::fields::FieldKind;
-        let valid = match (self, &field.definition.content) {
-            (Self::CheckboxOption { option, .. }, FieldKind::CheckboxGroup(group)) => {
-                group.options.iter().any(|candidate| candidate.id == option)
-            }
-            (Self::RadioOption { option, .. }, FieldKind::Radio(radio)) => {
-                radio.options.iter().any(|candidate| candidate.id == option)
-            }
-            (Self::Field { .. }, FieldKind::Radio(_) | FieldKind::CheckboxGroup(_))
-            | (Self::RadioOption { .. } | Self::CheckboxOption { .. }, _) => false,
-            (Self::Field { .. }, _) => true,
-        };
-        if valid {
-            Ok(())
-        } else {
-            Err(crate::error::ValidationError::InvalidWidgetBinding(
-                field.id,
-            ))
-        }
-    }
 }

@@ -14,7 +14,7 @@ pub mod visibility_expression;
 mod wire;
 
 pub use error::OptionalContentError;
-pub use ocg_state::{OcgStateEntry, OcgTarget};
+pub use ocg_state::{OcgOperation, OcgState, OcgStateChange, OcgTarget};
 pub use optional_content::{
     OptionalContentBaseState, OptionalContentConfiguration, OptionalContentGroup,
     OptionalContentGroupId, OptionalContentMembership, OptionalContentPolicy,
