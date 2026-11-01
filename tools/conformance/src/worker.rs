@@ -377,7 +377,7 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
             // The web renderer draws the annotation layer, so its differences are told apart.
             let annotations = job
                 .web
-                .and(renderer.as_ref().ok())
+                .and_then(|_| renderer.as_ref().ok())
                 .and_then(|renderer| renderer.document().get_page(job.page))
                 .map(|page| AnnotationMap::of_page(page, width, height));
             if let Some(map) = &annotations {
