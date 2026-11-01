@@ -153,9 +153,9 @@ impl AnnotationOverlay {
         }
     }
 
-    /// Returns the source appearances of `page`'s displayed button widgets in
-    /// presentation order, selected by live field state, for painting on the page canvas.
-    /// The `pressed` widget draws its down appearance.
+    /// Returns the source appearances of `page`'s displayed button widgets, selected by
+    /// live field state, and of annotations drawn from their appearance, in presentation
+    /// order, for painting on the page canvas. The `pressed` widget draws its down appearance.
     ///
     /// # Errors
     /// Rejects absent pages and widgets whose bound field is missing.

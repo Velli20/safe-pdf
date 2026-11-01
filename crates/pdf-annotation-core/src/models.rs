@@ -235,10 +235,18 @@ impl Annotation {
             && !self.is_drawn_from_appearance()
     }
 
-    /// Whether this is source ink without strokes, whose appearance is painted at its fixed
-    /// source rectangle instead of native shapes.
+    /// Whether this annotation's appearance is painted at its fixed source rectangle instead
+    /// of a native presentation: source ink without strokes, and caret or unknown subtypes
+    /// that carry a normal appearance.
     pub fn is_drawn_from_appearance(&self) -> bool {
-        matches!(&self.content, AnnotationKind::Ink(ink) if ink.strokes.is_empty())
+        match &self.content {
+            AnnotationKind::Ink(ink) => ink.strokes.is_empty(),
+            AnnotationKind::Caret(_) | AnnotationKind::Unknown(_) => self
+                .source()
+                .and_then(|source| source.appearance.as_ref())
+                .is_some_and(|appearance| appearance.normal.is_some()),
+            _ => false,
+        }
     }
 
     /// Whether plain FreeText content can be edited without changing style or geometry.
