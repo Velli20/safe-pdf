@@ -1,0 +1,55 @@
+name: Conformance dispatch
+
+# Conformance runs in Velli20/pdf-conformance, which compares Safe-PDF with PDFium, pdf.js and
+# WebKit. This workflow only tells it which commit to check: each pull request (it reads both
+# corpora, comments read changes and sets the `conformance/reads` status) and each push to
+# main (it also renders the corpora and files, updates and closes conformance issues here).
+#
+# `pull_request_target` gives fork pull requests the App token too. Nothing from the pull
+# request is checked out or run here; only its number and commits are sent.
+
+on:
+  pull_request_target:
+    types: [ opened, synchronize, reopened ]
+  push:
+    branches: [ main ]
+
+permissions: {}
+
+concurrency:
+  group: conformance-dispatch-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    name: Dispatch to pdf-conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CONFORMANCE_APP_ID }}
+          private-key: ${{ secrets.CONFORMANCE_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: pdf-conformance
+
+      - name: Dispatch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET: ${{ github.repository_owner }}/pdf-conformance
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = pull_request_target ]; then
+            payload=$(jq -n --arg pr "$PR" --arg head "$HEAD_SHA" --arg base "$BASE_SHA" \
+              '{event_type: "safe-pdf-pr", client_payload: {pr: $pr, head_sha: $head, base_sha: $base}}')
+          else
+            payload=$(jq -n --arg sha "$SHA" '{event_type: "safe-pdf-main", client_payload: {sha: $sha}}')
+          fi
+          gh api --method POST "repos/$TARGET/dispatches" --input - <<<"$payload"
+          echo "Dispatched $(jq -r .event_type <<<"$payload") to $TARGET" >> "$GITHUB_STEP_SUMMARY"
