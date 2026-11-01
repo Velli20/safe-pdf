@@ -1353,8 +1353,6 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
- "zune-core 0.5.1",
- "zune-jpeg 0.5.15",
 ]
 
 [[package]]
@@ -2286,13 +2284,14 @@ dependencies = [
  "bytes",
  "criterion",
  "flate2",
- "image",
  "num-traits",
  "pdf-ccitt",
  "pdf-jbig2",
  "pdf-object-reader",
  "pdf-utils",
  "thiserror 2.0.12",
+ "zune-core 0.5.1",
+ "zune-jpeg 0.5.15",
 ]
 
 [[package]]

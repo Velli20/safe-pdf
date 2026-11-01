@@ -6,6 +6,7 @@ use crate::{
     error::FilterError,
     image_payload::{FilterPipeline, ImagePayload},
     jpeg_frame::JpegFrameHeader,
+    jpeg_samples::JpegSamples,
 };
 
 use pdf_object_reader::{
@@ -226,10 +227,7 @@ impl Filter {
         });
         let jpeg = patched.as_deref().unwrap_or(stream_data);
 
-        let bitmap = image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg)
-            .map_err(|e| FilterError::Decompression(e.to_string()))?;
-
-        Ok(bitmap.as_bytes().to_vec())
+        Ok(JpegSamples::decode(jpeg)?.into_samples())
     }
 }
 
