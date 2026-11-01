@@ -63,7 +63,7 @@ impl FromPdfObject for FontResource {
     ) -> ReadResult<Self> {
         let font: PdfFontSpec = context.read(context.object())?;
         let resources = match font.is_type3() {
-            true => context.dictionary()?.optional_shared(b"Resources")?,
+            true => context.dictionary()?.optional(b"Resources")?,
             false => None,
         };
         Ok(Self { font, resources })

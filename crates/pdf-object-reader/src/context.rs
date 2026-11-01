@@ -16,6 +16,7 @@ use crate::pdf_object::PdfObject;
 use crate::reader::ObjectAccess;
 use crate::{dictionary::Dictionary, stream::StreamObject};
 use pdf_graphics::interval::Interval;
+use std::any::TypeId;
 use std::collections::HashMap;
 
 /// The single argument passed to a typed decoder.
@@ -25,6 +26,9 @@ use std::collections::HashMap;
 /// type mismatch instead of silently accepting an unrelated object kind.
 pub struct ObjectContext<'read, A: ObjectAccess + ?Sized> {
     object: &'read ObjectVariant,
+    /// The reference this object was requested through, when it was reached by one, with
+    /// the cycle key of the decoder reading it.
+    reference: Option<(ObjectId, TypeId)>,
     access: &'read mut A,
 }
 
@@ -35,7 +39,41 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
     /// Custom access implementations must establish their traversal scope
     /// before constructing the context and retain it until decoding returns.
     pub fn new(object: &'read ObjectVariant, access: &'read mut A) -> Self {
-        Self { object, access }
+        Self {
+            object,
+            reference: None,
+            access,
+        }
+    }
+
+    /// Binds an object resolved from a reference, keeping for [`Self::shared`] the
+    /// requested id and the cycle key of the decoder reading it.
+    pub(crate) fn referenced(
+        object: &'read ObjectVariant,
+        reference: (ObjectId, TypeId),
+        access: &'read mut A,
+    ) -> Self {
+        Self {
+            object,
+            reference: Some(reference),
+            access,
+        }
+    }
+
+    /// Reads the bound object as a shared `T` through the typed cache.
+    ///
+    /// An object reached by reference shares that reference's typed entry, so a decoder
+    /// can return a shared handle to the value it is decoding. The decoder's own eager
+    /// scope ends first, so recursion back to this object meets the typed cache's pending
+    /// handle rather than a cycle. A direct object gives an owned, ready handle.
+    pub fn shared<T>(self) -> ReadResult<ObjectHandle<T>>
+    where
+        T: FromPdfObject + Send + Sync + 'static,
+    {
+        match self.reference {
+            Some((id, key)) => self.access.read_shared_reached(id, key),
+            None => self.access.read_shared(self.object),
+        }
     }
 
     /// Returns the resolved object for custom shape inspection.
@@ -189,63 +227,22 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
         self.optional(key).unwrap_or_default()
     }
 
-    /// Reads a required entry as a shared value or a pending recursive handle.
-    pub fn required_shared<T>(&mut self, key: &[u8]) -> ReadResult<ObjectHandle<T>>
-    where
-        T: FromPdfObject + Send + Sync + 'static,
-    {
-        let result = match self.dictionary.get(key) {
-            Some(object) => self.access.read_shared(object),
-            None => Err(ObjectReadError::MissingDictionaryKey {
-                key: PdfName::from_bytes(key),
-            }),
-        };
-        result.map_err(|source| ObjectReadError::At {
-            location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
-            source: Box::new(source),
-        })
-    }
-
-    /// Reads a shared entry when present and non-null.
-    ///
-    /// Null detection must preserve the original indirect identity used by the
-    /// typed cache. A pending typed entry remains a handle, not an absent value.
-    /// Inspect only the raw top-level reference chain for null, with chain-local
-    /// cycle checks; do not enter a second eager decoding scope for that probe.
-    pub fn optional_shared<T>(&mut self, key: &[u8]) -> ReadResult<Option<ObjectHandle<T>>>
-    where
-        T: FromPdfObject + Send + Sync + 'static,
-    {
-        let Some(object) = self.dictionary.get(key) else {
-            return Ok(None);
-        };
-        let result = (|| {
-            if self.access.resolve(object)?.kind() == ObjectKind::Null {
-                return Ok(None);
-            }
-            self.access.read_shared(object).map(Some)
-        })();
-        result.map_err(|source| ObjectReadError::At {
-            location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
-            source: Box::new(source),
-        })
-    }
-
-    /// Decodes each entry of an optional sub-dictionary with `decode`, keyed by entry name.
+    /// Decodes each entry of an optional sub-dictionary as `T` and maps it with `convert`,
+    /// keyed by entry name.
     ///
     /// A missing or null sub-dictionary yields an empty map. Null entries and references to
     /// missing objects are skipped, since per PDF spec §7.3.7 and §7.3.10 they are equivalent
     /// to absent entries.
-    pub fn optional_entries<T>(
+    pub fn optional_entries<T: FromPdfObject, R>(
         &mut self,
         key: &[u8],
-        mut decode: impl FnMut(&mut Self, &ObjectVariant) -> ReadResult<T>,
-    ) -> ReadResult<HashMap<PdfName, T>> {
+        mut convert: impl FnMut(T) -> ReadResult<R>,
+    ) -> ReadResult<HashMap<PdfName, R>> {
         let entries = self.with_optional_dictionary(key, |context, dictionary| {
             let mut entries = HashMap::with_capacity(dictionary.len());
             for (name, value) in dictionary.iter() {
-                if !context.is_absent(value)? {
-                    entries.insert(PdfName::from_bytes(name), decode(context, value)?);
+                if let Some(entry) = context.access.read::<Option<T>>(value)? {
+                    entries.insert(PdfName::from_bytes(name), convert(entry)?);
                 }
             }
             Ok(entries)
@@ -412,24 +409,6 @@ impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
             })
     }
 
-    /// Reads an element through typed caching while retaining array diagnostics.
-    pub fn shared_at<T>(&mut self, index: usize) -> ReadResult<ObjectHandle<T>>
-    where
-        T: FromPdfObject + Send + Sync + 'static,
-    {
-        let result = match self.array.get(index) {
-            Some(object) => self.access.read_shared(object),
-            None => Err(ObjectReadError::ArrayIndexOutOfBounds {
-                index,
-                length: self.array.len(),
-            }),
-        };
-        result.map_err(|source| ObjectReadError::At {
-            location: ReadLocation::ArrayIndex(index),
-            source: Box::new(source),
-        })
-    }
-
     /// Eagerly decodes every element in source order, stopping at the first error.
     pub fn read_all<T: FromPdfObject>(&mut self) -> ReadResult<Vec<T>> {
         let mut values = Vec::with_capacity(self.array.len());
@@ -521,13 +500,6 @@ macro_rules! context_access {
                 self.access.read(object)
             }
 
-            /// Reads another object through typed caching within the same traversal.
-            pub fn read_shared<T>(&mut self, object: &ObjectVariant) -> ReadResult<ObjectHandle<T>>
-            where
-                T: FromPdfObject + Send + Sync + 'static,
-            {
-                self.access.read_shared(object)
-            }
             /// Resolves a raw child without entering its eager decoding scope.
             pub fn resolve(
                 &mut self,
@@ -557,14 +529,6 @@ macro_rules! context_access {
             /// Eagerly decodes an indirect object within the current traversal.
             pub fn read_indirect<T: FromPdfObject>(&mut self, id: ObjectId) -> ReadResult<T> {
                 self.access.read_indirect(id)
-            }
-
-            /// Reads a shared indirect value without waiting for a pending entry.
-            pub fn read_shared_indirect<T>(&mut self, id: ObjectId) -> ReadResult<ObjectHandle<T>>
-            where
-                T: FromPdfObject + Send + Sync + 'static,
-            {
-                self.access.read_shared_indirect(id)
             }
         }
     };

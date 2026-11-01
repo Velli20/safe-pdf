@@ -1,6 +1,6 @@
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult, object_kind::ObjectKind,
-    pdf_name::PdfName,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult,
+    object_variant::ObjectVariant,
 };
 
 use crate::{error::PdfPagesError, resource::Resource, soft_mask::SoftMask};
@@ -79,25 +79,9 @@ impl FromPdfObject for ExternalGraphicsState {
             context
                 .optional(b"ML")?
                 .map(ExternalGraphicsStateKey::MiterLimit),
-            // A soft mask dictionary is read as a shared handle from this dictionary, since a
-            // decoder of the value itself cannot read that same value shared.
-            match context
-                .resolve_entry(b"SMask")?
-                .map(|soft_mask| soft_mask.kind())
-            {
-                None | Some(ObjectKind::Null) => None,
-                Some(ObjectKind::Dictionary) => Some(ExternalGraphicsStateKey::SoftMask(
-                    context.optional_shared::<SoftMask>(b"SMask")?,
-                )),
-                Some(_)
-                    if context
-                        .lenient::<PdfName>(b"SMask")
-                        .is_some_and(|name| name.as_bytes() == b"None") =>
-                {
-                    Some(ExternalGraphicsStateKey::SoftMask(None))
-                }
-                Some(_) => return Err(PdfPagesError::InvalidExtGStateSoftMask.into()),
-            },
+            context
+                .optional::<SoftMaskEntry>(b"SMask")?
+                .map(|SoftMaskEntry(mask)| ExternalGraphicsStateKey::SoftMask(mask)),
             context
                 .optional(b"ca")?
                 .map(ExternalGraphicsStateKey::NonStrokingAlpha),
@@ -141,7 +125,21 @@ impl FromPdfObject for FontEntry {
             }
             .into());
         }
-        Ok(Self(array.shared_at(0)?, array.at(1)?))
+        Ok(Self(array.at(0)?, array.at(1)?))
+    }
+}
+
+/// An `/SMask` entry: a soft mask dictionary, or the name `/None`, which removes the
+/// current soft mask.
+struct SoftMaskEntry(Option<ObjectHandle<SoftMask>>);
+
+impl FromPdfObject for SoftMaskEntry {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object() {
+            ObjectVariant::Dictionary(_) => Ok(Self(Some(context.shared()?))),
+            ObjectVariant::String(name) if name.as_bytes() == b"None" => Ok(Self(None)),
+            _ => Err(PdfPagesError::InvalidExtGStateSoftMask.into()),
+        }
     }
 }
 
@@ -301,8 +299,11 @@ mod tests {
             Ok(_) => panic!("invalid soft mask should fail"),
         };
 
+        let pdf_object_reader::ObjectReadError::At { source, .. } = error else {
+            panic!("the error should name the /SMask entry, got {error:?}");
+        };
         assert!(matches!(
-            error,
+            *source,
             pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<PdfPagesError>(), Some(PdfPagesError::InvalidExtGStateSoftMask))
         ));
     }

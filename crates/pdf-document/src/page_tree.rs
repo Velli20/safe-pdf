@@ -1,7 +1,8 @@
 //! Decodes a `/Pages` node and its descendants into an ordered list of pages.
 
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult, pdf_array::PdfArray,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ObjectReadError, ReadResult,
+    pdf_array::PdfArray,
 };
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 
@@ -140,7 +141,7 @@ impl FromPdfObject for InheritedAttributes {
         let mut context = context.dictionary()?;
         Ok(Self {
             resources: context
-                .optional_shared::<Resources>(b"Resources")?
+                .optional::<ObjectHandle<Resources>>(b"Resources")?
                 .map(|handle| handle.get())
                 .transpose()?,
             media_box: context.lenient(b"MediaBox"),

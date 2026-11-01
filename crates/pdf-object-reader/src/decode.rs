@@ -6,6 +6,7 @@ use std::any::TypeId;
 
 use crate::context::ObjectContext;
 use crate::error::{ObjectReadError, ReadResult};
+use crate::handle::ObjectHandle;
 use crate::inline_bytes::InlineBytes;
 use crate::object_error::ObjectError;
 use crate::object_kind::ObjectKind;
@@ -137,6 +138,15 @@ impl<T: FromPdfObject> FromPdfObject for Option<T> {
     #[inline]
     fn cycle_key() -> TypeId {
         T::cycle_key()
+    }
+}
+
+/// Reads the value as a shared handle through the typed cache (see [`ObjectContext::shared`]).
+///
+/// A recursive edge back to a value still being decoded is a pending handle.
+impl<T: FromPdfObject + Send + Sync + 'static> FromPdfObject for ObjectHandle<T> {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        context.shared()
     }
 }
 
