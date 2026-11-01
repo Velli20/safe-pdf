@@ -3,6 +3,7 @@
 //!
 //! See `tools/conformance/README.md`.
 
+mod annotation_areas;
 mod attribution;
 mod baseline;
 mod compare;

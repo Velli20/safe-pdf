@@ -26,6 +26,8 @@ pub struct RawRegion {
     pub class: RegionClass,
     /// Best aligning offset, for [`RegionClass::Offset`].
     pub shift: Option<[i32; 2]>,
+    /// Kind of the annotation the region lies in; set by the caller.
+    pub annotation: Option<String>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -164,6 +166,7 @@ pub fn find(
                 mismatched,
                 class,
                 shift,
+                annotation: None,
             }
         })
         .collect()

@@ -280,6 +280,13 @@ fn page_section(
                 metrics.ignored * 100.0
             )?;
         }
+        if metrics.annotation_mismatch > 0.0 {
+            writeln!(
+                text,
+                "- {:.3}% of pixels differ inside annotations (regions with an annotation kind below)",
+                metrics.annotation_mismatch * 100.0
+            )?;
+        }
     }
     if let Some(error) = &output.reference_error {
         writeln!(text, "- PDFium could not render this page: {error}")?;
@@ -309,7 +316,7 @@ fn page_section(
     if !output.regions.is_empty() {
         writeln!(
             text,
-            "\n| # | class | pixels | page space | differing px | reference text | Safe-PDF text |\n|---|---|---|---|---|---|---|"
+            "\n| # | class | annotation | pixels | page space | differing px | reference text | Safe-PDF text |\n|---|---|---|---|---|---|---|---|"
         )?;
         for (rank, region) in output.regions.iter().enumerate() {
             let class = match region.shift {
@@ -318,7 +325,8 @@ fn page_section(
             };
             writeln!(
                 text,
-                "| {rank} | {class} | {:?} | {} | {} | {} | {} |",
+                "| {rank} | {class} | {} | {:?} | {} | {} | {} | {} |",
+                region.annotation.as_deref().unwrap_or_default(),
                 region.pixels,
                 region
                     .page_space
@@ -330,6 +338,13 @@ fn page_section(
             )?;
         }
         for (rank, region) in output.regions.iter().enumerate().take(3) {
+            if let Some(kind) = &region.annotation {
+                writeln!(
+                    text,
+                    "\nRegion {rank} lies in a `{kind}` annotation, drawn by the annotation layer; no page-content draw calls apply."
+                )?;
+                continue;
+            }
             if region.draws.is_empty() {
                 writeln!(
                     text,

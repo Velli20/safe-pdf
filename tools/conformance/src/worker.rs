@@ -1,6 +1,7 @@
 //! Worker entry points. Each runs in its own process and prints one JSON value on stdout.
 
 use crate::{
+    annotation_areas::{AnnotationArea, AnnotationMap},
     attribution, compare, golden, inventory,
     model::{Diagnostic, PageOutput, ReadOutput, RenderStats},
     process::{STAGE_MARKER, STATS_MARKER},
@@ -181,31 +182,40 @@ fn viewport_box(viewport: &PageViewport, [x0, y0, x1, y1]: [u32; 4]) -> Option<[
     Some([a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)])
 }
 
-/// Returns device-pixel boxes of annotations drawn in golden images, grown by two pixels
-/// for anti-aliasing. Links and popups have no appearance in `pdfium_test` output.
+/// Returns device-pixel boxes of annotations drawn in golden images. Links and popups have
+/// no appearance in `pdfium_test` output.
 fn annotation_boxes(page: &pdf_document::page::PdfPage, width: u32, height: u32) -> Vec<[u32; 4]> {
-    let Some(device) = width.to_f32().zip(height.to_f32()) else {
-        return Vec::new();
-    };
-    let Ok(viewport) = page.viewport(None, Size::new(device.0, device.1)) else {
-        return Vec::new();
-    };
-    page.annotations
-        .iter()
-        .flatten()
-        .filter(|annotation| *annotation.subtype != *b"Link" && *annotation.subtype != *b"Popup")
-        .filter_map(|annotation| {
-            let rect = annotation.rect?;
-            let mapped = viewport.map_rect(&rect).ok()?;
-            let clamp = |value: f32, limit: u32| value.max(0.0).to_u32().map(|v| v.min(limit));
-            Some([
-                clamp((mapped.left - 2.0).floor(), width)?,
-                clamp((mapped.top - 2.0).floor(), height)?,
-                clamp((mapped.right + 2.0).ceil(), width)?,
-                clamp((mapped.bottom + 2.0).ceil(), height)?,
-            ])
-        })
+    AnnotationArea::of_page(page, width, height)
+        .into_iter()
+        .filter(|area| !area.unpainted_in_goldens)
+        .map(|area| area.pixels)
         .collect()
+}
+
+/// Finds the differing regions, keeping those inside annotations apart from page content
+/// when `annotations` maps the annotation layer the render includes. Each annotation region
+/// is labelled with the kind of annotation owning most of its differing pixels.
+fn find_regions(
+    mask: &[compare::PixelDiff],
+    reference: &RgbaImage,
+    safe: &RgbaImage,
+    annotations: Option<&AnnotationMap>,
+) -> Vec<regions::RawRegion> {
+    let Some(map) = annotations.filter(|map| !map.is_empty()) else {
+        return regions::find(mask, reference, safe, REGION_LIMIT);
+    };
+    let annotation_mask = map.annotation_mask(mask);
+    let mut found = regions::find(&map.content_mask(mask), reference, safe, REGION_LIMIT);
+    found.extend(
+        regions::find(&annotation_mask, reference, safe, REGION_LIMIT)
+            .into_iter()
+            .map(|region| regions::RawRegion {
+                annotation: map.label(&annotation_mask, region.pixels),
+                ..region
+            }),
+    );
+    found.sort_by_key(|region| std::cmp::Reverse(region.mismatched));
+    found
 }
 
 /// Returns the pixel boxes of Safe-PDF's glyphs, grown by one pixel and clamped to the image.
@@ -364,14 +374,27 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
                 }
             }
             let failed = comparison.metrics.mismatch > job.tolerance;
+            // The web renderer draws the annotation layer, so its differences are told apart.
+            let annotations = job
+                .web
+                .and_then(|_| renderer.as_ref().ok())
+                .and_then(|renderer| renderer.document().get_page(job.page))
+                .map(|page| AnnotationMap::of_page(page, width, height));
+            if let Some(map) = &annotations {
+                comparison.metrics.annotation_mismatch = map.mismatch(&comparison.mask);
+            }
             output.metrics = Some(comparison.metrics);
             if failed {
                 output.draw_count = traced
                     .as_ref()
                     .map_or(0, |(backend, _)| backend.draws.len());
                 stage("regions");
-                let raw =
-                    regions::find(&comparison.mask, reference_image, safe_image, REGION_LIMIT);
+                let raw = find_regions(
+                    &comparison.mask,
+                    reference_image,
+                    safe_image,
+                    annotations.as_ref(),
+                );
                 let viewport = renderer
                     .as_ref()
                     .ok()

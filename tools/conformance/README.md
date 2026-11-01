@@ -76,6 +76,17 @@ cargo conformance render <pdf> --renderer web            # one page
   `--renderer web`. `issues` and `repro` take report names such as `--corpus pdfium-web`.
 - **Evidence.** Draw lists, glyph bounds and content-stream listings come from the Skia
   pipeline's trace of the same page content; annotation differences have no draws.
+- **Annotation differences.** Differing pixels inside an annotation's rectangle (grown by 2 px;
+  where annotations overlap, the later one in `/Annots` owns the pixel) are grouped into
+  regions apart from page content. Each such region is labelled with the annotation's kind:
+  its subtype (`Stamp`, `FreeText`, `Ink`, `Link`, …) or, for widgets, the form field it
+  presents: `Widget (checkbox)`, `Widget (radio)`, `Widget (push button)`, `Widget (text)`,
+  `Widget (multiline text)`, `Widget (combo box)`, `Widget (list box)` or
+  `Widget (signature)`. Page content decides the signature when it differs; a page whose
+  only differences are in annotations clusters as
+  `mismatch: [web] <class> / annotation <kind>`. `summary.md` gives the share of pixels
+  differing inside annotations, and `TRIAGE.md` tallies failing pages and regions per
+  annotation kind.
 - **CI.** On `main`, the PDFium corpus is rendered by both renderers.
 
 ## Text rasterization
@@ -167,7 +178,9 @@ agents.
   hatching = annotation area (not compared), gray = matching.
 - Region classes: `missing_ink` / `extra_ink` = one renderer drew nothing there;
   `color_shift` = same shapes, different color; `reshaped` = both drew but glyph shapes or
-  geometry differ; `offset` = same content shifted by a few pixels.
+  geometry differ; `offset` = same content shifted by a few pixels. With the web renderer, a
+  region inside an annotation also names its annotation kind (see
+  [Web renderer](#web-renderer)).
 - `pN-regionK.png`: reference | Safe-PDF crops of region K, enlarged.
 - Region pixels are `[x0, y0, x1, y1]` from the top-left. Page space is PDF user space
   `[left, bottom, right, top]`.
@@ -216,7 +229,8 @@ cluster, filed as one issue.
   and filters by status, signature and baseline change (`j`/`k`, `1`–`4`).
   `index.html#case=<id>&page=<n>` opens one page; the address follows the selection.
 - `TRIAGE.md`: failures clustered by signature, largest first, after any pages that took
-  at least 5 s to render (not failures, but likely performance regressions)
+  at least 5 s to render (not failures, but likely performance regressions) and, for the
+  web renderer, a table of annotation kinds with differences
 - `index.json`, `results.json`: machine-readable run data
 - `cases/<id>/summary.md`: the entry point for fixing one case; alongside it
   are `report.json`, `pN-*.png` images, `pN-content.txt`, `pN-streams.txt` and

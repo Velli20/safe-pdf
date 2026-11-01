@@ -3,7 +3,7 @@
 use crate::{
     baseline::{Baseline, Delta},
     fetch,
-    model::{CaseResult, RenderStats, Status},
+    model::{CaseResult, PageOutput, RenderStats, Status},
     run::RunOptions,
 };
 use anyhow::Result;
@@ -83,6 +83,15 @@ pub struct Cluster {
     pub likely_crates: Vec<(String, usize)>,
 }
 
+/// Failing pages and regions that differ inside one kind of annotation.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AnnotationTally {
+    /// Failing pages with at least one differing region in this kind of annotation.
+    pub pages: usize,
+    /// Differing regions in this kind of annotation.
+    pub regions: usize,
+}
+
 /// The run index.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Index {
@@ -110,6 +119,9 @@ pub struct Index {
     pub page_totals: BTreeMap<String, usize>,
     /// Failure clusters, largest first.
     pub clusters: Vec<Cluster>,
+    /// Differences inside annotations on failing pages, by annotation kind.
+    #[serde(default)]
+    pub annotations: BTreeMap<String, AnnotationTally>,
     /// Cases in id order.
     pub cases: Vec<IndexCase>,
 }
@@ -119,6 +131,7 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
     let mut totals = BTreeMap::<String, usize>::new();
     let mut page_totals = BTreeMap::<String, usize>::new();
     let mut clusters = BTreeMap::<String, ClusterAccumulator>::new();
+    let mut annotations = BTreeMap::<String, AnnotationTally>::new();
     let mut cases = Vec::with_capacity(results.len());
     for result in results {
         bump(&mut totals, result.status.as_str());
@@ -144,6 +157,11 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
                     && let Some(signature) = &page.signature
                 {
                     add_to_cluster(signature);
+                }
+                if page.status.is_failure()
+                    && let Some(output) = &page.output
+                {
+                    tally_annotations(&mut annotations, output);
                 }
                 let mismatch = page
                     .output
@@ -227,8 +245,45 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
         totals,
         page_totals,
         clusters,
+        annotations,
         cases,
     }
+}
+
+/// Counts a failing page's regions inside annotations, by annotation kind.
+fn tally_annotations(tallies: &mut BTreeMap<String, AnnotationTally>, output: &PageOutput) {
+    let mut kinds = BTreeSet::new();
+    for kind in output
+        .regions
+        .iter()
+        .filter_map(|region| region.annotation.as_deref())
+    {
+        let tally = tallies.entry(kind.to_owned()).or_default();
+        tally.regions = tally.regions.saturating_add(1);
+        if kinds.insert(kind) {
+            tally.pages = tally.pages.saturating_add(1);
+        }
+    }
+}
+
+/// Writes the table of annotation kinds with differences, most affected pages first.
+fn annotation_differences(text: &mut String, index: &Index) -> Result<()> {
+    if index.annotations.is_empty() {
+        return Ok(());
+    }
+    writeln!(
+        text,
+        "## Annotation differences\n\nDifferences inside annotation rectangles, drawn by the annotation layer rather than the \
+         page content, on failing pages. Their regions carry the annotation kind; a page whose content matches clusters as \
+         `annotation <kind>`.\n\n| Annotation | Failing pages | Regions |\n|---|---|---|"
+    )?;
+    let mut kinds: Vec<_> = index.annotations.iter().collect();
+    kinds.sort_by(|a, b| b.1.pages.cmp(&a.1.pages).then_with(|| a.0.cmp(b.0)));
+    for (kind, tally) in kinds {
+        writeln!(text, "| {kind} | {} | {} |", tally.pages, tally.regions)?;
+    }
+    writeln!(text)?;
+    Ok(())
 }
 
 /// Failures collected for one signature while building the index.
@@ -408,6 +463,7 @@ fn triage(index: &Index) -> Result<String> {
         )?;
     }
     slow_pages(&mut text, index)?;
+    annotation_differences(&mut text, index)?;
     writeln!(
         text,
         "## Failure clusters\n\nEach cluster groups failures with the same signature, so one fix may resolve all of them. \

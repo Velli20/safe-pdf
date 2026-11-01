@@ -25,6 +25,8 @@ pub fn attribute(
     raw.into_iter()
         .map(|region| {
             let bounds = page_space(region.pixels);
+            // The trace and PDFium's text describe page content, not the annotation layer.
+            let content = region.annotation.is_none();
             Region {
                 pixels: region.pixels,
                 page_space: bounds,
@@ -32,11 +34,18 @@ pub fn attribute(
                 class: region.class,
                 shift: region.shift,
                 reference_text: bounds
+                    .filter(|_| content)
                     .map(|bounds| truncate(reference_text(bounds).trim()))
                     .unwrap_or_default(),
                 safe_text: layout
+                    .filter(|_| content)
                     .map_or_else(String::new, |layout| safe_text(layout, region.pixels)),
-                draws: overlapping(draws, region.pixels),
+                draws: if content {
+                    overlapping(draws, region.pixels)
+                } else {
+                    Vec::new()
+                },
+                annotation: region.annotation,
             }
         })
         .collect()

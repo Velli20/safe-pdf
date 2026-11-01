@@ -654,6 +654,7 @@ mod tests {
                     cases: vec!["a".to_owned(), "b".to_owned()],
                     likely_crates: Vec::new(),
                 }],
+                annotations: BTreeMap::new(),
                 cases: Vec::new(),
             },
             results: BTreeMap::new(),

@@ -310,6 +310,8 @@ fn draw_features(draw: &DrawRef) -> Vec<String> {
 
 /// Signature of a visual mismatch from its most telling region and what was drawn there.
 ///
+/// Page-content regions come first; a region inside an annotation decides only when no
+/// content region does, and names the annotation kind (`annotation Widget (checkbox)`).
 /// In documents with non-embedded fonts, text regions are skipped in favour of the first
 /// other region, since renderers substitute such fonts differently. The drawing call's paint
 /// (shading type, pattern, image format, blend mode, soft mask) separates causes that the
@@ -321,12 +323,20 @@ pub fn mismatch(output: &PageOutput, non_embedded_fonts: bool) -> String {
     let Some(region) = output
         .regions
         .iter()
-        .find(|region| !(non_embedded_fonts && is_text(region)))
+        .find(|region| region.annotation.is_none() && !(non_embedded_fonts && is_text(region)))
+        .or_else(|| {
+            output
+                .regions
+                .iter()
+                .find(|region| region.annotation.is_some())
+        })
         .or_else(|| output.regions.first())
     else {
         return "mismatch: scattered differences".to_owned();
     };
-    let subject = if !region.reference_text.is_empty() && region.safe_text.is_empty() {
+    let subject = if let Some(kind) = &region.annotation {
+        format!("annotation {kind}")
+    } else if !region.reference_text.is_empty() && region.safe_text.is_empty() {
         "text missing".to_owned()
     } else if is_text(region) {
         "text".to_owned()
@@ -390,6 +400,7 @@ mod tests {
                 detail: detail.to_owned(),
                 bounds: [0.0, 0.0, 10.0, 10.0],
             }],
+            annotation: None,
         }
     }
 
