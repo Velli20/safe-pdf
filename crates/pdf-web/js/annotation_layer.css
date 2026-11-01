@@ -1,5 +1,6 @@
-/* Form-field highlight composited over each non-button widget; hosts may set it to `transparent`. */
-.native-annotations { position: absolute; inset: 0; pointer-events: none; --native-form-highlight: rgb(221 228 255 / 0.392); }
+/* Form-field highlight composited over each non-button widget. Off by default, as in PDFium;
+   hosts opt in by setting `--native-form-highlight`, e.g. `rgb(221 228 255 / 0.392)`. */
+.native-annotations { position: absolute; inset: 0; pointer-events: none; --native-form-highlight: transparent; }
 .native-annotation { position: absolute; left: 0; top: 0; transform-origin: 0 0; box-sizing: border-box; pointer-events: auto; }
 .native-control { display: block; width: 100%; height: 100%; margin: 0; box-sizing: border-box; padding: 0; overflow: hidden; white-space: pre-wrap; }
 .native-control:is(input,textarea,select), .native-free-text-editor { user-select: text; touch-action: auto; }
