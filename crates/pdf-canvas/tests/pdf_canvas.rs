@@ -28,7 +28,10 @@ fn render(
     stream: &ContentStream,
     resources: Option<Arc<Resources>>,
 ) -> Result<(), pdf_canvas::error::PdfCanvasError> {
-    let page = PdfPage::default();
+    let page = PdfPage {
+        media_box: Some(Rect::new(100.0, 100.0)),
+        ..PdfPage::default()
+    };
     let mut canvas = PdfCanvas::new(recording, &page, None, bundled_font_system())?;
     canvas.render_content_stream(stream, None, None, resources, None)
 }
@@ -196,7 +199,10 @@ fn releases_render_state_after_an_operator_error() {
         },
     ));
     let mut recording = RecordingCanvas::new(100.0, 100.0);
-    let page = PdfPage::default();
+    let page = PdfPage {
+        media_box: Some(Rect::new(100.0, 100.0)),
+        ..PdfPage::default()
+    };
     let mut canvas = PdfCanvas::new(&mut recording, &page, None, bundled_font_system())
         .expect("canvas should be constructed");
 

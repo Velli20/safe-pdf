@@ -23,7 +23,10 @@ fn render(
     stream: &ContentStream,
     resources: &Arc<Resources>,
 ) -> Result<RecordingCanvas, PdfCanvasError> {
-    let page = PdfPage::default();
+    let page = PdfPage {
+        media_box: Some(Rect::new(100.0, 100.0)),
+        ..PdfPage::default()
+    };
     let mut recording = RecordingCanvas::new(100.0, 100.0);
     {
         let mut canvas = PdfCanvas::new(&mut recording, &page, None, bundled_font_system())?;

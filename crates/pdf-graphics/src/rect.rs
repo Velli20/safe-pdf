@@ -110,6 +110,19 @@ impl Rect<f32> {
             && self.height() > 0.0
     }
 
+    /// Returns the overlap of both rectangles after normalizing their edges, or `None`
+    /// when they do not overlap with positive, finite dimensions.
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        let (a, b) = (self.normalized(), other.normalized());
+        let overlap = Self {
+            left: a.left.max(b.left),
+            top: a.top.max(b.top),
+            right: a.right.min(b.right),
+            bottom: a.bottom.min(b.bottom),
+        };
+        overlap.is_valid().then_some(overlap)
+    }
+
     /// Smallest rectangle containing both, assuming both are normalized.
     pub fn union(&self, other: &Self) -> Self {
         Self {
