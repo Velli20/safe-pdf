@@ -2,8 +2,8 @@
 //! without strokes on the page canvas, stamp artwork into the stamp's own presentation.
 use crate::{
     engine::DocumentView, entry::ControlKind, kind::AnnotationKind as Kind,
-    layer_error::AnnotationLayerResult, models::Annotation, projection, subtypes::Stamp,
-    widget_control,
+    layer_error::AnnotationLayerResult, models::Annotation, pdf_data::AppearanceStreams,
+    projection, subtypes::Stamp, widget_control,
 };
 use pdf_graphics::rect::Rect;
 use pdf_object_reader::pdf_object::PdfObject;
@@ -15,9 +15,8 @@ const OFF_STATE: &[u8] = b"Off";
 /// One annotation's normal appearance, selected by its live state and placed at its rectangle.
 #[derive(Clone, Debug)]
 pub struct PaintedAppearance {
-    /// The resolved `/AP /N` entry, or `/D` while pressed: a drawing stream, or a
-    /// dictionary of state streams.
-    pub normal: PdfObject,
+    /// The `/AP /N` appearance, or `/D` while pressed.
+    pub normal: AppearanceStreams,
     /// The state to draw from a state dictionary; `None` draws nothing from one.
     pub state: Option<Vec<u8>>,
     /// The annotation rectangle in PDF page user space.
@@ -113,6 +112,23 @@ fn drawn_from_appearance(annotation: &Annotation) -> Option<PaintedAppearance> {
 /// A stamp draws its source normal appearance, selected by `/AS`, at its live bounds.
 fn stamp(annotation: &Annotation, stamp: &Stamp) -> Option<PaintedAppearance> {
     source_normal_appearance(annotation, stamp.bounds)
+}
+
+impl AppearanceStreams {
+    /// The stream drawn for `state`: the single stream whatever the state, or the
+    /// stream named `state`.
+    pub fn stream(&self, state: Option<&[u8]>) -> Option<&PdfObject> {
+        match self {
+            Self::Stream(stream) => Some(stream),
+            Self::States(states) => {
+                let state = state?;
+                states
+                    .iter()
+                    .find(|candidate| *candidate.name == *state)
+                    .map(|candidate| &candidate.stream)
+            }
+        }
+    }
 }
 
 /// The source normal appearance, selected by `/AS`, drawn at `rect`.

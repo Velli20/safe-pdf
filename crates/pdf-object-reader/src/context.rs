@@ -433,6 +433,30 @@ impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
         Ok(values)
     }
 
+    /// Reads the elements from `start` on, splicing in the elements of any that are arrays,
+    /// for producers that inline a nested array into its parent.
+    pub fn read_flattened_from<T: FromPdfObject>(&mut self, start: usize) -> ReadResult<Vec<T>> {
+        let mut values = Vec::new();
+        for (index, object) in self.array.iter().enumerate().skip(start) {
+            let result = self.access.resolve(object).and_then(|resolved| {
+                match resolved.value() {
+                    ObjectVariant::Array(nested) => {
+                        for member in nested.iter() {
+                            values.push(self.access.read(member)?);
+                        }
+                    }
+                    _ => values.push(self.access.read(object)?),
+                }
+                Ok(())
+            });
+            result.map_err(|source| ObjectReadError::At {
+                location: ReadLocation::ArrayIndex(index),
+                source: Box::new(source),
+            })?;
+        }
+        Ok(values)
+    }
+
     /// Reads the elements as a flat `[min0 max0 min1 max1 ...]` list, one interval per pair.
     ///
     /// A trailing unpaired value is ignored.

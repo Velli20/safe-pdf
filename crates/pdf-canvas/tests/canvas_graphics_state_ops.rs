@@ -63,7 +63,7 @@ fn unmatched_restore_graphics_state_is_ignored() {
 fn external_graphics_state_dash_pattern_is_used_for_strokes() {
     let resources = Arc::new(graphics_state_resource(vec![
         ExternalGraphicsStateKey::DashPattern(
-            DashPattern::new(&[3.0, 1.0], 2.0)
+            DashPattern::new(vec![3.0, 1.0], 2.0)
                 .expect("dash pattern should be valid")
                 .expect("dash pattern should be present"),
         ),

@@ -98,9 +98,7 @@ impl FromPdfObject for HideTarget {
             return Ok(Self::FieldName(context.decode()?));
         }
         Ok(match context.dictionary()?.object_number() {
-            Some(number) => Self::Object {
-                number: u64::try_from(number).map_err(|_| SourceDecodeError::ResourceLimit)?,
-            },
+            Some(number) => Self::Object { number },
             None => Self::Unresolved,
         })
     }
@@ -123,20 +121,13 @@ impl FromPdfObject for WidgetAdditionalActions {
 
 /// Reads a named destination (a string or name) or an explicit destination array.
 impl FromPdfObject for AnnotationDestination {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let object = context.object();
-        match object {
-            ObjectVariant::String(value) => Ok(Self::Named {
-                name: value.as_bytes().to_vec(),
-            }),
-            ObjectVariant::Array(_) => Ok(Self::Explicit(Box::new(context.read(object)?))),
-            other => Err(ObjectReadError::TypeMismatch {
-                expected: ObjectKind::Array,
-                actual: other.kind(),
-            }),
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        if matches!(context.object(), ObjectVariant::Array(_)) {
+            return Ok(Self::Explicit(Box::new(context.decode()?)));
         }
+        Ok(Self::Named {
+            name: context.decode()?,
+        })
     }
 }
 
@@ -208,9 +199,8 @@ impl TryFrom<&ObjectVariant> for DestinationTarget {
     fn try_from(value: &ObjectVariant) -> ReadResult<Self> {
         Ok(match value {
             ObjectVariant::Reference(id) => Self::Reference {
-                number: u64::try_from(id.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
-                generation: u64::try_from(id.generation)
-                    .map_err(|_| SourceDecodeError::ResourceLimit)?,
+                number: id.number,
+                generation: id.generation,
             },
             ObjectVariant::Integer(index) => Self::PageIndex {
                 index: u64::try_from(*index).map_err(|_| SourceDecodeError::ResourceLimit)?,

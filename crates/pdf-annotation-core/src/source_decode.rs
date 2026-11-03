@@ -5,15 +5,15 @@
 use crate::error::SourceDecodeError;
 use crate::metadata::AnnotationFlags;
 use crate::pdf_data::{
-    AnnotationBorder, AppearanceCharacteristics, AppearanceDictionary, BorderEffect,
-    BorderEffectStyle, BorderStyle, BorderStyleName, NativeAnnotation, PageAnnotations,
-    SourceAnnotation,
+    AnnotationBorder, AppearanceCharacteristics, AppearanceDictionary, AppearanceState,
+    AppearanceStreams, BorderEffect, BorderEffectStyle, BorderStyle, BorderStyleName,
+    NativeAnnotation, PageAnnotations, SourceAnnotation,
 };
 use pdf_graphics::DashPattern;
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
-    ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
-    object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
+    object_variant::ObjectVariant, pdf_object::PdfObject, stream::StreamObject,
 };
 use pdf_optional_content::OptionalContentMembership;
 
@@ -89,10 +89,8 @@ impl FromPdfObject for PageAnnotations {
                 continue;
             }
             let object_number = match value {
-                ObjectVariant::Reference(id) => u64::try_from(id.number).ok(),
-                _ => dictionary
-                    .object_number
-                    .and_then(|number| u64::try_from(number).ok()),
+                ObjectVariant::Reference(id) => Some(id.number),
+                _ => dictionary.object_number,
             };
             let defines_field = dictionary.get(b"T").is_some();
             let mut annotation: SourceAnnotation = annots.read(value)?;
@@ -111,67 +109,37 @@ impl FromPdfObject for PageAnnotations {
     }
 }
 
-/// Reads `/AP` normal-state names and keeps the resolved `/N` and `/D` entries unparsed.
+/// Reads an `/AP` appearance dictionary.
 impl FromPdfObject for AppearanceDictionary {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut appearance = context.dictionary()?;
-        // A malformed down appearance only loses the pressed look.
-        let down = appearance.resolve_entry(b"D")?.filter(|down| {
-            matches!(
-                down.value(),
-                ObjectVariant::Stream(_) | ObjectVariant::Dictionary(_)
-            )
-        });
-        let Some(normal) = appearance.resolve_entry(b"N")? else {
-            return Ok(Self {
-                normal_states: Vec::new(),
-                normal: None,
-                down,
-            });
-        };
-        let states = match normal.value() {
-            ObjectVariant::Dictionary(states) => states,
-            ObjectVariant::Stream(_) => {
-                return Ok(Self {
-                    normal_states: Vec::new(),
-                    normal: Some(normal),
-                    down,
-                });
-            }
-            ObjectVariant::Null => {
-                return Ok(Self {
-                    normal_states: Vec::new(),
-                    normal: None,
-                    down,
-                });
-            }
-            _ => {
-                return Err(SourceDecodeError::InvalidEntry {
-                    entry: b"N",
-                    reason: "expected a drawing stream or state dictionary".into(),
-                }
-                .into());
-            }
-        };
-        let mut normal_states = Vec::with_capacity(states.len());
-        for (name, value) in states.iter() {
-            match appearance.resolve(value)?.kind() {
-                ObjectKind::Null => continue,
-                ObjectKind::Stream => normal_states.push(name.to_vec()),
-                _ => {
-                    return Err(SourceDecodeError::InvalidEntry {
-                        entry: b"N",
-                        reason: "expected a stream for each normal state".into(),
-                    }
-                    .into());
-                }
-            }
-        }
         Ok(Self {
-            normal_states,
-            normal: Some(normal),
-            down,
+            normal: appearance.optional(b"N")?,
+            // A malformed down appearance only loses the pressed look.
+            down: appearance.lenient(b"D"),
         })
+    }
+}
+
+/// Reads an `/AP` entry: one stream, or a dictionary of state streams with null states skipped.
+impl FromPdfObject for AppearanceStreams {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let ObjectVariant::Dictionary(_) = context.object() else {
+            let stream = context.decode::<StreamObject>()?;
+            return Ok(Self::Stream(PdfObject::new(ObjectVariant::Stream(stream))));
+        };
+        let mut states = context.dictionary()?;
+        states
+            .keys()
+            .filter_map(|name| {
+                let stream = states.optional::<StreamObject>(name).transpose()?;
+                Some(stream.map(|stream| AppearanceState {
+                    name: PdfName::from_bytes(name),
+                    stream: PdfObject::new(ObjectVariant::Stream(stream)),
+                }))
+            })
+            .collect::<ReadResult<_>>()
+            .map(Self::States)
     }
 }
 
@@ -190,35 +158,20 @@ impl FromPdfObject for AppearanceCharacteristics {
     }
 }
 
-/// Reads a `/Border` array `[horizontal_radius vertical_radius width dash_array?]`.
+/// Reads a `/Border` array `[horizontal_radius vertical_radius width dash_array?]`. Some
+/// writers flatten the dash array into the `/Border` array itself.
 impl FromPdfObject for AnnotationBorder {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut array = context.array()?;
-        let [_, _, _, rest @ ..] = array.array() else {
-            return Err(SourceDecodeError::InvalidEntry {
-                entry: b"Border",
-                reason: "expected an array with at least 3 numbers".to_owned(),
-            }
-            .into());
-        };
-        let [horizontal_radius, vertical_radius, width] = array.read_array::<f32, 3>()?;
-
-        // The dash array is nominally nested, but some writers flatten it into the
-        // `/Border` array itself.
-        let intervals: Vec<f32> = match rest.first() {
-            None => Vec::new(),
-            Some(first) if array.resolve(first)?.kind() == ObjectKind::Array => {
-                array.read(first)?
-            }
-            Some(_) => ArrayContext::new(rest, array.access()).read_all()?,
-        };
+        let [horizontal_radius, vertical_radius, width] = array.read_array()?;
         // `/Border` carries no dash phase.
         let dash_pattern =
-            DashPattern::new(&intervals, 0.0).map_err(|error| SourceDecodeError::InvalidEntry {
-                entry: b"Border",
-                reason: error.to_string(),
+            DashPattern::new(array.read_flattened_from(3)?, 0.0).map_err(|error| {
+                SourceDecodeError::InvalidEntry {
+                    entry: b"Border",
+                    reason: error.to_string(),
+                }
             })?;
-
         Ok(Self {
             horizontal_radius,
             vertical_radius,

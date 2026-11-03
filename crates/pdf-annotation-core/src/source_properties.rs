@@ -85,20 +85,21 @@ impl SourceAnnotation {
     /// supply a button annotation. Returns `MissingButtonOnState` when no state can
     /// be resolved. This method borrows source bytes and does not panic.
     pub fn button_on_state(&self) -> Result<&[u8], SourceAdoptionError> {
-        let states = self
-            .appearance
-            .as_ref()
-            .map(|v| v.normal_states.as_slice())
-            .unwrap_or_default();
-        if let Some(state) = self
-            .appearance_state
-            .as_deref()
-            .filter(|state| *state != b"Off" && states.iter().any(|name| name == state))
-        {
+        let states = match self.appearance.as_ref().and_then(|ap| ap.normal.as_ref()) {
+            Some(AppearanceStreams::States(states)) => states.as_slice(),
+            _ => &[],
+        };
+        if let Some(state) = self.appearance_state.as_deref().filter(|state| {
+            *state != b"Off" && states.iter().any(|candidate| *candidate.name == **state)
+        }) {
             return Ok(state);
         }
-        if let Some(state) = states.iter().find(|state| state.as_slice() != b"Off") {
-            return Ok(state);
+        if let Some(name) = states
+            .iter()
+            .map(|candidate| candidate.name.as_bytes())
+            .find(|name| *name != b"Off")
+        {
+            return Ok(name);
         }
         if matches!(&self.kind, NativeAnnotation::Widget(widget) if widget.is_checkbox()) {
             return Ok(b"Yes");

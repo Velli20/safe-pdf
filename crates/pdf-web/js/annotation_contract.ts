@@ -261,15 +261,6 @@ rollover_caption: Array<number> | null,
 alternate_caption: Array<number> | null, };
 
 /**
- * Owned AppearanceDictionary data retained from the source PDF.
- */
-export type AppearanceDictionary = {
-/**
- * Normal-state names.
- */
-normal_states: Array<Array<number>>, };
-
-/**
  * Owned BorderEffect data retained from the source PDF.
  */
 export type BorderEffect = {
@@ -1533,10 +1524,6 @@ name: Array<number> | null,
  * The optional annotation flags from `/F`.
  */
 flags: number | null,
-/**
- * The optional appearance dictionary from `/AP`.
- */
-appearance: AppearanceDictionary | null,
 /**
  * The optional appearance state from `/AS`.
  */
