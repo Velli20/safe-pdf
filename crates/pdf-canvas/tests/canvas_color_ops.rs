@@ -6,12 +6,15 @@ use common::{content_stream, replay};
 use pdf_canvas::{error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
 use pdf_color_space::error::ColorSpaceError;
 use pdf_document::page::PdfPage;
-use pdf_graphics::color::Color;
+use pdf_graphics::{color::Color, rect::Rect};
 use pdf_text_engine::bundled_font_system;
 
 fn render(data: &[u8]) -> Result<RecordingCanvas, PdfCanvasError> {
     let stream = content_stream(1, data);
-    let page = PdfPage::default();
+    let page = PdfPage {
+        media_box: Some(Rect::new(100.0, 100.0)),
+        ..PdfPage::default()
+    };
     let mut recording = RecordingCanvas::new(100.0, 100.0);
     {
         let mut canvas = PdfCanvas::new(&mut recording, &page, None, bundled_font_system())?;

@@ -88,27 +88,22 @@ impl PdfPage {
         Some(annotation)
     }
 
+    /// US Letter bounds in points, used when a page has no usable box.
+    const LETTER: Rect = Rect::new(612.0, 792.0);
+
     /// Returns the page's displayed width and height in PDF points.
     ///
-    /// Uses the CropBox, then the MediaBox, and swaps the axes for a sideways `/Rotate`
-    /// so hosts size their containers with the same geometry rendering uses.
-    /// Returns `None` for pages without either box or with invalid bounds.
+    /// Uses the bounds resolved by [`Self::page_bounds`] and swaps the axes for a
+    /// sideways `/Rotate` so hosts size their containers with the same geometry
+    /// rendering uses.
     pub fn page_size(&self) -> Option<Size> {
-        if self.crop_box.is_none() && self.media_box.is_none() {
-            return None;
-        }
-        let (bounds, rotation) = self.page_bounds(None, || Rect::new(1.0, 1.0))?;
-        let (width, height) = (bounds.width(), bounds.height());
-        if width <= 0.0 || height <= 0.0 {
-            return None;
-        }
-        Some(Size::new(width, height).quarter_turned(rotation))
+        let (bounds, rotation) = self.page_bounds(None)?;
+        Some(bounds.size().quarter_turned(rotation))
     }
 
     /// Fits `bounds_override`, or the page box, into `device_size` with the page `/Rotate`.
     ///
-    /// Pages without a box fit the device size itself. Rejects invalid device
-    /// dimensions before resolving bounds, then invalid bounds.
+    /// Rejects invalid device dimensions before resolving bounds, then invalid bounds.
     pub fn viewport(
         &self,
         bounds_override: Option<&Rect>,
@@ -118,44 +113,50 @@ impl PdfPage {
             return Err(ViewportError::Dimensions);
         }
         let (bounds, rotation) = self
-            .page_bounds(bounds_override, || {
-                Rect::new(device_size.width, device_size.height)
-            })
+            .page_bounds(bounds_override)
             .ok_or(ViewportError::Bounds)?;
         PageViewport::new(bounds, rotation, device_size)
     }
 
     /// Resolves the page box and normalized `/Rotate` shared by rendering and layout.
     ///
-    /// The box is chosen in priority order: `bounds_override`, then the CropBox, then
-    /// the MediaBox, and finally the box produced by `fallback`.
+    /// The box is chosen in priority order: `bounds_override`, then the page box
+    /// resolved by [`Self::page_box`], and finally US Letter.
     ///
     /// # Parameters
     ///
     /// - `bounds_override`: Bounds in PDF page coordinates that take precedence over
     ///   the page's own boxes, such as a caller-selected clip region.
-    /// - `fallback`: Produces the bounds used when neither an override nor a page box
-    ///   is available. It is only called in that case.
     ///
     /// # Returns
     ///
     /// The selected bounds and the page rotation in degrees, normalized into
-    /// `0..360` (an absent `/Rotate` is `0`). Returns `None` if the selected bounds
-    /// are not valid or have a nonfinite width or height.
-    pub fn page_bounds(
-        &self,
-        bounds_override: Option<&Rect>,
-        fallback: impl FnOnce() -> Rect,
-    ) -> Option<(Rect, i32)> {
+    /// `0..360` (an absent `/Rotate` is `0`). Returns `None` if `bounds_override`
+    /// does not have finite edges and positive dimensions.
+    pub fn page_bounds(&self, bounds_override: Option<&Rect>) -> Option<(Rect, i32)> {
         let bounds = bounds_override
-            .or(self.crop_box.as_ref())
-            .or(self.media_box.as_ref())
             .copied()
-            .unwrap_or_else(fallback);
-        if !bounds.is_valid() || !bounds.width().is_finite() || !bounds.height().is_finite() {
+            .or_else(|| self.page_box())
+            .unwrap_or(Self::LETTER);
+        if !bounds.is_valid() {
             return None;
         }
         Some((bounds, self.rotation.unwrap_or_default().rem_euclid(360)))
+    }
+
+    /// Resolves the page's own visible box with normalized edges.
+    ///
+    /// An empty MediaBox is ignored, a missing or empty one bounds the CropBox as US
+    /// Letter would, and a CropBox that does not overlap it yields the MediaBox.
+    /// Returns `None` when neither box gives positive, finite bounds.
+    fn page_box(&self) -> Option<Rect> {
+        let media_box = self
+            .media_box
+            .map(|media_box| media_box.normalized())
+            .filter(|media_box| media_box.is_valid());
+        self.crop_box
+            .and_then(|crop_box| crop_box.intersection(&media_box.unwrap_or(Self::LETTER)))
+            .or(media_box)
     }
 }
 
@@ -183,5 +184,38 @@ impl FromPdfObject for PdfPage {
             annotations,
             annotation_id_high_watermark,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_size_resolves_malformed_boxes() {
+        let page = |media_box: Option<[f32; 4]>, crop_box: Option<[f32; 4]>| PdfPage {
+            media_box: media_box.map(Rect::from),
+            crop_box: crop_box.map(Rect::from),
+            ..PdfPage::default()
+        };
+        let letter = Some(Size::new(612.0, 792.0));
+
+        let inverted = page(Some([0.0, 792.0, 612.0, 0.0]), None);
+        assert_eq!(inverted.page_size(), letter);
+        assert_eq!(
+            inverted.page_bounds(None),
+            Some((Rect::new(612.0, 792.0), 0))
+        );
+
+        let empty = page(Some([0.0; 4]), Some([0.0; 4]));
+        assert_eq!(empty.page_size(), letter);
+
+        let disjoint = page(
+            Some([0.0, 0.0, 800.0, 600.0]),
+            Some([600.0, 800.0, 1000.0, 1000.0]),
+        );
+        assert_eq!(disjoint.page_size(), Some(Size::new(800.0, 600.0)));
+
+        assert_eq!(page(None, None).page_size(), letter);
     }
 }
