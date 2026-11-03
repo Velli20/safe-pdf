@@ -12,6 +12,11 @@ use pdf_object_reader::{
     EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult,
     object_variant::ObjectVariant, stream::StreamObject,
 };
+use zune_jpeg::{
+    JpegDecoder,
+    errors::DecodeErrors,
+    zune_core::{bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions},
+};
 
 /// Represents the compression filter applied to a stream or image in a PDF.
 ///
@@ -226,10 +231,29 @@ impl Filter {
         });
         let jpeg = patched.as_deref().unwrap_or(stream_data);
 
-        let bitmap = image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg)
-            .map_err(|e| FilterError::Decompression(e.to_string()))?;
+        let options = DecoderOptions::default()
+            .set_strict_mode(false)
+            .set_max_width(usize::MAX)
+            .set_max_height(usize::MAX);
+        let mut decoder = JpegDecoder::new_with_options(ZCursor::new(jpeg), options);
+        let decompression = |e: DecodeErrors| FilterError::Decompression(e.to_string());
+        decoder.decode_headers().map_err(decompression)?;
 
-        Ok(bitmap.as_bytes().to_vec())
+        // CMYK samples are kept as decoded: PDF reads them as ink amounts subject to
+        // the image's `/Decode`, so converting them here would bypass both. Every
+        // other encoding is delivered as gray or RGB.
+        let output = match decoder.input_colorspace() {
+            Some(
+                colorspace @ (ColorSpace::CMYK
+                | ColorSpace::Luma
+                | ColorSpace::LumaA
+                | ColorSpace::RGB
+                | ColorSpace::RGBA),
+            ) => colorspace,
+            _ => ColorSpace::RGB,
+        };
+        decoder.set_options(options.jpeg_set_out_colorspace(output));
+        decoder.decode().map_err(decompression)
     }
 }
 

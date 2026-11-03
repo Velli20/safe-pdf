@@ -129,6 +129,10 @@ impl DecodedSamples {
     }
 
     /// Uses DCT decoder output as display samples when the JPEG decoder already converted color.
+    ///
+    /// Four-component output in a four-component color space is CMYK as encoded, not
+    /// converted color: it is left to the regular path, which applies `/Decode` and the
+    /// color space's conversion.
     fn decode_preconverted_dct(raw_data: &Bytes, metadata: &ImageMetadata) -> Option<Self> {
         let has_dct_filter = metadata
             .filters
@@ -141,6 +145,13 @@ impl DecodedSamples {
         let num_pixels = metadata.size.width().saturating_mul(metadata.size.height());
         let num_color_components = Self::decoded_dct_component_count(raw_data.as_ref(), num_pixels)
             .or_else(|| Self::decoded_single_pixel_component_count(raw_data.as_ref()))?;
+        let source_components = metadata
+            .color_space
+            .as_ref()
+            .map(|color_space| color_space.num_color_components());
+        if num_color_components == 4 && source_components == Some(4) {
+            return None;
+        }
 
         let image_data = if raw_data.len() == num_color_components && num_pixels > 1 {
             raw_data.repeat(num_pixels).into()
