@@ -31,13 +31,13 @@ impl DashPattern {
     /// Builds a validated dash pattern from PDF dash operands.
     ///
     /// An empty dash array represents a solid stroke and returns `Ok(None)`.
-    pub fn new(intervals: &[f32], phase: f32) -> Result<Option<Self>, DashPatternError> {
+    pub fn new(mut intervals: Vec<f32>, phase: f32) -> Result<Option<Self>, DashPatternError> {
         if intervals.is_empty() {
             return Ok(None);
         }
 
         let mut has_positive_interval = false;
-        for interval in intervals {
+        for interval in &intervals {
             if !interval.is_finite() || *interval < 0.0 {
                 return Err(DashPatternError::InvalidInterval);
             }
@@ -54,17 +54,17 @@ impl DashPattern {
             return Err(DashPatternError::InvalidPhase);
         }
 
-        let mut normalized_intervals = normalize_intervals(intervals);
-        for dash in normalized_intervals.iter_mut().step_by(2) {
+        // An odd-length array repeats to give every interval both a dash and a gap turn.
+        if intervals.len() % 2 == 1 {
+            intervals.extend_from_within(..);
+        }
+        for dash in intervals.iter_mut().step_by(2) {
             if *dash == 0.0 {
                 *dash = MIN_DASH_LENGTH;
             }
         }
 
-        Ok(Some(Self {
-            intervals: normalized_intervals,
-            phase,
-        }))
+        Ok(Some(Self { intervals, phase }))
     }
 
     /// Returns a pattern scaled into the same coordinate space as the stroked path.
@@ -78,7 +78,11 @@ impl DashPattern {
             .map(|interval| interval * scale)
             .collect();
         let phase = self.phase * scale;
-        Ok(Self::new(&intervals, phase)?.unwrap_or(Self { intervals, phase }))
+        // Only an empty array yields `None`, which scaling keeps empty.
+        Ok(Self::new(intervals, phase)?.unwrap_or(Self {
+            intervals: Vec::new(),
+            phase,
+        }))
     }
 
     /// Returns whether a dash starts at `distance` along a contour, within a tolerance
@@ -104,14 +108,6 @@ impl DashPattern {
     }
 }
 
-fn normalize_intervals(intervals: &[f32]) -> Vec<f32> {
-    let mut normalized = intervals.to_vec();
-    if intervals.len() % 2 == 1 {
-        normalized.extend(intervals.iter().copied());
-    }
-    normalized
-}
-
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -119,14 +115,14 @@ mod tests {
 
     #[test]
     fn empty_dash_array_is_solid() {
-        let pattern = DashPattern::new(&[], 4.0).expect("empty dash array should be valid");
+        let pattern = DashPattern::new(vec![], 4.0).expect("empty dash array should be valid");
 
         assert_eq!(pattern, None);
     }
 
     #[test]
     fn odd_dash_array_is_repeated() {
-        let pattern = DashPattern::new(&[3.0, 1.0, 2.0], 1.0)
+        let pattern = DashPattern::new(vec![3.0, 1.0, 2.0], 1.0)
             .expect("dash pattern should be valid")
             .expect("dash pattern should be present");
 
@@ -137,7 +133,7 @@ mod tests {
     #[test]
     fn all_zero_dash_array_is_invalid() {
         let error =
-            DashPattern::new(&[0.0, 0.0], 0.0).expect_err("all-zero dash pattern should fail");
+            DashPattern::new(vec![0.0, 0.0], 0.0).expect_err("all-zero dash pattern should fail");
 
         assert_eq!(error, DashPatternError::AllZeroIntervals);
     }
@@ -145,14 +141,14 @@ mod tests {
     #[test]
     fn negative_dash_values_are_invalid() {
         let error =
-            DashPattern::new(&[2.0, -1.0], 0.0).expect_err("negative dash interval should fail");
+            DashPattern::new(vec![2.0, -1.0], 0.0).expect_err("negative dash interval should fail");
 
         assert_eq!(error, DashPatternError::InvalidInterval);
     }
 
     #[test]
     fn non_finite_phase_is_invalid() {
-        let error = DashPattern::new(&[2.0, 1.0], f32::INFINITY)
+        let error = DashPattern::new(vec![2.0, 1.0], f32::INFINITY)
             .expect_err("non-finite dash phase should fail");
 
         assert_eq!(error, DashPatternError::InvalidPhase);
@@ -160,7 +156,7 @@ mod tests {
 
     #[test]
     fn scaled_pattern_scales_normalized_intervals_and_phase() {
-        let pattern = DashPattern::new(&[3.0, 1.0, 2.0], 1.5)
+        let pattern = DashPattern::new(vec![3.0, 1.0, 2.0], 1.5)
             .expect("dash pattern should be valid")
             .expect("dash pattern should be present");
 

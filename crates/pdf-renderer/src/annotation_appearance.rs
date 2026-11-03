@@ -4,7 +4,6 @@ use crate::{PdfRenderer, PdfRendererError};
 use pdf_annotation_core::PaintedAppearance;
 use pdf_canvas::{PageViewport, canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_object_reader::object_variant::ObjectVariant;
 use pdf_optional_content::OptionalContentState;
 use pdf_resources::form::FormXObject;
 use std::sync::Arc;
@@ -64,11 +63,11 @@ impl PdfRenderer {
 
     /// Reads the form drawn for `appearance`: its stream, or its state's stream.
     fn appearance_form(&self, appearance: &PaintedAppearance) -> Option<FormXObject> {
-        let stream = match appearance.normal.value() {
-            ObjectVariant::Dictionary(states) => states.get(appearance.state.as_deref()?)?,
-            normal => normal,
-        };
-        self.document.objects().read::<FormXObject>(stream).ok()
+        let stream = appearance.normal.stream(appearance.state.as_deref())?;
+        self.document
+            .objects()
+            .read::<FormXObject>(stream.value())
+            .ok()
     }
 }
 

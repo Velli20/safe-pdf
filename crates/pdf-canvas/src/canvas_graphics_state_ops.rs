@@ -48,7 +48,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         dash_array: &[f32],
         dash_phase: f32,
     ) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.dash_pattern = DashPattern::new(dash_array, dash_phase)?;
+        self.current_state_mut()?.paint.dash_pattern =
+            DashPattern::new(dash_array.to_vec(), dash_phase)?;
         Ok(())
     }
 

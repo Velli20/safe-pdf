@@ -11,12 +11,7 @@ impl FromPdfObject for WidgetAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let object = context.object();
         let mut dictionary = context.dictionary()?;
-        let field_id = dictionary
-            .reference(b"Parent")
-            .map(|parent_id| {
-                u64::try_from(parent_id.number).map_err(|_| SourceDecodeError::ResourceLimit)
-            })
-            .transpose()?;
+        let field_id = dictionary.reference(b"Parent").map(|parent| parent.number);
         let fields: FieldProperties = dictionary.read(object)?;
 
         Ok(Self {

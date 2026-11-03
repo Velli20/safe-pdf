@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{metadata::AnnotationFlags, models::Quad};
 use pdf_graphics::{DashPattern, color::Color, polyline::Polyline, rect::Rect};
-use pdf_object_reader::pdf_object::PdfObject;
+use pdf_object_reader::{pdf_name::PdfName, pdf_object::PdfObject};
 use pdf_optional_content::{OcgState, OptionalContentMembership};
 
 bitflags::bitflags! {
@@ -201,22 +201,30 @@ pub struct AppearanceCharacteristics {
 }
 
 /// Owned AppearanceDictionary data retained from the source PDF.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AppearanceDictionary {
-    /// Normal-state names.
-    pub normal_states: Vec<Vec<u8>>,
-    /// The resolved `/N` entry, a drawing stream or a dictionary of state streams,
-    /// kept unparsed for hosts that paint the appearance. Not serialized.
-    #[serde(skip)]
-    #[cfg_attr(feature = "typescript", ts(skip))]
-    pub normal: Option<PdfObject>,
-    /// The resolved `/D` entry shown while the annotation is pressed, kept unparsed
-    /// like `normal`. Not serialized.
-    #[serde(skip)]
-    #[cfg_attr(feature = "typescript", ts(skip))]
-    pub down: Option<PdfObject>,
+    /// The `/N` appearance, kept for hosts that paint it.
+    pub normal: Option<AppearanceStreams>,
+    /// The `/D` appearance shown while the annotation is pressed.
+    pub down: Option<AppearanceStreams>,
+}
+
+/// An `/AP` entry: one appearance stream, or appearance streams keyed by state name.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AppearanceStreams {
+    /// A single appearance stream drawn whatever the state.
+    Stream(PdfObject),
+    /// Appearance streams by state name, in key order.
+    States(Vec<AppearanceState>),
+}
+
+/// One named state of an `/AP` state dictionary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppearanceState {
+    /// The state name.
+    pub name: PdfName,
+    /// The state's appearance stream.
+    pub stream: PdfObject,
 }
 
 /// Owned FileSpecification data retained from the source PDF.
@@ -259,7 +267,7 @@ pub enum AnnotationDestination {
     /// A named destination.
     Named {
         /// Raw destination name bytes.
-        name: Vec<u8>,
+        name: Arc<[u8]>,
     },
     /// An explicit destination array.
     Explicit(Box<ExplicitDestination>),
@@ -279,11 +287,11 @@ pub enum DestinationTarget {
         /// PDF object number, distinct from Core annotation and field identities.
         #[serde(with = "crate::wire")]
         #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        number: u64,
+        number: usize,
         /// PDF generation number.
         #[serde(with = "crate::wire")]
         #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        generation: u64,
+        generation: usize,
     },
     /// A zero-based page index, used by remote (`GoToR`) destinations.
     PageIndex {
@@ -375,7 +383,7 @@ pub enum HideTarget {
         /// The object number.
         #[serde(with = "crate::wire")]
         #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        number: u64,
+        number: usize,
     },
     /// A direct dictionary, which has no identity to match an annotation by.
     Unresolved,
@@ -685,7 +693,7 @@ pub struct PopupAnnotation {
     /// The required parent annotation reference.
     #[serde(with = "crate::wire::optional")]
     #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub parent: Option<u64>,
+    pub parent: Option<usize>,
     /// Whether the popup is open.
     pub open: Option<bool>,
 }
@@ -807,7 +815,7 @@ pub struct WidgetAnnotation {
     /// when other field properties are inherited from higher ancestors.
     #[serde(with = "crate::wire::optional")]
     #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub field_id: Option<u64>,
+    pub field_id: Option<usize>,
     /// The form field type.
     pub field_type: Option<Arc<[u8]>>,
     /// The field name.
@@ -918,7 +926,7 @@ pub struct SourceAnnotation {
     /// Original indirect object number, used to resolve annotation relationships.
     #[serde(with = "crate::wire::optional")]
     #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub object_number: Option<u64>,
+    pub object_number: Option<usize>,
     /// Opacity applied by native presentation.
     pub opacity: f32,
     /// The annotation subtype name.
@@ -934,7 +942,9 @@ pub struct SourceAnnotation {
     /// The optional annotation flags from `/F`.
     #[cfg_attr(feature = "typescript", ts(type = "number | null"))]
     pub flags: Option<AnnotationFlags>,
-    /// The optional appearance dictionary from `/AP`.
+    /// The optional appearance dictionary from `/AP`. Not serialized.
+    #[serde(skip)]
+    #[cfg_attr(feature = "typescript", ts(skip))]
     pub appearance: Option<AppearanceDictionary>,
     /// The optional appearance state from `/AS`.
     pub appearance_state: Option<Arc<[u8]>>,

@@ -106,7 +106,7 @@ impl FromPdfObject for DashEntry {
         let intervals: Vec<f32> = array.at(0)?;
         let phase: f32 = array.at(1)?;
         Ok(Self(
-            DashPattern::new(&intervals, phase).map_err(PdfPagesError::from)?,
+            DashPattern::new(intervals, phase).map_err(PdfPagesError::from)?,
         ))
     }
 }
