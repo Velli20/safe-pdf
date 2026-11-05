@@ -7,10 +7,11 @@
 //! supplement cannot succeed.
 //!
 //! PDF revisions are processed newest first. Entries from the first section that
-//! mentions an object number remain authoritative; older `/Prev` sections fill only
-//! missing numbers. In a hybrid-reference revision, the traditional table is merged
-//! before its `/XRefStm` stream for the same reason. A set of visited offsets prevents
-//! malformed cyclic chains from looping forever.
+//! mentions an object number remain authoritative; older `/Prev` sections fill missing
+//! numbers and override an in-use entry only with an in-use entry of a higher generation.
+//! In a hybrid-reference revision, the traditional table is merged before its `/XRefStm`
+//! stream for the same reason. A set of visited offsets prevents malformed cyclic chains
+//! from looping forever.
 //!
 //! Exact section parsing is deliberately separate from repair.
 //! `XrefRecovery::parse_section_at` accepts only the syntax located at the supplied byte
@@ -20,7 +21,7 @@
 //! marker yields a table that can reach the document catalog, the builder falls back to
 //! that module's linear object reconstruction.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, btree_map::Entry};
 
 use pdf_object_reader::{
     EmptySource, ObjectReader,
@@ -205,8 +206,8 @@ impl<'input> XrefBuilder<'input> {
             let auxiliary_offset = self.trailer_offset(&table.trailer, b"XRefStm")?;
             let previous_offset = self.trailer_offset(&table.trailer, b"Prev")?;
 
-            // The loop walks newest to oldest. Inserting only vacant keys below makes
-            // the first visible declaration of each object number authoritative.
+            // The loop walks newest to oldest, so the first visible declaration of each
+            // object number stands unless an older one has a higher generation.
             Self::merge_entries(&mut entries, table.entries);
 
             if let Some(offset) = auxiliary_offset
@@ -239,17 +240,28 @@ impl<'input> XrefBuilder<'input> {
             .flatten())
     }
 
-    /// Adds entries that have not already been supplied by a newer section.
+    /// Adds entries from an older section to those supplied by newer sections.
     ///
     /// Cross-reference precedence is keyed by object number, regardless of whether an
     /// entry is normal, free, or compressed. Consequently a newer free entry also blocks
-    /// an older live declaration from being resurrected.
+    /// an older live declaration from being resurrected. The one exception is
+    /// [`CrossReferenceEntryType::overrides_newer`]: an update that declares an in-use
+    /// object at a lower generation leaves references to the higher generation pointing
+    /// at the older declaration.
     fn merge_entries(
         entries: &mut BTreeMap<usize, CrossReferenceEntryType>,
         section_entries: BTreeMap<usize, CrossReferenceEntryType>,
     ) {
         for (object_number, entry) in section_entries {
-            let _ = entries.entry(object_number).or_insert(entry);
+            match entries.entry(object_number) {
+                Entry::Vacant(slot) => {
+                    let _ = slot.insert(entry);
+                }
+                Entry::Occupied(mut slot) if entry.overrides_newer(slot.get()) => {
+                    let _ = slot.insert(entry);
+                }
+                Entry::Occupied(_) => {}
+            }
         }
     }
 
@@ -309,5 +321,32 @@ mod tests {
 
         assert_eq!(offsets, vec![12]);
         assert_eq!(builder.parser.position(), 4);
+    }
+
+    /// Verifies an older entry replaces a newer one only as an in-use, higher generation.
+    #[test]
+    fn merge_entries_prefers_newer_unless_older_in_use_generation_is_higher() {
+        use CrossReferenceEntryType as Entry;
+
+        let cases = [
+            // An update at a lower generation leaves the referenced generation in place.
+            (Entry::new_normal(900, 0), Entry::new_normal(100, 1), true),
+            (Entry::new_normal(900, 1), Entry::new_normal(100, 1), false),
+            (Entry::new_normal(900, 2), Entry::new_normal(100, 1), false),
+            // A placeholder row with no offset declares nothing.
+            (Entry::new_normal(900, 0), Entry::new_normal(0, 1), false),
+            // Free and compressed entries never lose to or win on generation.
+            (Entry::new_free(0, 0), Entry::new_normal(100, 1), false),
+            (Entry::new_normal(900, 0), Entry::new_free(0, 65_535), false),
+            (Entry::new_compressed(7), Entry::new_normal(100, 1), false),
+        ];
+
+        for (newer, older, older_wins) in cases {
+            let mut entries = BTreeMap::from([(5, newer.clone())]);
+            XrefBuilder::merge_entries(&mut entries, BTreeMap::from([(5, older.clone())]));
+
+            let expected = if older_wins { older } else { newer };
+            assert_eq!(entries.get(&5), Some(&expected));
+        }
     }
 }

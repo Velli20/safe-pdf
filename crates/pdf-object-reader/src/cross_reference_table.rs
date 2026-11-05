@@ -122,6 +122,28 @@ impl CrossReferenceEntryType {
             CrossReferenceEntryType::Free { .. } => false,
         }
     }
+
+    /// Returns whether this entry, from an older revision, overrides `newer`.
+    ///
+    /// Only an in-use object at a higher generation does: the file's references still
+    /// name that generation, so a newer revision declaring a lower one has not replaced
+    /// it. Free entries never compete, because their generation describes the next reuse
+    /// of the number, and producers write unused slots at generation 65535.
+    pub fn overrides_newer(&self, newer: &Self) -> bool {
+        match (self, newer) {
+            (
+                CrossReferenceEntryType::Normal {
+                    generation_number: older_generation,
+                    ..
+                },
+                CrossReferenceEntryType::Normal {
+                    generation_number: newer_generation,
+                    ..
+                },
+            ) => self.locates_object() && older_generation > newer_generation,
+            _ => false,
+        }
+    }
 }
 
 /// Represents the status of a cross-reference entry in a PDF file.
