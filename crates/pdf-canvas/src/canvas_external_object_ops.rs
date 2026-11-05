@@ -7,11 +7,14 @@
 //! Images are placed by handing the backend the full image-space to device-space
 //! matrix, so rotation, shear and mirroring in the CTM are all preserved.
 
-use pdf_graphics::{Image, PixelFormat, transform::Transform};
+use pdf_graphics::{Image, PixelFormat, size::Size, transform::Transform};
 use pdf_image::{PdfImage, raster::stencil_image};
-use pdf_resources::resource::Resource;
+use pdf_resources::{form::FormXObject, resource::Resource};
 
-use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
+use crate::{
+    canvas_backend::CanvasBackend, error::PdfCanvasError, mask_layer::MaskLayer,
+    pdf_canvas::PdfCanvas,
+};
 
 /// Maps image space onto the PDF unit square.
 ///
@@ -59,16 +62,12 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             Resource::UnavailableImage => {}
             Resource::Form(form) => {
                 let form = form.get()?;
-                self.render_content_stream(
-                    &form.content_stream,
-                    form.matrix,
-                    form.bbox.as_ref(),
-                    form.resources
-                        .as_ref()
-                        .map(|resources| resources.get())
-                        .transpose()?,
-                    None,
-                )?;
+                match self.current_state()?.soft_mask.clone() {
+                    Some(mask) if form.transparency_group => {
+                        self.render_masked_group(&form, &mask)?;
+                    }
+                    _ => self.render_form(&form)?,
+                }
             }
             _ => {
                 return Err(PdfCanvasError::XObjectNotFound(
@@ -78,6 +77,45 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         }
 
         Ok(())
+    }
+
+    /// Runs a form's content stream under its matrix, bounds and resources.
+    fn render_form(&mut self, form: &FormXObject) -> Result<(), PdfCanvasError> {
+        self.render_content_stream(
+            &form.content_stream,
+            form.matrix,
+            form.bbox.as_ref(),
+            form.resources
+                .as_ref()
+                .map(|resources| resources.get())
+                .transpose()?,
+            None,
+        )
+    }
+
+    /// Paints a transparency group as one object under the soft mask active at `Do`.
+    ///
+    /// The mask applies to the group's result, and the group's contents start without one,
+    /// so an `/SMask /None` inside the group leaves the outer mask in effect. The contents
+    /// are recorded first because a mask layer's callback holds only the backend.
+    fn render_masked_group(
+        &mut self,
+        form: &FormXObject,
+        mask: &MaskLayer,
+    ) -> Result<(), PdfCanvasError> {
+        // A nested canvas restarts its optional content, so hidden content stops here.
+        if self.content_hidden() {
+            return Ok(());
+        }
+        let mut initial_state = self.current_state()?.clone();
+        initial_state.soft_mask = None;
+        let size = Size::new(self.canvas.width(), self.canvas.height());
+        let text_glyphs = self.text_glyphs.take();
+        let group = self.record_nested(size, initial_state, text_glyphs, |canvas| {
+            canvas.render_form(form)
+        })?;
+        self.canvas
+            .with_mask_layer(mask, |backend| group.replay(backend))
     }
 
     /// Decodes inline image samples before applying the current painting state.
