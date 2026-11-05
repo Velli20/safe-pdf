@@ -17,7 +17,7 @@ use crate::reader::ObjectAccess;
 use crate::{dictionary::Dictionary, stream::StreamObject};
 use pdf_graphics::interval::Interval;
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The single argument passed to a typed decoder.
 ///
@@ -91,6 +91,39 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
     #[inline]
     pub fn decode<T: FromPdfObject>(self) -> ReadResult<T> {
         T::from_pdf_object(self)
+    }
+
+    /// Decodes the bound dictionary and the objects linked from it through `key`, depth
+    /// first in source order. `key` holds one object or an array of them.
+    ///
+    /// Each indirect object is decoded once, so a repeated or cyclic link is skipped, as
+    /// are null links. The walk is iterative, so its length is not limited by decode depth.
+    pub fn linked<T: FromPdfObject>(self, key: &[u8]) -> ReadResult<Vec<T>> {
+        self.object.dictionary()?;
+        let mut visited: HashSet<ObjectId> = self.reference.iter().map(|(id, _)| *id).collect();
+        let mut pending = vec![self.object.clone()];
+        let mut nodes = Vec::new();
+        while let Some(link) = pending.pop() {
+            if let ObjectVariant::Reference(id) = link
+                && !visited.insert(id)
+            {
+                continue;
+            }
+            let resolved = match self.access.resolve(&link) {
+                Ok(resolved) => resolved,
+                Err(ObjectReadError::CyclicReference { .. }) => continue,
+                Err(error) => return Err(error),
+            };
+            match resolved.value() {
+                ObjectVariant::Null => {}
+                ObjectVariant::Array(links) => pending.extend(links.iter().rev().cloned()),
+                node => {
+                    nodes.push(self.access.read(node)?);
+                    pending.extend(node.dictionary()?.get(key).cloned());
+                }
+            }
+        }
+        Ok(nodes)
     }
 
     /// Requires a dictionary or stream and transfers the traversal into its dictionary context.

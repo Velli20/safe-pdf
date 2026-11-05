@@ -497,7 +497,8 @@ pub enum AnnotationAction {
         /// Whether the targets are hidden; `false` shows them.
         hide: bool,
     },
-    /// An action followed by its `/Next` successors, flattened into execution order.
+    /// An action followed by its `/Next` successors, flattened into execution order,
+    /// with each action dictionary appearing once.
     Sequence(Vec<AnnotationAction>),
     /// A vendor or future action type.
     Unknown {
