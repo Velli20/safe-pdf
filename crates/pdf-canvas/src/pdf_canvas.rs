@@ -234,7 +234,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         cell_color: Option<Color>,
     ) -> Result<RecordingCanvas, PdfCanvasError> {
         let size = mat.map_or(*bbox, |mat| mat.map_rect(bbox)).size();
-        let mut recording_canvas = RecordingCanvas::new(size.width, size.height);
         let mut initial_state = CanvasState {
             transform: Transform::identity(),
             pattern_parent_transform: Transform::identity(),
@@ -245,34 +244,50 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             initial_state.paint.set_fill_color(color);
             initial_state.paint.set_stroke_color(color);
         }
-        let canvas_stack = vec![initial_state];
+        // Render the form's content stream into the mask canvas.
+        self.record_nested(size, initial_state, None, |canvas| {
+            canvas.render_content_stream(content_stream, mat, Some(bbox), resources, filter)
+        })
+    }
 
+    /// Records `paint` on a nested canvas that starts from `initial_state`.
+    ///
+    /// The nested canvas shares this canvas's caches and active streams, so a cycle
+    /// through a nested canvas is still detected. `text_glyphs` is the buffer it collects
+    /// selectable text into, handed back to this canvas afterwards.
+    pub(crate) fn record_nested(
+        &mut self,
+        size: Size<f32>,
+        initial_state: CanvasState,
+        text_glyphs: Option<Vec<TextGlyph>>,
+        paint: impl FnOnce(&mut PdfCanvas<'_, RecordingCanvas>) -> Result<(), PdfCanvasError>,
+    ) -> Result<RecordingCanvas, PdfCanvasError> {
+        let mut recording_canvas = RecordingCanvas::new(size.width, size.height);
         let mut other = PdfCanvas::<RecordingCanvas> {
             current_path: None,
             pending_clip: None,
             canvas: &mut recording_canvas,
             page: self.page,
             font_system: Arc::clone(&self.font_system),
-            font_cache: HashMap::new(),
+            font_cache: std::mem::take(&mut self.font_cache),
             image_cache: Arc::clone(&self.image_cache),
-            glyph_cache: HashMap::new(),
+            glyph_cache: std::mem::take(&mut self.glyph_cache),
             pattern_shading_cache: None,
-            canvas_stack,
+            canvas_stack: vec![initial_state],
             restore_floor: 1,
-            // The recording continues this canvas's active streams, so a cycle
-            // through a pattern or soft mask is still detected inside it.
             content_stream_render_state: std::mem::take(&mut self.content_stream_render_state),
-            text_glyphs: None,
+            text_glyphs,
             optional_content: self
                 .optional_content
                 .as_ref()
                 .map(OptionalContentFilter::restarted),
         };
 
-        // Render the form's content stream into the mask canvas.
-        let result =
-            other.render_content_stream(content_stream, mat, Some(bbox), resources, filter);
+        let result = paint(&mut other);
+        self.font_cache = other.font_cache;
+        self.glyph_cache = other.glyph_cache;
         self.content_stream_render_state = other.content_stream_render_state;
+        self.text_glyphs = other.text_glyphs.or_else(|| self.text_glyphs.take());
         result.map(|()| recording_canvas)
     }
 

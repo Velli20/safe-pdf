@@ -50,6 +50,7 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
                 matrix: None,
                 resources: None,
                 content_stream: stream,
+                transparency_group: false,
             })),
         )]),
         ..Default::default()

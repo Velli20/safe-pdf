@@ -99,6 +99,7 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
             operators: Vec::new(),
             id: 2,
         },
+        transparency_group: false,
     };
     let resources = Arc::new(graphics_state_resource(vec![
         ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
@@ -113,4 +114,47 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
 
     let observer = replay(&recording);
     assert_eq!(observer.begin_mask_count, 0);
+}
+
+#[test]
+fn soft_mask_applies_to_a_transparency_group_as_one_object() {
+    let mask_group = FormXObject {
+        bbox: Some(Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 10.0,
+            bottom: 10.0,
+        }),
+        matrix: None,
+        resources: None,
+        content_stream: content_stream(2, b"0 0 10 10 re f"),
+        transparency_group: true,
+    };
+    let group = FormXObject {
+        bbox: None,
+        matrix: None,
+        resources: Some(pdf_object_reader::ObjectHandle::from(
+            graphics_state_resource(vec![ExternalGraphicsStateKey::SoftMask(None)]),
+        )),
+        content_stream: content_stream(3, b"/GS0 gs 0 0 5 5 re f 5 5 5 5 re f"),
+        transparency_group: true,
+    };
+    let mut resources = graphics_state_resource(vec![ExternalGraphicsStateKey::SoftMask(Some(
+        pdf_object_reader::ObjectHandle::from(SoftMask {
+            mask_type: MaskMode::Alpha,
+            transfer: MaskTransfer::Identity,
+            shape: mask_group.into(),
+        }),
+    ))]);
+    resources.xobjects = HashMap::from([(
+        PdfName::from(b"Fm0"),
+        pdf_object_reader::ObjectHandle::from(Resource::from(group)),
+    )]);
+    let stream = content_stream(1, b"/GS0 gs /Fm0 Do");
+
+    let recording = render(&stream, &Arc::new(resources)).expect("masked group should render");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.begin_mask_count, 1);
+    assert_eq!(observer.fill_colors.len(), 2);
 }

@@ -3,7 +3,7 @@ use pdf_content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult,
-    object_variant::ObjectVariant,
+    object_variant::ObjectVariant, pdf_name::PdfName,
 };
 
 /// A parsed Form XObject, including deferred resource graph edges.
@@ -17,6 +17,24 @@ pub struct FormXObject {
     pub resources: Option<ObjectHandle<Resources>>,
     /// Parsed form operators.
     pub content_stream: ContentStream,
+    /// Whether `/Group` makes this form a transparency group, which composites as one
+    /// object: a soft mask active at `Do` applies to its result, not to its contents.
+    pub transparency_group: bool,
+}
+
+/// A form's `/Group` dictionary, whose `/S` names the kind of group.
+struct FormGroup {
+    /// Whether `/S` is `/Transparency`.
+    transparency: bool,
+}
+
+impl FromPdfObject for FormGroup {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let subtype = context.dictionary()?.required::<PdfName>(b"S")?;
+        Ok(Self {
+            transparency: subtype.as_bytes() == b"Transparency",
+        })
+    }
 }
 
 impl FromPdfObject for FormXObject {
@@ -41,6 +59,10 @@ impl FromPdfObject for FormXObject {
             // Retain deferred handles so recursive resource graphs can finish decoding.
             resources: context.optional(b"Resources")?,
             content_stream,
+            // A malformed /Group leaves the form an ordinary one.
+            transparency_group: context
+                .lenient::<FormGroup>(b"Group")
+                .is_some_and(|group| group.transparency),
         })
     }
 }
