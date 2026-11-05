@@ -1,7 +1,7 @@
 //! Extensible typed decoding with one object-bound context per invocation.
 
 use num_traits::FromPrimitive;
-use pdf_graphics::{LineCap, LineJoin, MaskMode, TextRenderingMode};
+use pdf_graphics::{AlphaConstant, LineCap, LineJoin, MaskMode, TextRenderingMode};
 use std::any::TypeId;
 
 use crate::context::ObjectContext;
@@ -269,6 +269,14 @@ impl<T: FromPdfObject, const N: usize> FromPdfObject for [T; N] {
                 }
                 .into()
             })
+    }
+}
+
+/// Reads a `CA` or `ca` number. Values outside the alpha range are brought into it;
+/// anything but a number is rejected.
+impl FromPdfObject for AlphaConstant {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self::new(context.decode::<f32>()?))
     }
 }
 

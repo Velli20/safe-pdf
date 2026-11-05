@@ -163,10 +163,10 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                     }
                 }
                 ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
-                    self.current_state_mut()?.paint.stroke_color.a = *alpha
+                    self.set_stroking_alpha(*alpha)?;
                 }
                 ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
-                    self.current_state_mut()?.paint.fill_color.a = *alpha
+                    self.set_non_stroking_alpha(*alpha)?;
                 }
             }
         }

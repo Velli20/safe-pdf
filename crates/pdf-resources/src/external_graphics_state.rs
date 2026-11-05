@@ -4,7 +4,7 @@ use pdf_object_reader::{
 };
 
 use crate::{error::PdfPagesError, resource::Resource, soft_mask::SoftMask};
-use pdf_graphics::{BlendMode, DashPattern, LineCap, LineJoin};
+use pdf_graphics::{AlphaConstant, BlendMode, DashPattern, LineCap, LineJoin};
 use std::sync::Arc;
 
 /// One parsed entry of a graphics state parameter dictionary (`ExtGState`).
@@ -37,11 +37,10 @@ pub enum ExternalGraphicsStateKey {
     /// Soft mask (`SMask`): `Some` for a soft mask dictionary, `None` for the name `/None`,
     /// which removes the current soft mask.
     SoftMask(Option<pdf_object_reader::ObjectHandle<SoftMask>>),
-    /// Stroking alpha constant (`CA`): the opacity of stroking operations, from 0.0 to 1.0.
-    StrokingAlpha(f32),
-    /// Non-stroking alpha constant (`ca`): the opacity of all other painting operations,
-    /// from 0.0 to 1.0.
-    NonStrokingAlpha(f32),
+    /// Stroking alpha constant (`CA`): the opacity of stroking operations.
+    StrokingAlpha(AlphaConstant),
+    /// Non-stroking alpha constant (`ca`): the opacity of all other painting operations.
+    NonStrokingAlpha(AlphaConstant),
 }
 
 pub struct ExternalGraphicsState {

@@ -750,11 +750,7 @@ quad_points: Array<Quad>,
 /**
  * The annotation color.
  */
-color: Color | null,
-/**
- * The constant opacity.
- */
-constant_opacity: number | null, };
+color: Color | null, };
 
 /**
  * Completed freehand strokes; collecting pointer samples belongs to the GUI.
@@ -1584,11 +1580,7 @@ quad_points: Array<Quad>,
 /**
  * The annotation color.
  */
-color: Color | null,
-/**
- * The constant opacity.
- */
-constant_opacity: number | null, };
+color: Color | null, };
 
 /**
  * Stamp identity. Custom names remain data without claiming artwork support.
@@ -1627,11 +1619,7 @@ quad_points: Array<Quad>,
 /**
  * The annotation color.
  */
-color: Color | null,
-/**
- * The constant opacity.
- */
-constant_opacity: number | null, };
+color: Color | null, };
 
 /**
  * Owned TextAnnotation data retained from the source PDF.
@@ -1718,11 +1706,7 @@ quad_points: Array<Quad>,
 /**
  * The annotation color.
  */
-color: Color | null,
-/**
- * The constant opacity.
- */
-constant_opacity: number | null, };
+color: Color | null, };
 
 /**
  * Unknown subtype retained explicitly rather than approximated by another kind.

@@ -592,8 +592,6 @@ pub struct HighlightAnnotation {
     pub quad_points: Vec<Quad>,
     /// The annotation color.
     pub color: Option<Color>,
-    /// The constant opacity.
-    pub constant_opacity: Option<f64>,
 }
 
 /// Owned InkAnnotation data retained from the source PDF.
@@ -722,8 +720,6 @@ pub struct SquigglyAnnotation {
     pub quad_points: Vec<Quad>,
     /// The annotation color.
     pub color: Option<Color>,
-    /// The constant opacity.
-    pub constant_opacity: Option<f64>,
 }
 
 /// Owned StampAnnotation data retained from the source PDF.
@@ -744,8 +740,6 @@ pub struct StrikeOutAnnotation {
     pub quad_points: Vec<Quad>,
     /// The annotation color.
     pub color: Option<Color>,
-    /// The constant opacity.
-    pub constant_opacity: Option<f64>,
 }
 
 /// Owned TextAnnotation data retained from the source PDF.
@@ -774,8 +768,6 @@ pub struct UnderlineAnnotation {
     pub quad_points: Vec<Quad>,
     /// The annotation color.
     pub color: Option<Color>,
-    /// The constant opacity.
-    pub constant_opacity: Option<f64>,
 }
 
 /// Owned WidgetChoiceOption data retained from the source PDF.
