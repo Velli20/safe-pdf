@@ -251,6 +251,28 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
         Ok(Event { revision, change })
     }
 
+    /// Runs `create`, restoring the document if it fails, so a group of creations is
+    /// adopted whole or not at all. `create` may only append annotations and fields.
+    pub(crate) fn append_atomically<T, E>(
+        &mut self,
+        create: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let revision = self.data.revision;
+        let next_annotation_id = self.data.next_annotation_id;
+        let next_field_id = self.data.next_field_id;
+        let annotations = self.data.annotations.len();
+        let fields = self.data.fields.len();
+        let result = create(self);
+        if result.is_err() {
+            self.data.revision = revision;
+            self.data.next_annotation_id = next_annotation_id;
+            self.data.next_field_id = next_field_id;
+            self.data.annotations.truncate(annotations);
+            self.data.fields.truncate(fields);
+        }
+        result
+    }
+
     /// Borrow a read-only view; its lifetime prevents concurrent engine edits.
     pub fn view(&self) -> DocumentView<'_> {
         DocumentView {

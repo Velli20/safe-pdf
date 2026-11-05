@@ -11,82 +11,85 @@ use pdf_object_reader::{
 };
 
 /// Reads an action dictionary, such as a link's or widget's `/A` entry, together
-/// with its `/Next` successors. A chain is flattened into one `Sequence` in execution
-/// order; a `/Next` chain that loops back ends at the repeated action.
+/// with its `/Next` successors. They are flattened into one `Sequence` in execution
+/// order, with each action dictionary run once, so a `/Next` link that repeats an
+/// action is skipped.
 impl FromPdfObject for AnnotationAction {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let steps: Vec<_> = context
+            .linked::<ActionStep>(b"Next")?
+            .into_iter()
+            .map(|step| step.0)
+            .collect();
+        Ok(match <[_; 1]>::try_from(steps) {
+            Ok([action]) => action,
+            Err(steps) => Self::Sequence(steps),
+        })
+    }
+}
+
+/// One action dictionary, without its `/Next` successors.
+struct ActionStep(AnnotationAction);
+
+impl FromPdfObject for ActionStep {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut action = context.dictionary()?;
         let action_type = action.required::<PdfName>(b"S")?;
-        let head = match action_type.as_ref() {
-            b"GoTo" => Self::GoTo {
+        Ok(Self(match action_type.as_ref() {
+            b"GoTo" => AnnotationAction::GoTo {
                 destination: action.required(b"D")?,
             },
-            b"GoToR" => Self::GoToRemote {
+            b"GoToR" => AnnotationAction::GoToRemote {
                 file_specification: action.required(b"F")?,
                 destination: action.optional(b"D")?,
                 // Advisory viewer hint; like PDFium, a malformed value (e.g. the name
                 // `/false`) is treated as absent rather than rejecting the annotation.
                 new_window: action.lenient(b"NewWindow"),
             },
-            b"URI" => Self::Uri {
+            b"URI" => AnnotationAction::Uri {
                 uri: action.required(b"URI")?,
                 is_map: action.optional(b"IsMap")?,
             },
-            b"Launch" => Self::Launch {
+            b"Launch" => AnnotationAction::Launch {
                 file_specification: action.optional(b"F")?,
             },
-            b"Named" => Self::Named {
+            b"Named" => AnnotationAction::Named {
                 name: action.required(b"N")?,
             },
-            b"SubmitForm" => Self::SubmitForm {
+            b"SubmitForm" => AnnotationAction::SubmitForm {
                 file_specification: action.optional(b"F")?,
                 fields: action.optional(b"Fields")?,
                 flags: action.optional(b"Flags")?,
             },
-            b"ResetForm" => Self::ResetForm {
+            b"ResetForm" => AnnotationAction::ResetForm {
                 fields: action.optional(b"Fields")?,
                 flags: action.optional(b"Flags")?,
             },
-            b"ImportData" => Self::ImportData {
+            b"ImportData" => AnnotationAction::ImportData {
                 file_specification: action.required(b"F")?,
             },
-            b"JavaScript" => Self::JavaScript {
+            b"JavaScript" => AnnotationAction::JavaScript {
                 script: action.required(b"JS")?,
             },
-            b"SetOCGState" => Self::SetOCGState {
+            b"SetOCGState" => AnnotationAction::SetOCGState {
                 state: action.required(b"State")?,
                 preserve_rb: action.optional(b"PreserveRB")?,
             },
-            b"Rendition" => Self::Rendition {
+            b"Rendition" => AnnotationAction::Rendition {
                 operation: action.optional(b"OP")?,
             },
-            b"Trans" => Self::Trans {
+            b"Trans" => AnnotationAction::Trans {
                 duration: action.optional(b"D")?,
             },
-            b"GoTo3DView" => Self::GoTo3DView,
-            b"Hide" => Self::Hide {
+            b"GoTo3DView" => AnnotationAction::GoTo3DView,
+            b"Hide" => AnnotationAction::Hide {
                 targets: action.optional_list(b"T")?,
                 hide: action.optional(b"H")?.unwrap_or(true),
             },
-            other => Self::Unknown {
+            other => AnnotationAction::Unknown {
                 action_type: Vec::from(other),
             },
-        };
-        let next = match action.optional_list::<Self>(b"Next") {
-            Err(error) if error.is_cyclic_reference() => Vec::new(),
-            result => result?,
-        };
-        if next.is_empty() {
-            return Ok(head);
-        }
-        let mut sequence = vec![head];
-        for action in next {
-            match action {
-                Self::Sequence(actions) => sequence.extend(actions),
-                action => sequence.push(action),
-            }
-        }
-        Ok(Self::Sequence(sequence))
+        }))
     }
 }
 

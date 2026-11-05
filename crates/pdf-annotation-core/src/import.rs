@@ -8,7 +8,7 @@ use crate::{
     models::{AnnotationId, DocumentDescriptor, DocumentId, NewAnnotation, PageIndex},
     pdf_data::{NativeAnnotation as Source, SourceAnnotation},
     session_store::SessionStore,
-    source_fields::{SourceFieldGroup, resolve_source_field},
+    source_fields::SourceFieldGroup,
     widgets::WidgetBinding,
 };
 use pdf_object_reader::{
@@ -145,18 +145,18 @@ impl<'a> Importer<'a> {
     }
 
     /// Creates each queued field group, or rejects all of its members together.
-    fn import_groups(&mut self, descriptor: DocumentDescriptor) -> AnnotationLayerResult<()> {
-        // One disposable engine preflights every group: a bad member cannot leave a partial group.
-        let mut scratch = Engine::new(descriptor, SessionStore)?;
+    fn import_groups(&mut self) {
         let groups = std::mem::take(&mut self.groups);
         for members in groups.values() {
             let sources: Vec<_> = members.iter().map(|record| record.source).collect();
-            let preflight = resolve_source_field(&sources)
+            let adopted = SourceFieldGroup::try_from(sources.as_slice())
                 .map_err(AnnotationLayerError::from)
-                .and_then(|group| insert_group(&mut scratch, members, &group).map(|_| group));
-            match preflight {
-                Ok(group) => {
-                    let ids = insert_group(&mut self.engine, members, &group)?;
+                .and_then(|group| {
+                    self.engine
+                        .append_atomically(|engine| insert_group(engine, members, group))
+                });
+            match adopted {
+                Ok(ids) => {
                     for (record, id) in members.iter().zip(ids) {
                         self.remember(*record, id);
                     }
@@ -166,7 +166,6 @@ impl<'a> Importer<'a> {
                     .extend(members.iter().map(|record| record.reject(&error))),
             }
         }
-        Ok(())
     }
 
     /// Adopts queued popups whose parents were imported on the same page.
@@ -207,9 +206,9 @@ pub(crate) fn import<'a>(
         id: DocumentId("session".into()),
         page_count: u32::try_from(pages.len()).map_err(|_| AnnotationLayerError::ResourceLimit)?,
     };
-    let mut importer = Importer::new(descriptor.clone())?;
+    let mut importer = Importer::new(descriptor)?;
     importer.collect(&pages)?;
-    importer.import_groups(descriptor)?;
+    importer.import_groups();
     importer.import_popups();
     Ok(importer.finish())
 }
@@ -241,16 +240,16 @@ fn insert(
 fn insert_group(
     engine: &mut Engine,
     members: &[SourceRecord<'_>],
-    group: &SourceFieldGroup,
+    group: SourceFieldGroup,
 ) -> AnnotationLayerResult<Vec<AnnotationId>> {
-    let field = group.field.clone();
+    let SourceFieldGroup { field, bindings } = group;
     let field = match dispatch(engine, Operation::CreateField { field })? {
         Change::FieldCreated(id) => id,
         _ => return Err(AnnotationLayerError::UnexpectedChange),
     };
     members
         .iter()
-        .zip(group.bindings(field))
-        .map(|(record, binding)| insert(engine, *record, Some(binding), None))
+        .enumerate()
+        .map(|(index, record)| insert(engine, *record, bindings.binding(field, index), None))
         .collect()
 }

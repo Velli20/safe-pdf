@@ -124,80 +124,79 @@ impl WidgetAnnotation {
         self.field_type.as_deref() == Some(b"Ch") && !self.is_combo_box()
     }
 
-    /// Borrow `annotation`'s active source appearance name, excluding `Off`.
-    /// Does not infer a normalized live field value, validate the type, or panic.
-    pub fn active_button_state<'a>(&self, annotation: &'a SourceAnnotation) -> Option<&'a [u8]> {
-        annotation
-            .appearance_state
-            .as_deref()
-            .filter(|state| *state != b"Off")
+    /// Whether `/FT` and flags describe a checkbox or radio button.
+    pub fn is_toggle_button(&self) -> bool {
+        self.is_button() && !self.is_push_button()
     }
 
     /// Text entry mode from the retained flags; password takes precedence over multiline.
     pub fn text_mode(&self) -> TextMode {
-        let flags = self.field_flags.unwrap_or_default();
-        if flags.contains(WidgetFieldFlags::PASSWORD) {
+        if self.has_flag(WidgetFieldFlags::PASSWORD) {
             TextMode::Password
-        } else if flags.contains(WidgetFieldFlags::MULTILINE) {
+        } else if self.has_flag(WidgetFieldFlags::MULTILINE) {
             TextMode::Multiline
         } else {
             TextMode::SingleLine
         }
     }
 
-    /// Whether the retained radio flag is set; callers check field type separately.
-    /// This read-only query does not panic.
+    /// Whether the retained `/Ff` entry sets `flag`.
+    ///
+    /// This reads the bit alone, as do the flag queries below, and bit meanings depend
+    /// on the field type, so callers check `/FT` separately.
+    fn has_flag(&self, flag: WidgetFieldFlags) -> bool {
+        self.field_flags.unwrap_or_default().contains(flag)
+    }
+
+    /// Whether the radio flag is set.
     pub fn is_radio_button(&self) -> bool {
-        self.field_flags
-            .is_some_and(|flags| flags.contains(WidgetFieldFlags::RADIO_BUTTON))
+        self.has_flag(WidgetFieldFlags::RADIO_BUTTON)
     }
 
-    /// Whether the retained push button flag is set; callers check field type separately.
-    /// This read-only query does not panic.
+    /// Whether the push button flag is set.
     pub fn is_push_button(&self) -> bool {
-        self.field_flags
-            .is_some_and(|flags| flags.contains(WidgetFieldFlags::PUSH_BUTTON))
+        self.has_flag(WidgetFieldFlags::PUSH_BUTTON)
     }
 
-    /// Whether the retained combo flag is set; callers check field type separately.
-    /// This read-only query does not panic.
+    /// Whether the combo flag is set.
     pub fn is_combo_box(&self) -> bool {
-        self.field_flags
-            .is_some_and(|flags| flags.contains(WidgetFieldFlags::COMBO_BOX))
+        self.has_flag(WidgetFieldFlags::COMBO_BOX)
     }
 
-    /// Whether the retained multiple selection flag is set; callers check field type separately.
-    /// This read-only query does not panic.
+    /// Whether the combo edit flag is set.
+    pub fn is_editable(&self) -> bool {
+        self.has_flag(WidgetFieldFlags::EDIT)
+    }
+
+    /// Whether the multiple selection flag is set.
     pub fn is_multi_select(&self) -> bool {
-        self.field_flags
-            .is_some_and(|flags| flags.contains(WidgetFieldFlags::MULTI_SELECT))
+        self.has_flag(WidgetFieldFlags::MULTI_SELECT)
     }
 
-    /// Whether the retained read-only flag is set; callers check field type separately.
-    /// This read-only query does not panic.
+    /// Whether the read-only flag is set.
     pub fn is_read_only(&self) -> bool {
-        self.field_flags
-            .is_some_and(|flags| flags.contains(WidgetFieldFlags::READ_ONLY))
+        self.has_flag(WidgetFieldFlags::READ_ONLY)
     }
 
-    /// Whether the retained no-toggle-to-off flag is set; callers check field type separately.
-    /// This read-only query does not panic.
+    /// Whether the required flag is set.
+    pub fn is_required(&self) -> bool {
+        self.has_flag(WidgetFieldFlags::REQUIRED)
+    }
+
+    /// Whether the no-toggle-to-off flag is set.
     pub fn is_no_toggle_to_off(&self) -> bool {
-        self.field_flags
-            .is_some_and(|flags| flags.contains(WidgetFieldFlags::NO_TOGGLE_TO_OFF))
+        self.has_flag(WidgetFieldFlags::NO_TOGGLE_TO_OFF)
     }
 
-    /// Whether the retained radios-in-unison flag is set; callers check field type separately.
-    /// This read-only query does not panic.
+    /// Whether the radios-in-unison flag is set.
     pub fn is_radios_in_unison(&self) -> bool {
-        self.field_flags
-            .is_some_and(|flags| flags.contains(WidgetFieldFlags::RADIOS_IN_UNISON))
+        self.has_flag(WidgetFieldFlags::RADIOS_IN_UNISON)
     }
 
     /// Resolve source choice indices, preferring explicit `/I` over inferred `/V`.
     ///
-    /// Inferred values use the first matching export value, then sort/deduplicate
-    /// indices as the legacy reader does. Core value commands intentionally require
+    /// Inferred values use the first matching export value, then sort and deduplicate
+    /// the indices. Core value commands intentionally require
     /// ordered distinct option identities instead. Returns `IndexOverflow` if a
     /// platform index cannot fit u64; does not mutate state or panic.
     pub fn selected_option_indices(&self) -> Result<Vec<u64>, SourceAdoptionError> {
