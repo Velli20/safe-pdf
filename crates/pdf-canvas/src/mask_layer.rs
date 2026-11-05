@@ -219,7 +219,7 @@ mod tests {
             .is_err()
         );
     }
-    /// Checks alpha, straight-RGB luminosity, lookup ordering, and malformed input.
+    /// Checks alpha, luminosity over black, lookup ordering, and malformed input.
     #[test]
     fn coverage_matches_explicit_bytes() {
         let image = Image {
@@ -248,7 +248,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             luma.prepare_coverage(&image).unwrap().data.as_ref(),
-            &[255, 255, 255, 76, 255, 255, 255, 149]
+            &[255, 255, 255, 0, 255, 255, 255, 75]
         );
         let table = Arc::new(std::array::from_fn(|i| {
             255_u8.saturating_sub(u8::try_from(i).unwrap())
@@ -262,7 +262,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             transferred.prepare_coverage(&image).unwrap().data.as_ref(),
-            &[255, 255, 255, 179, 255, 255, 255, 106]
+            &[255, 255, 255, 255, 255, 255, 255, 180]
         );
         let alpha = MaskLayer::new(
             recording,

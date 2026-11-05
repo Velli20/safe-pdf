@@ -238,9 +238,9 @@ fn pixel_at(image: &Image, index: usize) -> [u8; 4] {
     }
 }
 
-/// Creates a white RGBA mask whose alpha is the source RGB luminosity.
+/// Creates a white RGBA mask whose alpha is the source's luminosity over a black backdrop.
 ///
-/// Uses straight RGB independently of source alpha, expanding Gray8 first.
+/// Scales the luminosity of straight RGB by source alpha, expanding Gray8 first.
 /// The weighted `f32` result is clamped and truncated to a byte.
 ///
 /// # Errors
@@ -248,11 +248,13 @@ fn pixel_at(image: &Image, index: usize) -> [u8; 4] {
 /// Returns validation errors, a resource-limit error on allocation failure, or
 /// an invalid-input error if luminosity cannot be converted to a byte.
 pub fn luminosity_mask(image: &Image) -> Result<Image, ImageRasterError> {
-    alpha_mask(image, [255; 3], |[r, g, b, _]| {
+    alpha_mask(image, [255; 3], |[r, g, b, alpha]| {
         // Preserve operation order and truncation, even for expanded gray:
         // simplifying to the gray byte or rounding can change the resulting alpha.
-        // Input is straight RGB; multiplying by source alpha would change the mask.
-        (0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b))
+        let luminosity = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+        // The group composites over a black backdrop, so only its opacity contributes.
+        // Dividing first leaves opaque pixels exactly as they are.
+        (luminosity * (f32::from(alpha) / 255.0))
             .clamp(0.0, 255.0)
             .to_u8()
             .ok_or(ImageRasterError::InvalidInput("luminosity"))
@@ -341,9 +343,9 @@ mod tests {
         };
         assert!(rgba(&image).is_err());
     }
-    /// Checks that luminosity ignores the source alpha channel.
+    /// Checks that luminosity is taken after compositing over a black backdrop.
     #[test]
-    fn luminosity_uses_straight_rgb() {
+    fn luminosity_composites_over_black() {
         let image = Image {
             width: 1,
             height: 1,
@@ -353,7 +355,7 @@ mod tests {
         };
         assert_eq!(
             luminosity_mask(&image).unwrap().data.as_ref(),
-            &[255, 255, 255, 76]
+            &[255, 255, 255, 19]
         );
     }
     /// Checks grayscale luminosity output format, dimensions, and pixels.
