@@ -1,8 +1,9 @@
 use crate::operator_stream_parser::OperatorStreamParser;
 use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperatorVariant};
 use pdf_object_reader::{
-    EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult,
-    object_kind::ObjectKind, stream::StreamObject,
+    ArrayContext, EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ObjectReader,
+    ReadResult, ReadSession, object_kind::ObjectKind, object_variant::ObjectVariant,
+    stream::StreamObject,
 };
 
 /// Represents one materialized PDF content stream as parsed operators plus its
@@ -21,49 +22,100 @@ impl FromPdfObject for ContentStream {
     /// Object resolution and shape errors propagate, and consume no content-stream ID.
     /// Each successful read allocates one ID, including an empty stream array.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let mut operators = Vec::new();
+        let reader = ObjectReader::new(EmptySource);
+        let mut parsed = ParsedOperators::new(&reader);
         let id = match context.object().kind() {
             ObjectKind::Array => {
                 let mut context = context.array()?;
-                // The streams of an array form one content stream (ISO 32000 §7.8.2). They
-                // divide only at token boundaries, which need not fall between operations,
-                // so an operator's operands can end one stream and the operator start the
-                // next. A newline joins them, which also ends a trailing comment.
-                let mut joined = Vec::new();
-                for (index, element) in context.array().iter().enumerate() {
-                    // Null and dangling entries contribute no content (ISO 32000 §7.3.10).
-                    if context.is_absent(element)? {
-                        continue;
-                    }
-                    let stream = context.at::<StreamObject>(index)?;
-                    joined.extend_from_slice(stream.raw_data());
-                    joined.push(b'\n');
-                }
-                Self::parse_decoded_stream(&joined, &mut operators)?;
+                parsed.parse_stream_array(&mut context)?;
                 // The combined operator buffer receives one ID after every entry succeeds.
                 context.content_stream_ids().next_id()?
             }
             _ => {
                 let context = context.stream()?;
-                Self::parse_decoded_stream(context.stream().raw_data(), &mut operators)?;
+                parsed.parse(context.stream().raw_data(), false)?;
                 context.content_stream_ids().next_id()?
             }
         };
-        Ok(Self { operators, id })
+        Ok(Self {
+            operators: parsed.operators,
+            id,
+        })
     }
 }
 
-impl ContentStream {
-    /// Parses bytes best-effort, preserving operators recovered around malformed syntax.
-    fn parse_decoded_stream(
-        input: &[u8],
-        operators: &mut Vec<PdfOperatorVariant>,
-    ) -> Result<(), PdfOperatorError> {
-        let reader = ObjectReader::new(EmptySource);
-        let mut session = reader.session();
-        let mut parser = OperatorStreamParser::new(input, &mut session, operators);
-        while parser.parse_next_item()? {}
+/// The operators parsed from a content stream so far, and the operands awaiting theirs.
+struct ParsedOperators<'reader> {
+    session: ReadSession<'reader, EmptySource>,
+    /// Reused across operators. Preallocated because PDF operators typically have a
+    /// small fixed number of operands.
+    operands: Vec<ObjectVariant>,
+    operators: Vec<PdfOperatorVariant>,
+}
+
+impl<'reader> ParsedOperators<'reader> {
+    fn new(reader: &'reader ObjectReader<EmptySource>) -> Self {
+        Self {
+            session: reader.session(),
+            operands: Vec::with_capacity(6),
+            operators: Vec::new(),
+        }
+    }
+
+    /// Parses the streams of an array, which form one content stream (ISO 32000 §7.8.2).
+    ///
+    /// Streams divide only at token boundaries, which need not fall between operations,
+    /// so an item can continue into the next stream. A newline separates them, which also
+    /// ends a trailing comment. Each stream is parsed in place until an item may continue
+    /// past its end; from that item on, the remaining content is joined and parsed once,
+    /// which keeps an item that never ends from being parsed again for every stream.
+    fn parse_stream_array(
+        &mut self,
+        context: &mut ArrayContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<()> {
+        let elements = context.array();
+        let mut joined = Vec::new();
+        for (index, element) in elements.iter().enumerate() {
+            // Null and dangling entries contribute no content (ISO 32000 §7.3.10).
+            if context.is_absent(element)? {
+                continue;
+            }
+            let stream = context.at::<StreamObject>(index)?;
+            let unparsed = if joined.is_empty() {
+                let more_input_follows = index.saturating_add(1) < elements.len();
+                self.parse(stream.raw_data(), more_input_follows)?
+            } else {
+                Some(stream.raw_data())
+            };
+            if let Some(unparsed) = unparsed {
+                joined.extend_from_slice(unparsed);
+                joined.push(b'\n');
+            }
+        }
+        self.parse(&joined, false)?;
         Ok(())
+    }
+
+    /// Parses bytes best-effort, preserving operators recovered around malformed syntax.
+    ///
+    /// When `more_input_follows` is set, returns the input from the first item that later
+    /// content may continue, leaving that item unparsed.
+    fn parse<'a>(
+        &mut self,
+        input: &'a [u8],
+        more_input_follows: bool,
+    ) -> Result<Option<&'a [u8]>, PdfOperatorError> {
+        let mut parser = OperatorStreamParser::new(
+            input,
+            more_input_follows,
+            std::mem::take(&mut self.operands),
+            &mut self.session,
+            &mut self.operators,
+        );
+        while parser.parse_next_item()? {}
+        let unfinished = parser.unfinished();
+        self.operands = parser.into_operands();
+        Ok(unfinished)
     }
 }
 
