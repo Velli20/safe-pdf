@@ -10,32 +10,56 @@ use pdf_tokenizer::error::TokenizerError;
 
 use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperatorVariant};
 
-/// Incrementally parses one content stream into PDF operators while reusing the
-/// same operand buffer across operator boundaries.
+/// Incrementally parses one stream of a content stream into PDF operators.
+///
+/// The operand buffer is reused across operator boundaries. It moves between the parsers of
+/// consecutive streams, so an operator's operands can end one stream and the operator start
+/// the next.
 pub(super) struct OperatorStreamParser<'a, 'out, 'session, 'reader> {
+    input: &'a [u8],
     parser: PdfParser<'a>,
     session: &'session mut ReadSession<'reader, EmptySource>,
     operands: Vec<ObjectVariant>,
     out: &'out mut Vec<PdfOperatorVariant>,
+    /// Whether later content can continue an item that reaches the end of `input`.
+    more_input_follows: bool,
+    /// The bytes from the start of an item that later content may continue.
+    unfinished: Option<&'a [u8]>,
 }
 
 impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'reader> {
     /// Creates a parser for a single borrowed content stream.
     ///
-    /// Operators read their operands in place through `session`. The operand
-    /// buffer is preallocated because PDF operators typically have a small
-    /// fixed number of operands.
+    /// Operators read their operands in place through `session`. When
+    /// `more_input_follows` is set, parsing stops at the first item that later content
+    /// could change, leaving it to [`Self::unfinished`].
     pub(super) fn new(
         input: &'a [u8],
+        more_input_follows: bool,
+        operands: Vec<ObjectVariant>,
         session: &'session mut ReadSession<'reader, EmptySource>,
         out: &'out mut Vec<PdfOperatorVariant>,
     ) -> Self {
         Self {
+            input,
             parser: PdfParser::from(input),
             session,
-            operands: Vec::with_capacity(6),
+            operands,
             out,
+            more_input_follows,
+            unfinished: None,
         }
+    }
+
+    /// Returns the input from the item that stopped parsing because later content may
+    /// continue it. Its operands stay in the operand buffer.
+    pub(super) fn unfinished(&self) -> Option<&'a [u8]> {
+        self.unfinished
+    }
+
+    /// Returns the operand buffer, holding any operands still awaiting their operator.
+    pub(super) fn into_operands(self) -> Vec<ObjectVariant> {
+        self.operands
     }
 
     /// Parses the next operand or operator from the stream.
@@ -51,13 +75,17 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
 
         let start_position = self.parser.position();
         let result = if next_item_is_operator(next_byte) {
-            self.parse_operator_from_stream().map(|()| true)
+            self.parse_operator_from_stream()
         } else {
-            self.parse_operand_or_stop(next_byte)
+            self.parse_operand(next_byte)
         };
 
         match result {
-            Ok(parsed) => Ok(parsed),
+            Ok(()) => Ok(true),
+            Err(error) if self.item_may_continue(&error) => {
+                self.unfinished = self.input.get(start_position..);
+                Ok(false)
+            }
             Err(error) if is_truncated_operand_error(&error) => {
                 self.operands.clear();
                 Ok(false)
@@ -67,6 +95,15 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
                 Ok(true)
             }
         }
+    }
+
+    /// Returns whether a failed item could parse differently with the content after it.
+    ///
+    /// Not every failure at the end of the input is a truncation error: where recovery
+    /// resumes after an unterminated string depends on what follows it.
+    fn item_may_continue(&self, error: &PdfOperatorError) -> bool {
+        self.more_input_follows
+            && (is_truncated_operand_error(error) || self.peek_next_byte().is_none())
     }
 
     /// Skips inter-token whitespace and comments before reading the next item.
@@ -90,18 +127,6 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
         Ok(())
     }
 
-    /// Parses one operand object or stops cleanly when the stream ends mid-object.
-    fn parse_operand_or_stop(&mut self, first_byte: u8) -> Result<bool, PdfOperatorError> {
-        match self.parse_operand(first_byte) {
-            Ok(()) => Ok(true),
-            Err(error) if is_truncated_operand_error(&error) => {
-                self.operands.clear();
-                Ok(false)
-            }
-            Err(error) => Err(error),
-        }
-    }
-
     /// Parses the next operator token and reads it from the collected operands.
     ///
     /// An inline image (`BI`) is parsed from the stream bytes that follow it.
@@ -109,6 +134,11 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
     fn parse_operator_from_stream(&mut self) -> Result<(), PdfOperatorError> {
         let name = self.parser.read_operator_name()?;
         let operator = if name == b"BI" {
+            // A later stream can hold a better end for the data than any found in this
+            // one, so an image can be read only once the rest of the content is known.
+            if self.more_input_follows {
+                return Err(ParserError::UnexpectedEndOfFile.into());
+            }
             Some(PdfOperatorVariant::InlineImage(Arc::new(
                 self.parse_inline_image()?,
             )))
@@ -264,7 +294,13 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser = OperatorStreamParser::new(b"unknown q", &mut session, &mut out);
+        let mut parser = OperatorStreamParser::new(
+            b"unknown q",
+            false,
+            Vec::with_capacity(6),
+            &mut session,
+            &mut out,
+        );
         parser.operands.push(ObjectVariant::Integer(1));
 
         assert!(
@@ -294,6 +330,8 @@ mod tests {
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(
             b"BI /W 1 /H 1 /BPC 8 /CS /G ID x\nEI Q",
+            false,
+            Vec::with_capacity(6),
             &mut session,
             &mut out,
         );
@@ -336,7 +374,13 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser = OperatorStreamParser::new(b"0 j 0 J [ ", &mut session, &mut out);
+        let mut parser = OperatorStreamParser::new(
+            b"0 j 0 J [ ",
+            false,
+            Vec::with_capacity(6),
+            &mut session,
+            &mut out,
+        );
 
         while parser
             .parse_next_item()
@@ -360,7 +404,8 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser = OperatorStreamParser::new(b") q", &mut session, &mut out);
+        let mut parser =
+            OperatorStreamParser::new(b") q", false, Vec::with_capacity(6), &mut session, &mut out);
 
         while parser
             .parse_next_item()
@@ -380,7 +425,13 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser = OperatorStreamParser::new(b"[ ) 0 J", &mut session, &mut out);
+        let mut parser = OperatorStreamParser::new(
+            b"[ ) 0 J",
+            false,
+            Vec::with_capacity(6),
+            &mut session,
+            &mut out,
+        );
 
         while parser
             .parse_next_item()
@@ -400,7 +451,13 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser = OperatorStreamParser::new(b"1 0 R q", &mut session, &mut out);
+        let mut parser = OperatorStreamParser::new(
+            b"1 0 R q",
+            false,
+            Vec::with_capacity(6),
+            &mut session,
+            &mut out,
+        );
 
         while parser
             .parse_next_item()
@@ -419,8 +476,13 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser =
-            OperatorStreamParser::new(b"/Tag << /Ref 5 0 R >> BDC EMC", &mut session, &mut out);
+        let mut parser = OperatorStreamParser::new(
+            b"/Tag << /Ref 5 0 R >> BDC EMC",
+            false,
+            Vec::with_capacity(6),
+            &mut session,
+            &mut out,
+        );
 
         while parser
             .parse_next_item()
@@ -443,7 +505,13 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser = OperatorStreamParser::new(b"9 J q", &mut session, &mut out);
+        let mut parser = OperatorStreamParser::new(
+            b"9 J q",
+            false,
+            Vec::with_capacity(6),
+            &mut session,
+            &mut out,
+        );
         let original_capacity = parser.operands.capacity();
 
         while parser
@@ -465,8 +533,13 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser =
-            OperatorStreamParser::new(b"BI /W 1 /H 1 ID abc Q", &mut session, &mut out);
+        let mut parser = OperatorStreamParser::new(
+            b"BI /W 1 /H 1 ID abc Q",
+            false,
+            Vec::with_capacity(6),
+            &mut session,
+            &mut out,
+        );
 
         while parser
             .parse_next_item()
@@ -486,7 +559,13 @@ mod tests {
         let mut out = Vec::new();
         let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
-        let mut parser = OperatorStreamParser::new(b"} { q", &mut session, &mut out);
+        let mut parser = OperatorStreamParser::new(
+            b"} { q",
+            false,
+            Vec::with_capacity(6),
+            &mut session,
+            &mut out,
+        );
 
         while parser
             .parse_next_item()
@@ -508,6 +587,8 @@ mod tests {
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(
             b"BI /IM true /W 8 /H 1 /F /CCF /DP << /K -1 /Columns 8 >> ID \x01}\x10EI\nQ",
+            false,
+            Vec::with_capacity(6),
             &mut session,
             &mut out,
         );

@@ -107,17 +107,21 @@ impl PdfParser<'_> {
     /// sequences. Some producers write `EI` directly after the binary data, so when no
     /// guarded end exists the scan accepts the first `EI` keyword without that guard.
     fn find_inline_image_data_end_by_scan(&mut self) -> Result<usize, ParserError> {
+        let input = self.tokenizer.input;
         let current = self.tokenizer.position;
-        let candidates: Vec<usize> = self
-            .tokenizer
-            .data()
-            .iter()
-            .enumerate()
-            .filter_map(|(offset, byte)| (*byte == b'E').then_some(current.saturating_add(offset)))
-            .collect();
+        let candidates = || {
+            input
+                .get(current..)
+                .unwrap_or(&[])
+                .iter()
+                .enumerate()
+                .filter_map(move |(offset, byte)| {
+                    (*byte == b'E').then_some(current.saturating_add(offset))
+                })
+        };
 
-        self.find_inline_image_end_candidate(&candidates, true)
-            .or_else(|| self.find_inline_image_end_candidate(&candidates, false))
+        self.find_inline_image_end_candidate(candidates(), true)
+            .or_else(|| self.find_inline_image_end_candidate(candidates(), false))
             .ok_or(ParserError::InlineImageMissingDataEnd)
     }
 
@@ -125,10 +129,10 @@ impl PdfParser<'_> {
     /// requiring PDF whitespace immediately before it.
     fn find_inline_image_end_candidate(
         &mut self,
-        candidates: &[usize],
+        mut candidates: impl Iterator<Item = usize>,
         require_whitespace_before: bool,
     ) -> Option<usize> {
-        candidates.iter().copied().find(|&candidate| {
+        candidates.find(|&candidate| {
             (!require_whitespace_before || self.has_whitespace_before(candidate))
                 && self.try_consume_inline_image_end(candidate)
         })
