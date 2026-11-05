@@ -18,8 +18,10 @@ impl DocumentData {
     }
 
     /// Borrow a field by identity, returning `None` when it is absent.
+    ///
+    /// Searches newest first, so import binding a group's widgets finds its field at once.
     pub(crate) fn field(&self, id: FieldId) -> Option<&Field> {
-        self.fields.iter().find(|field| field.id == id)
+        self.fields.iter().rfind(|field| field.id == id)
     }
 
     /// Mutably borrow a field by identity, returning `None` when it is absent.
