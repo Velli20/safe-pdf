@@ -171,7 +171,6 @@ macro_rules! text_markup_decoder {
                 Ok(Self {
                     quad_points: quad_points(dictionary.required(b"QuadPoints")?)?,
                     color: dictionary.optional(b"C")?,
-                    constant_opacity: dictionary.optional(b"CA")?,
                 })
             }
         }

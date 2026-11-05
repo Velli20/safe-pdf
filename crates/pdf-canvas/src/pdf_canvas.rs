@@ -20,8 +20,8 @@ use pdf_document::page::PdfPage;
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec};
 use pdf_graphics::{
-    BlendMode, Image, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
-    size::Size, transform::Transform,
+    AlphaConstant, BlendMode, Image, PaintMode, PathFillType, color::Color, pdf_path::PdfPath,
+    rect::Rect, size::Size, transform::Transform,
 };
 use pdf_optional_content::OptionalContentState;
 
@@ -593,16 +593,16 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Sets the alpha value for subsequent non-stroking paint operations.
     ///
     /// This updates only the fill alpha component in the current graphics state.
-    pub fn set_non_stroking_alpha(&mut self, alpha: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.fill_color.a = alpha;
+    pub fn set_non_stroking_alpha(&mut self, alpha: AlphaConstant) -> Result<(), PdfCanvasError> {
+        self.current_state_mut()?.paint.fill_color.a = alpha.value();
         Ok(())
     }
 
     /// Sets the alpha value for subsequent stroking paint operations.
     ///
     /// This updates only the stroke alpha component in the current graphics state.
-    pub fn set_stroking_alpha(&mut self, alpha: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.stroke_color.a = alpha;
+    pub fn set_stroking_alpha(&mut self, alpha: AlphaConstant) -> Result<(), PdfCanvasError> {
+        self.current_state_mut()?.paint.stroke_color.a = alpha.value();
         Ok(())
     }
 

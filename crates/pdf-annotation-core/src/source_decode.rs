@@ -9,7 +9,7 @@ use crate::pdf_data::{
     AppearanceStreams, BorderEffect, BorderEffectStyle, BorderStyle, BorderStyleName,
     NativeAnnotation, PageAnnotations, SourceAnnotation,
 };
-use pdf_graphics::DashPattern;
+use pdf_graphics::{AlphaConstant, DashPattern};
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
@@ -40,10 +40,9 @@ impl FromPdfObject for SourceAnnotation {
             id: 0,
             object_number: None,
             opacity: dictionary
-                .optional::<f32>(b"CA")?
-                .filter(|v| v.is_finite())
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0),
+                .optional::<AlphaConstant>(b"CA")?
+                .unwrap_or_default()
+                .value(),
             // `/Subtype` identifies the concrete annotation kind.
             subtype: dictionary.required(b"Subtype")?,
             // The source edges are kept as-is so inverted rectangles survive decoding.

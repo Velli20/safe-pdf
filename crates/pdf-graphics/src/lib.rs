@@ -1,3 +1,4 @@
+mod alpha_constant;
 pub mod bezier;
 pub mod blend_mode;
 mod bounds_accumulator;
@@ -18,6 +19,7 @@ pub mod size;
 pub mod transform;
 pub mod viewport;
 
+pub use alpha_constant::AlphaConstant;
 pub use blend_mode::BlendMode;
 pub use bounds_accumulator::BoundsAccumulator;
 pub use canvas_paint::CanvasPaint;
