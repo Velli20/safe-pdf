@@ -171,7 +171,10 @@ impl FontFace for RawType0FontFace {
         _pixels_per_em: f32,
     ) -> Result<Option<GlyphGeometry>, FontError> {
         let program = self.program.borrow_dependent();
-        let cff_glyph = cff_glyph_id(&program.glyphs, self.id(), glyph)?;
+        // A CID outside the charset has no charstring, so it draws nothing.
+        let Ok(cff_glyph) = cff_glyph_id(&program.glyphs, self.id(), glyph) else {
+            return Ok(None);
+        };
         let subfont = self.subfont(&program.cff, glyph, cff_glyph)?;
         let mut pen = PdfPathPen::default();
         // No ppem scale is requested because the text engine retains vector
@@ -213,4 +216,71 @@ fn parse_cff(data: &[u8], face_index: u32) -> Result<CffFontRef<'_>, FontError> 
             FontError::MissingFace { face_index }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use crate::font::{
+        FontDriver, FontFaceId, FontLoadRequest, FontMetadata, FontProgramFormat, FontSource,
+        GlyphGeometry, GlyphId,
+    };
+    use crate::type0::Type0FontDriver;
+
+    /// A CID-keyed CFF whose charset holds only `.notdef` (CID 0).
+    const NOTDEF_ONLY_CID_CFF: &[u8] = &[
+        // Header: version 1.0, header size 4, offset size 1.
+        0x01, 0x00, 0x04, 0x01, //
+        // Name INDEX: "A".
+        0x00, 0x01, 0x01, 0x01, 0x02, b'A', //
+        // Top DICT INDEX: one 33-byte dictionary.
+        0x00, 0x01, 0x01, 0x01, 0x22, //
+        // ROS: SID 391, SID 392, supplement 0.
+        0xF8, 0x1B, 0xF8, 0x1C, 0x8B, 0x0C, 0x1E, //
+        // charset at 69.
+        0x1D, 0x00, 0x00, 0x00, 0x45, 0x0F, //
+        // FDSelect at 70.
+        0x1D, 0x00, 0x00, 0x00, 0x46, 0x0C, 0x25, //
+        // CharStrings at 78.
+        0x1D, 0x00, 0x00, 0x00, 0x4E, 0x11, //
+        // FDArray at 84.
+        0x1D, 0x00, 0x00, 0x00, 0x54, 0x0C, 0x24, //
+        // String INDEX: "Adobe", "Identity".
+        0x00, 0x02, 0x01, 0x01, 0x06, 0x0E, b'A', b'd', b'o', b'b', b'e', b'I', b'd', b'e', b'n',
+        b't', b'i', b't', b'y', //
+        // Global Subr INDEX: empty.
+        0x00, 0x00, //
+        // charset (69): format 0 with no glyphs beyond `.notdef`.
+        0x00, //
+        // FDSelect (70): format 3, one range from GID 0 to FD 0, sentinel 1.
+        0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, //
+        // CharStrings INDEX (78): one `endchar` charstring.
+        0x00, 0x01, 0x01, 0x01, 0x02, 0x0E, //
+        // FDArray INDEX (84): one Font DICT with a 2-byte Private DICT at 96.
+        0x00, 0x01, 0x01, 0x01, 0x08, 0x8D, 0x1D, 0x00, 0x00, 0x00, 0x60, 0x12, //
+        // Private DICT (96): defaultWidthX 0.
+        0x8B, 0x14,
+    ];
+
+    #[test]
+    fn cid_outside_charset_has_no_geometry() {
+        let face = Type0FontDriver::new()
+            .load(&FontLoadRequest {
+                source: FontSource::Memory {
+                    data: Bytes::from_static(NOTDEF_ONLY_CID_CFF),
+                    format: FontProgramFormat::CidCff,
+                    face_index: 0,
+                },
+                metadata_hint: FontMetadata::default(),
+                face_id: FontFaceId(0),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            face.glyph_geometry(GlyphId(0), 12.0),
+            Ok(Some(GlyphGeometry::Outline(_)))
+        ));
+        assert!(matches!(face.glyph_geometry(GlyphId(121), 12.0), Ok(None)));
+    }
 }
