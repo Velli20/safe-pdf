@@ -6,6 +6,7 @@ use crate::{
     error::FilterError,
     image_payload::{FilterPipeline, ImagePayload},
     jpeg_frame::JpegFrameHeader,
+    ycck::YcckSamples,
 };
 
 use pdf_object_reader::{
@@ -240,11 +241,13 @@ impl Filter {
         decoder.decode_headers().map_err(decompression)?;
 
         // CMYK samples are kept as decoded: PDF reads them as ink amounts subject to
-        // the image's `/Decode`, so converting them here would bypass both. Every
-        // other encoding is delivered as gray or RGB.
+        // the image's `/Decode`, so converting them here would bypass both. YCCK is
+        // delivered as CMYK for the same reason. Every other encoding is delivered
+        // as gray or RGB.
         let output = match decoder.input_colorspace() {
             Some(
                 colorspace @ (ColorSpace::CMYK
+                | ColorSpace::YCCK
                 | ColorSpace::Luma
                 | ColorSpace::LumaA
                 | ColorSpace::RGB
@@ -253,7 +256,11 @@ impl Filter {
             _ => ColorSpace::RGB,
         };
         decoder.set_options(options.jpeg_set_out_colorspace(output));
-        decoder.decode().map_err(decompression)
+        let samples = decoder.decode().map_err(decompression)?;
+        Ok(match output {
+            ColorSpace::YCCK => YcckSamples(samples).into_cmyk(),
+            _ => samples,
+        })
     }
 }
 
