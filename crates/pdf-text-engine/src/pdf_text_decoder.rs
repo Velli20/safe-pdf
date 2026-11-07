@@ -9,8 +9,7 @@ use crate::error::TextError;
 use crate::text::TextVector;
 use pdf_cmap::{Cid, CidMapping, PdfCode, ToUnicodeMap, UnicodeSequence};
 use pdf_font::{
-    CidFontKind, CidFontSpec, GlyphId, GlyphName, PdfFontSpec, PdfMetrics, SimpleEncoding,
-    Type0FontSpec,
+    CidFontSpec, GlyphId, GlyphName, PdfFontSpec, PdfMetrics, SimpleEncoding, Type0FontSpec,
 };
 
 /// Borrowed glyph-selection data valid only while its font specification is borrowed.
@@ -118,14 +117,11 @@ fn decode_type0_mapping(font: &Type0FontSpec, mapping: CidMapping) -> DecodedGly
 
 /// Selects the descendant glyph identifier associated with a CID.
 ///
-/// CIDFontType0 uses the CID directly. CIDFontType2 first consults its optional CID-to-GID table;
-/// a missing, out-of-range, or non-`usize` CID remains a CID so later face selection can recover by
-/// Unicode or use the conventional identity mapping.
+/// Either descendant subtype first consults its optional CID-to-GID table, which a CIDFontType0
+/// with a name-keyed program relies on to address its glyphs. A missing, out-of-range, or
+/// non-`usize` CID remains a CID so later face selection can recover by Unicode or use the
+/// conventional identity mapping.
 fn type0_selector(descendant: &CidFontSpec, cid: Cid) -> GlyphSelector<'static> {
-    if descendant.kind == CidFontKind::Type0 {
-        return GlyphSelector::Cid(cid);
-    }
-
     descendant
         .cid_to_gid
         .glyph(cid)
@@ -224,4 +220,35 @@ fn decode_one_byte_mapping<'a>(
 /// PDF font widths advance horizontally only.
 const fn horizontal_advance(width: f32) -> TextVector {
     TextVector { x: width, y: 0.0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pdf_font::glyph_widths_map::GlyphWidthsMap;
+    use pdf_font::{CidFontKind, CidSystemInfo, CidToGidMap, PdfFontDescriptor};
+
+    #[test]
+    fn cid_font_type0_applies_cid_to_gid_table() {
+        let descendant = CidFontSpec {
+            kind: CidFontKind::Type0,
+            descriptor: PdfFontDescriptor::default(),
+            program: None,
+            system_info: CidSystemInfo::default(),
+            metrics: PdfMetrics {
+                default: 1000.0,
+                explicit: GlyphWidthsMap::default(),
+            },
+            cid_to_gid: CidToGidMap::Table([0, 7, 17].into()),
+            cid_to_unicode: None,
+        };
+        assert!(matches!(
+            type0_selector(&descendant, Cid(2)),
+            GlyphSelector::GlyphId(GlyphId(17))
+        ));
+        assert!(matches!(
+            type0_selector(&descendant, Cid(3)),
+            GlyphSelector::Cid(Cid(3))
+        ));
+    }
 }
