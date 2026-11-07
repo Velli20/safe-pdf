@@ -49,7 +49,8 @@ export class NoteComponent extends AnnotationComponent {
       return;
     }
     if (content.kind !== AnnotationKind.Note) return;
-    this.node.textContent = this.entry.label || 'Note';
+    if (this.entry.artwork) this.drawArtwork();
+    else { this.node.textContent = this.entry.label || 'Note'; this.signature = ''; }
     this.node.setAttribute('aria-expanded', String(this.open));
     if (this.entry.has_popup) {
       this.popup?.remove(); this.popup = undefined; return;

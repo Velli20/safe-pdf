@@ -1856,7 +1856,8 @@ shapes: Array<Shape>, };
 export type WebCss = {
 /**
  * `matrix(a,b,c,d,e,f)` from annotation-local top-left units to container CSS pixels,
- * honoring the annotation's no-zoom and no-rotate flags.
+ * honoring the annotation's no-rotate flag. No-zoom annotations scale with the page
+ * like any other annotation.
  */
 transform: string,
 /**

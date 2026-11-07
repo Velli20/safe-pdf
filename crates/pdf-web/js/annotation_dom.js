@@ -25,6 +25,10 @@ export class AnnotationComponent {
     this.baseTransform = '';
     this.suppressClick = false;
     this.type = '';
+    /** Identifies the drawn content, so unchanged content is not redrawn. */
+    this.signature = '';
+    /** @type {import('./annotation_layer.js').NativeAnnotationLayer | undefined} */
+    this.layer = undefined;
   }
   /** @template {keyof HTMLElementEventMap} K
    * @param {HTMLElement} node
@@ -32,6 +36,21 @@ export class AnnotationComponent {
    * @param {(event: HTMLElementEventMap[K]) => void} callback */
   listen(node, name, callback) {
     node.addEventListener(name, callback, { signal: this.abort.signal });
+  }
+  /** Draws the source artwork into a canvas that moves with the node. Moves keep the
+   * drawing; a new size or viewport draws a fresh canvas before swapping it in. */
+  drawArtwork() {
+    const { entry, node, layer } = this;
+    if (!layer) return;
+    const signature = `${entry.size.width}x${entry.size.height}@${layer.snapshot?.viewportRevision}`;
+    if (this.signature === signature) return;
+    const canvas = element('canvas', { className: 'native-artwork' });
+    try {
+      layer.renderArtwork(entry, canvas);
+    } catch (error) { layer.onError(error); return; }
+    node.classList.remove('native-stamp');
+    node.replaceChildren(canvas);
+    this.signature = signature;
   }
   /** Subclasses reconcile their native control or visual from the current entry. */
   update() {}

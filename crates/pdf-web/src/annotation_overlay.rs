@@ -169,8 +169,8 @@ impl WebAnnotationOverlay {
         Ok(self.overlay.painted_appearances(page, self.pressed)?)
     }
 
-    /// Returns the source artwork of the displayed stamp `id`, drawn into the stamp's
-    /// own presentation; `None` for other annotations.
+    /// Returns the source artwork of the displayed stamp or note `id`, drawn into the
+    /// annotation's own presentation; `None` for other annotations.
     pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
         self.overlay.artwork(id)
     }

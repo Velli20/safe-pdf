@@ -46,7 +46,6 @@ export class VisualComponent extends AnnotationComponent {
   constructor(entry, layer) {
     super(entry, entry.content.kind === AnnotationKind.Link ? 'a' : 'div');
     this.layer = layer;
-    this.signature = '';
     if (entry.content.kind === AnnotationKind.Link) this.listen(this.node, 'click', event => {
       if (this.suppressClick) {
         event.preventDefault();
@@ -75,20 +74,5 @@ export class VisualComponent extends AnnotationComponent {
       node.replaceChildren(drawSvg(entry));
       this.signature = entry.modified_revision;
     }
-  }
-  /** Draws the source artwork into a canvas that moves with the node. Moves keep the
-   * drawing; a new size or viewport draws a fresh canvas before swapping it in. */
-  drawArtwork() {
-    const { entry, node, layer } = this;
-    const signature = `${entry.size.width}x${entry.size.height}@${layer.snapshot?.viewportRevision}`;
-    if (this.signature === signature) return;
-    const canvas = document.createElement('canvas');
-    canvas.className = 'native-artwork';
-    try {
-      layer.renderArtwork(entry, canvas);
-    } catch (error) { layer.onError(error); return; }
-    node.classList.remove('native-stamp');
-    node.replaceChildren(canvas);
-    this.signature = signature;
   }
 }
