@@ -268,6 +268,7 @@ impl FieldKind {
 mod tests {
     use super::*;
     use crate::error::FieldValidationError;
+    use crate::validate::Validate;
 
     fn options() -> Vec<ChoiceOption> {
         [OptionId(9), OptionId(1)]

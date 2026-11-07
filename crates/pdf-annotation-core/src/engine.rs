@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::commands::{AnnotationCommand, Operation};
 use crate::error::{CoreError, ValidationError};
 use crate::events::{Change, Event};
-use crate::field_validation::check_selected;
+use crate::field_validation::FieldValue;
 use crate::fields::{Field, FieldId, FieldIssue, FieldIssueKind, FieldKind, NewField};
 use crate::kind::AnnotationKind;
 use crate::metadata::AnnotationFlags;
@@ -12,6 +12,7 @@ use crate::models::{
     SCHEMA_VERSION,
 };
 use crate::store::AnnotationStore;
+use crate::validate::Validate;
 
 /// Marker for a snapshot with no storage acknowledgement.
 #[derive(Debug)]
@@ -364,7 +365,6 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
         &mut self,
         annotation: NewAnnotation,
     ) -> Result<Change, CoreError<S::Error>> {
-        crate::finite_values::check(&annotation)?;
         self.data
             .validate_content(annotation.page, &annotation.content)?;
         let id = AnnotationId(allocate(&mut self.data.next_annotation_id)?);
@@ -405,7 +405,6 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
         }
         let mut content = annotation.content.clone();
         content.translate(delta);
-        crate::finite_values::check(&content)?;
         content.validate()?;
         annotation.content = content;
         Ok(Change::Updated(id))
@@ -444,7 +443,6 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
                 return Err(CoreError::IncompatibleEdit(id));
             }
         }
-        crate::finite_values::check(&content)?;
         self.data.validate_content(annotation.page, &content)?;
         if content.popup_parent() == Some(id) {
             return Err(CoreError::InvalidPopupParent(id));
@@ -469,7 +467,6 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
 
     /// Validates a field definition and inserts it under a newly allocated identity.
     fn create_field(&mut self, field: NewField) -> Result<Change, CoreError<S::Error>> {
-        crate::finite_values::check(&field)?;
         field.validate()?;
         let id = FieldId(allocate(&mut self.data.next_field_id)?);
         self.data.fields.push(Field {
@@ -531,7 +528,7 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
                 FieldKind::CheckboxGroup(group),
                 Operation::SetCheckboxGroupSelection { selected, .. },
             ) => {
-                check_selected(&group.options, selected)?;
+                group.validate_value(&selected)?;
                 group.selected = selected;
             }
             (FieldKind::Checkbox(checkbox), Operation::SetCheckbox { checked, .. }) => {
@@ -541,11 +538,11 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
                 if selected.is_none() && radio.selected.is_some() && !radio.allow_clear {
                     return Err(CoreError::RadioClearNotAllowed(id));
                 }
-                check_selected(&radio.options, selected)?;
+                radio.validate_value(&selected)?;
                 radio.selected = selected;
             }
             (FieldKind::ListBox(list), Operation::SetListSelection { selection, .. }) => {
-                list.validate_selection(&selection)?;
+                list.validate_value(&selection)?;
                 list.selection = selection;
             }
             (FieldKind::ComboBox(combo), Operation::SetComboValue { value, .. }) => {

@@ -38,7 +38,6 @@ pub use pdf_data::{
     PolygonAnnotation, PopupAnnotation, SourceAnnotation, SquareAnnotation, SquigglyAnnotation,
     StampAnnotation, StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
 };
-mod finite_values;
 /// Device-independent style conversion and interpretation.
 pub mod style;
 /// Extended annotation geometry and semantic payloads.
@@ -79,6 +78,7 @@ pub mod requests;
 pub mod session_store;
 /// Local-unit outlines for annotations drawn by hosts.
 pub mod shapes;
+mod validate;
 mod widget_control;
 
 pub use actions::ActionTrigger;

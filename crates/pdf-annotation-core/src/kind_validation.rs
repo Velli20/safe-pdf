@@ -1,104 +1,94 @@
 //! Semantic rules for annotation payloads: positive bounds, path vertex counts,
 //! convex regions, and style ranges.
 //!
-//! Finiteness and nesting are checked once per input by [`crate::finite_values::check`],
-//! so these rules compare ranges only.
+//! Every range below excludes NaN and infinities, so no separate finiteness pass is
+//! needed.
 use std::ops::RangeBounds;
 
 use crate::error::ValidationError;
 use crate::free_text::FreeText;
 use crate::kind::AnnotationKind;
-use crate::models::{Ink, Quad};
+use crate::models::{Highlight, Ink, Quad, TextNote};
 use crate::style::ResolvedStyle;
-use crate::subtypes::PathAnnotation;
-use pdf_graphics::{color::Color, rect::Rect};
+use crate::subtypes::{
+    BoxAnnotation, Caret, Link, Markup, PathAnnotation, Popup, Stamp, UnknownAnnotation,
+};
+use crate::validate::Validate;
+use crate::widgets::Widget;
+use pdf_graphics::color::Color;
 
-impl AnnotationKind {
-    /// Check the payload's semantic rules; numbers must already be finite.
-    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+impl Validate for AnnotationKind {
+    type Error = ValidationError;
+
+    fn validate(&self) -> Result<(), ValidationError> {
         match self {
-            Self::Highlight(v) => {
-                check_quads(&v.quads)?;
-                v.style.validate()
-            }
-            Self::TextNote(v) => v.style.validate(),
+            Self::Highlight(v) => v.validate(),
+            Self::TextNote(v) => v.validate(),
             Self::Ink(v) => v.validate(),
-            Self::Widget(v) => {
-                check_bounds(&v.bounds)?;
-                v.style.as_ref().map_or(Ok(()), ResolvedStyle::validate)
-            }
+            Self::Widget(v) => v.validate(),
             Self::FreeText(v) => v.validate(),
-            Self::Line(v) => v.validate(false, 2..=2),
-            Self::Polygon(v) => v.validate(true, 3..),
-            Self::PolyLine(v) => v.validate(false, 2..),
-            Self::Square(v) | Self::Circle(v) => {
-                check_bounds(&v.bounds)?;
-                v.style.validate()
-            }
-            Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => {
-                check_quads(&v.quads)?;
-                v.style.validate()
-            }
-            Self::Link(v) => {
-                check_bounds(&v.bounds)?;
-                if !v.quads.iter().flatten().all(Quad::is_convex) {
-                    return Err(ValidationError::InvalidQuads);
-                }
-                v.style.validate()
-            }
-            Self::Stamp(v) => {
-                check_bounds(&v.bounds)?;
-                v.style.validate()
-            }
-            Self::Caret(v) => check_bounds(&v.bounds),
-            Self::Popup(v) => check_bounds(&v.bounds),
-            Self::Unknown(v) => {
-                if v.subtype.is_empty() {
-                    return Err(ValidationError::InvalidMetadata {
-                        field: "unknown subtype name",
-                    });
-                }
-                v.bounds.as_ref().map_or(Ok(()), check_bounds)
-            }
+            Self::Line(v) => v.check_path(false, 2..=2),
+            Self::Polygon(v) => v.check_path(true, 3..),
+            Self::PolyLine(v) => v.check_path(false, 2..),
+            Self::Square(v) | Self::Circle(v) => v.validate(),
+            Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => v.validate(),
+            Self::Link(v) => v.validate(),
+            Self::Stamp(v) => v.validate(),
+            Self::Caret(v) => v.validate(),
+            Self::Popup(v) => v.validate(),
+            Self::Unknown(v) => v.validate(),
         }
     }
 }
 
-impl Ink {
-    /// Strokes are open with at least two points; a source ink without strokes is
-    /// drawn from its appearance instead.
+/// Payloads whose rules are exactly their listed parts' rules, checked in order.
+macro_rules! validate_parts {
+    ($($ty:ty { $($part:ident),+ })*) => {$(
+        impl Validate for $ty {
+            type Error = ValidationError;
+
+            fn validate(&self) -> Result<(), ValidationError> {
+                $(self.$part.validate()?;)+
+                Ok(())
+            }
+        }
+    )*};
+}
+
+validate_parts! {
+    Highlight { quads, style }
+    Markup { quads, style }
+    TextNote { anchor, style }
+    Widget { bounds, style }
+    BoxAnnotation { bounds, style }
+    Stamp { bounds, style }
+    Caret { bounds }
+    Popup { bounds }
+}
+
+/// Strokes are open with at least two points; a source ink without strokes is
+/// drawn from its appearance instead.
+impl Validate for Ink {
+    type Error = ValidationError;
+
     fn validate(&self) -> Result<(), ValidationError> {
         self.style.validate()?;
-        if self
-            .strokes
-            .iter()
-            .any(|stroke| stroke.closed || stroke.points.len() < 2)
-        {
-            return Err(ValidationError::InvalidInk);
+        for stroke in &self.strokes {
+            if stroke.closed || stroke.points.len() < 2 {
+                return Err(ValidationError::InvalidInk);
+            }
+            stroke.validate()?;
         }
         Ok(())
     }
 }
 
-impl PathAnnotation {
-    /// Vertices must have the given closure and a count within `count`.
-    fn validate(
-        &self,
-        closed: bool,
-        count: impl RangeBounds<usize>,
-    ) -> Result<(), ValidationError> {
-        if self.vertices.closed != closed || !count.contains(&self.vertices.points.len()) {
-            return Err(ValidationError::InvalidPath { field: "vertices" });
-        }
-        check_bounds(&self.bounds)?;
-        self.style.validate()
-    }
-}
+/// Positive bounds, a valid style, and an open two- or three-point callout.
+impl Validate for FreeText {
+    type Error = ValidationError;
 
-impl FreeText {
-    /// Positive bounds, a valid style, and an open two- or three-point callout.
     fn validate(&self) -> Result<(), ValidationError> {
-        check_bounds(&self.bounds)?;
+        self.bounds.validate()?;
         self.style.validate()?;
         if self
             .callout
@@ -109,45 +99,76 @@ impl FreeText {
                 field: "free-text callout",
             });
         }
-        Ok(())
+        self.callout.validate()
     }
 }
 
-impl ResolvedStyle {
-    /// Colors within zero through one, opacity within zero through one, nonnegative
-    /// border width and dash intervals, and a positive font size.
-    pub(crate) fn validate(&self) -> Result<(), ValidationError> {
+/// Link regions are optional, but present ones must be convex.
+impl Validate for Link {
+    type Error = ValidationError;
+
+    fn validate(&self) -> Result<(), ValidationError> {
+        self.bounds.validate()?;
+        if !self.quads.iter().flatten().all(Quad::is_convex) {
+            return Err(ValidationError::InvalidQuads);
+        }
+        self.style.validate()
+    }
+}
+
+/// Unknown subtypes keep their name, and their bounds when present.
+impl Validate for UnknownAnnotation {
+    type Error = ValidationError;
+
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.subtype.is_empty() {
+            return Err(ValidationError::InvalidMetadata {
+                field: "unknown subtype name",
+            });
+        }
+        self.bounds.validate()
+    }
+}
+
+impl PathAnnotation {
+    /// Vertices must have the given closure and a count within `count`.
+    fn check_path(
+        &self,
+        closed: bool,
+        count: impl RangeBounds<usize>,
+    ) -> Result<(), ValidationError> {
+        if self.vertices.closed != closed || !count.contains(&self.vertices.points.len()) {
+            return Err(ValidationError::InvalidPath { field: "vertices" });
+        }
+        self.vertices.validate()?;
+        self.bounds.validate()?;
+        self.style.validate()
+    }
+}
+
+/// Colors within zero through one, opacity within zero through one, finite
+/// nonnegative border width and dash intervals, and a finite positive font size.
+impl Validate for ResolvedStyle {
+    type Error = ValidationError;
+
+    fn validate(&self) -> Result<(), ValidationError> {
         if ![Some(self.color), self.background, self.border_color]
             .iter()
             .flatten()
             .all(Color::is_valid)
             || !(0.0..=1.0).contains(&self.opacity)
-            || self.border_width < 0.0
-            || self.dash.iter().flatten().any(|v| *v < 0.0)
-            || self.font_size <= 0.0
+            || !(0.0..=f32::MAX).contains(&self.border_width)
+            || !self
+                .dash
+                .iter()
+                .flatten()
+                .all(|v| (0.0..=f32::MAX).contains(v))
+            || !(f32::MIN_POSITIVE..=f32::MAX).contains(&self.font_size)
         {
             return Err(ValidationError::InvalidStyle {
                 field: "resolved style",
             });
         }
         Ok(())
-    }
-}
-
-/// Bounds need finite edges and positive extents.
-fn check_bounds(bounds: &Rect) -> Result<(), ValidationError> {
-    if bounds.is_valid() {
-        Ok(())
-    } else {
-        Err(ValidationError::InvalidBounds)
-    }
-}
-
-/// Markup needs at least one region, and every region must be convex.
-fn check_quads(quads: &[Quad]) -> Result<(), ValidationError> {
-    if !quads.is_empty() && quads.iter().all(Quad::is_convex) {
-        Ok(())
-    } else {
-        Err(ValidationError::InvalidQuads)
     }
 }
