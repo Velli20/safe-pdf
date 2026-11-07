@@ -130,4 +130,26 @@ pub trait CanvasBackend {
     where
         Self: Sized,
         F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>;
+
+    /// Paints content into an isolated layer, then composites the layer as one object
+    /// with the constant `alpha` and `blend_mode`.
+    ///
+    /// Painting failures discard the layer. The callback must balance its own
+    /// saves/restores and must not restore caller-owned state.
+    ///
+    /// The default implementation paints directly onto this backend, ignoring `alpha`
+    /// and `blend_mode`, for backends without layers.
+    fn with_group_layer<F>(
+        &mut self,
+        alpha: f32,
+        blend_mode: Option<BlendMode>,
+        paint: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        Self: Sized,
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        let _ = (alpha, blend_mode);
+        paint(self)
+    }
 }

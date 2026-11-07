@@ -7,14 +7,11 @@
 //! Images are placed by handing the backend the full image-space to device-space
 //! matrix, so rotation, shear and mirroring in the CTM are all preserved.
 
-use pdf_graphics::{Image, PixelFormat, size::Size, transform::Transform};
+use pdf_graphics::{BlendMode, Image, PixelFormat, size::Size, transform::Transform};
 use pdf_image::{PdfImage, raster::stencil_image};
 use pdf_resources::{form::FormXObject, resource::Resource};
 
-use crate::{
-    canvas_backend::CanvasBackend, error::PdfCanvasError, mask_layer::MaskLayer,
-    pdf_canvas::PdfCanvas,
-};
+use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
 /// Maps image space onto the PDF unit square.
 ///
@@ -62,11 +59,10 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             Resource::UnavailableImage => {}
             Resource::Form(form) => {
                 let form = form.get()?;
-                match self.current_state()?.soft_mask.clone() {
-                    Some(mask) if form.transparency_group => {
-                        self.render_masked_group(&form, &mask)?;
-                    }
-                    _ => self.render_form(&form)?,
+                if form.transparency_group {
+                    self.render_transparency_group(&form)?;
+                } else {
+                    self.render_form(&form)?;
                 }
             }
             _ => {
@@ -93,29 +89,46 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         )
     }
 
-    /// Paints a transparency group as one object under the soft mask active at `Do`.
+    /// Paints a transparency group as one object under the soft mask, nonstroking alpha
+    /// constant and blend mode active at `Do`.
     ///
-    /// The mask applies to the group's result, and the group's contents start without one,
-    /// so an `/SMask /None` inside the group leaves the outer mask in effect. The contents
-    /// are recorded first because a mask layer's callback holds only the backend.
-    fn render_masked_group(
-        &mut self,
-        form: &FormXObject,
-        mask: &MaskLayer,
-    ) -> Result<(), PdfCanvasError> {
+    /// These apply to the group's result. The group's contents start with alpha 1, the
+    /// Normal blend mode and no soft mask, so a `gs` inside the group cannot override the
+    /// outer values, and an `/SMask /None` inside it leaves the outer mask in effect. The
+    /// contents are recorded first because a layer's callback holds only the backend.
+    fn render_transparency_group(&mut self, form: &FormXObject) -> Result<(), PdfCanvasError> {
+        let state = self.current_state()?;
+        let alpha = state.paint.fill_color.a;
+        let blend_mode = state
+            .paint
+            .blend_mode
+            .clone()
+            .filter(|mode| *mode != BlendMode::Normal);
+        let mask = state.soft_mask.clone();
+        // Contents painted straight onto the backdrop composite the same way.
+        if mask.is_none() && alpha >= 1.0 && blend_mode.is_none() {
+            return self.render_form(form);
+        }
         // A nested canvas restarts its optional content, so hidden content stops here.
         if self.content_hidden() {
             return Ok(());
         }
         let mut initial_state = self.current_state()?.clone();
         initial_state.soft_mask = None;
+        initial_state.paint.fill_color.a = 1.0;
+        initial_state.paint.stroke_color.a = 1.0;
+        initial_state.paint.blend_mode = None;
         let size = Size::new(self.canvas.width(), self.canvas.height());
         let text_glyphs = self.text_glyphs.take();
         let group = self.record_nested(size, initial_state, text_glyphs, |canvas| {
             canvas.render_form(form)
         })?;
+        // The layer encloses the mask so that its blend mode meets the real backdrop.
         self.canvas
-            .with_mask_layer(mask, |backend| group.replay(backend))
+            .with_group_layer(alpha, blend_mode, |backend| match &mask {
+                Some(mask) => backend.with_mask_layer(mask, |backend| group.replay(backend)),
+                None => group.replay(backend),
+            })
     }
 
     /// Decodes inline image samples before applying the current painting state.
