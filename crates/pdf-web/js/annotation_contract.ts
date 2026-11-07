@@ -1784,10 +1784,6 @@ subtype: string,
  */
 unsupported: string | null,
 /**
- * Device-space interaction rectangles.
- */
-bounds: Array<Rect>,
-/**
  * Page-space bottom-left corner of the `size` box; local coordinates are
  * `[x - origin.x, origin.y + size.height - y]`.
  */

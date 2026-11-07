@@ -5,28 +5,13 @@ use crate::{
     entry::AnnotationEntry,
     fields::{Field, FieldKind},
     import::LayoutHint,
-    layer_error::{AnnotationLayerError, AnnotationLayerResult},
+    layer_error::AnnotationLayerResult,
     models::{Annotation, Revision},
     pdf_data::AnnotationAction,
-    shapes, widget_control,
+    shapes,
 };
-use pdf_graphics::{point::Point, rect::Rect, viewport::PageViewport};
+use pdf_graphics::{point::Point, viewport::PageViewport};
 use pdf_optional_content::OptionalContentState;
-
-/// The shared field a widget is bound to; `None` for other kinds.
-pub(crate) fn widget_field<'a>(
-    annotation: &Annotation,
-    view: &DocumentView<'a>,
-) -> AnnotationLayerResult<Option<&'a Field>> {
-    annotation
-        .content
-        .bound_field()
-        .map(|id| {
-            view.field(id)
-                .ok_or(AnnotationLayerError::InvalidInput("widget field"))
-        })
-        .transpose()
-}
 
 /// Why the host should show a placeholder: the payload's reason, else unsupported field semantics.
 fn unsupported_reason(annotation: &Annotation, field: Option<&Field>) -> Option<String> {
@@ -41,35 +26,6 @@ fn unsupported_reason(annotation: &Annotation, field: Option<&Field>) -> Option<
         })
 }
 
-/// Device-space interaction rectangles: one per quad, else the payload bounds.
-fn device_regions(
-    annotation: &Annotation,
-    bounds: &Rect,
-    viewport: &PageViewport,
-) -> AnnotationLayerResult<Vec<Rect>> {
-    let regions = match annotation.content.quads().filter(|q| !q.is_empty()) {
-        Some(quads) => quads
-            .iter()
-            .map(|quad| viewport.map_quad(quad))
-            .collect::<Result<Vec<_>, _>>()?,
-        None => vec![viewport.map_rect(bounds)?],
-    };
-    if !regions.iter().all(|region| region.is_valid()) {
-        return Err(AnnotationLayerError::InvalidInput("device bounds"));
-    }
-    Ok(regions)
-}
-
-/// Whether `annotation` is shown under its flags and `optional_content`.
-pub(crate) fn displayed(annotation: &Annotation, optional_content: &OptionalContentState) -> bool {
-    // Optional content hides an annotation without altering its flags, so the two
-    // conditions are independent: either one alone suppresses display.
-    annotation.is_visible()
-        && annotation
-            .optional_content()
-            .is_none_or(|content| optional_content.is_visible(content))
-}
-
 pub(crate) fn project(
     annotation: &Annotation,
     view: &DocumentView<'_>,
@@ -82,10 +38,10 @@ pub(crate) fn project(
     let bounds = annotation
         .content
         .bounds(hint.and_then(LayoutHint::source_layout).as_ref())?;
-    let field = widget_field(annotation, view)?;
+    let field = annotation.widget_field(view)?;
     let style = annotation.style()?;
     let action = annotation.action();
-    let visible = displayed(annotation, optional_content);
+    let visible = annotation.is_displayed(optional_content);
     let artwork = PaintedAppearance::artwork(annotation, optional_content).is_some();
     Ok(AnnotationEntry {
         id: annotation.id,
@@ -100,7 +56,6 @@ pub(crate) fn project(
         // as authored, so no placeholder is needed.
         unsupported: unsupported_reason(annotation, field)
             .filter(|_| !artwork && !annotation.is_drawn_from_appearance()),
-        bounds: device_regions(annotation, &bounds, viewport)?,
         origin: bounds.origin(),
         size: bounds.size(),
         transform: viewport.local_frame(Point::new(bounds.left, bounds.bottom))?,
@@ -113,7 +68,7 @@ pub(crate) fn project(
         modified_revision,
         label: annotation.content.label(),
         has_popup,
-        control: field.and_then(|field| widget_control::control(annotation, field)),
+        control: field.and_then(|field| annotation.widget_control(field)),
         artwork,
         shapes: shapes::shapes(annotation, &bounds, &style),
         style,

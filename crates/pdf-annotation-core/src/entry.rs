@@ -8,7 +8,7 @@ use crate::{
     pdf_data::AnnotationAction,
     style::ResolvedStyle,
 };
-use pdf_graphics::{point::Point, rect::Rect, size::Size, transform::Transform};
+use pdf_graphics::{point::Point, size::Size, transform::Transform};
 use serde::{Deserialize, Serialize};
 
 /// Host element family presenting a widget's field value.
@@ -121,8 +121,6 @@ pub struct AnnotationEntry {
     pub subtype: String,
     /// Why the host should show a placeholder instead of `annotation.content`.
     pub unsupported: Option<String>,
-    /// Device-space interaction rectangles.
-    pub bounds: Vec<Rect>,
     /// Page-space bottom-left corner of the `size` box; local coordinates are
     /// `[x - origin.x, origin.y + size.height - y]`.
     pub origin: Point,

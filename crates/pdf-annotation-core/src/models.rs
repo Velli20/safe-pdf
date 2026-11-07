@@ -160,13 +160,6 @@ impl Annotation {
         self.metadata.source.as_deref()
     }
 
-    /// Whether live flags permit display and the payload has geometry to place.
-    /// Unknown subtypes without usable bounds are never shown.
-    pub fn is_visible(&self) -> bool {
-        self.metadata.is_visible()
-            && !matches!(&self.content, AnnotationKind::Unknown(v) if v.bounds.is_none())
-    }
-
     /// Whether this widget may edit `field`'s value: the field is not read-only and
     /// live flags permit content edits. False for non-widget payloads.
     pub fn can_edit_field(&self, field: &Field) -> bool {
@@ -201,17 +194,6 @@ impl Annotation {
                     | AnnotationKind::StrikeOut(_)
             )
             && !self.is_drawn_from_appearance()
-    }
-
-    /// Whether this annotation's appearance is painted at its fixed source rectangle instead
-    /// of a native presentation: source ink without strokes, and caret or unknown subtypes
-    /// that carry a normal appearance.
-    pub fn is_drawn_from_appearance(&self) -> bool {
-        match &self.content {
-            AnnotationKind::Ink(ink) => ink.strokes.is_empty(),
-            AnnotationKind::Caret(_) | AnnotationKind::Unknown(_) => self.has_normal_appearance(),
-            _ => false,
-        }
     }
 
     /// Whether plain FreeText content can be edited without changing style or geometry.

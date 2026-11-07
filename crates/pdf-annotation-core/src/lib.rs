@@ -57,6 +57,7 @@ mod wire;
 
 /// Triggers that run annotation actions.
 pub mod actions;
+mod annotation_display;
 mod annotation_source;
 /// Source appearances hosts paint on the page canvas.
 pub mod appearance_paint;

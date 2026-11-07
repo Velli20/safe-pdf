@@ -1,9 +1,12 @@
 //! Source appearances a host paints in place of a native presentation: widgets and ink
 //! without strokes on the page canvas, stamp artwork into the stamp's own presentation.
 use crate::{
-    engine::DocumentView, entry::ControlKind, kind::AnnotationKind as Kind,
-    layer_error::AnnotationLayerResult, models::Annotation, pdf_data::AppearanceStreams,
-    projection, subtypes::Stamp, widget_control,
+    engine::DocumentView,
+    kind::AnnotationKind as Kind,
+    layer_error::AnnotationLayerResult,
+    models::Annotation,
+    pdf_data::{AppearanceStreams, SourceAnnotation},
+    widget_control::ButtonState,
 };
 use pdf_graphics::rect::Rect;
 use pdf_object_reader::pdf_object::PdfObject;
@@ -12,13 +15,11 @@ use pdf_optional_content::OptionalContentState;
 /// The `/Off` appearance state of an unselected button.
 const OFF_STATE: &[u8] = b"Off";
 
-/// One annotation's normal appearance, selected by its live state and placed at its rectangle.
+/// One annotation's appearance stream, selected by its live state and placed at its rectangle.
 #[derive(Clone, Debug)]
 pub struct PaintedAppearance {
-    /// The `/AP /N` appearance, or `/D` while pressed.
-    pub normal: AppearanceStreams,
-    /// The state to draw from a state dictionary; `None` draws nothing from one.
-    pub state: Option<Vec<u8>>,
+    /// The appearance stream drawn: `/AP /D` while pressed when it has the state, else `/N`.
+    pub stream: PdfObject,
     /// The annotation rectangle in PDF page user space.
     pub rect: Rect,
 }
@@ -29,7 +30,7 @@ impl PaintedAppearance {
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
     /// buttons their source `/AS`. A `pressed` widget draws its down appearance when it has
-    /// one. Ink without strokes draws its source `/AS` state.
+    /// one for that state. Ink without strokes draws its source `/AS` state.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
@@ -39,13 +40,29 @@ impl PaintedAppearance {
         optional_content: &OptionalContentState,
         pressed: bool,
     ) -> AnnotationLayerResult<Option<Self>> {
-        if !projection::displayed(annotation, optional_content) {
+        if !annotation.is_displayed(optional_content) {
             return Ok(None);
         }
         if annotation.is_drawn_from_appearance() {
-            return Ok(drawn_from_appearance(annotation));
+            return Ok(annotation
+                .source()
+                .and_then(|source| source.normal_appearance(source.rect?)));
         }
-        widget(annotation, view, pressed)
+        let Some(field) = annotation.widget_field(view)? else {
+            return Ok(None);
+        };
+        let Some(source) = annotation.source() else {
+            return Ok(None);
+        };
+        let state = match annotation.button_state(field) {
+            Some(ButtonState::Source) => source.appearance_state.as_deref(),
+            Some(ButtonState::Checked(true)) => source.button_on_state().ok(),
+            Some(ButtonState::Checked(false)) => Some(OFF_STATE),
+            None => return Ok(None),
+        };
+        Ok(source
+            .rect
+            .and_then(|rect| source.widget_appearance(state, pressed, rect)))
     }
 
     /// The source artwork of a displayed stamp at its live bounds, or `None`.
@@ -56,68 +73,54 @@ impl PaintedAppearance {
         annotation: &Annotation,
         optional_content: &OptionalContentState,
     ) -> Option<Self> {
-        let Kind::Stamp(payload) = &annotation.content else {
+        let Kind::Stamp(stamp) = &annotation.content else {
             return None;
         };
-        if !projection::displayed(annotation, optional_content) {
+        if !annotation.is_displayed(optional_content) {
             return None;
         }
-        stamp(annotation, payload)
+        annotation.source()?.normal_appearance(stamp.bounds)
     }
 }
 
-/// A widget whose control is painted draws its appearance for the live field state.
-fn widget(
-    annotation: &Annotation,
-    view: &DocumentView<'_>,
-    pressed: bool,
-) -> AnnotationLayerResult<Option<PaintedAppearance>> {
-    let Some(field) = projection::widget_field(annotation, view)? else {
-        return Ok(None);
-    };
-    let Some(control) = widget_control::control(annotation, field).filter(|c| c.painted) else {
-        return Ok(None);
-    };
-    let Some(source) = annotation.source() else {
-        return Ok(None);
-    };
-    let appearance = source.appearance.as_ref();
-    let down = appearance
-        .and_then(|ap| ap.down.clone())
-        .filter(|_| pressed);
-    let (Some(normal), Some(rect)) = (
-        down.or_else(|| appearance.and_then(|ap| ap.normal.clone())),
-        source.rect,
-    ) else {
-        return Ok(None);
-    };
-    let state = match control.kind {
-        ControlKind::Button => source.appearance_state.as_deref().map(<[u8]>::to_vec),
-        _ if control.checked => source.button_on_state().ok().map(<[u8]>::to_vec),
-        _ => Some(OFF_STATE.to_vec()),
-    };
-    Ok(Some(PaintedAppearance {
-        normal,
-        state,
-        rect: rect.normalized(),
-    }))
-}
+impl SourceAnnotation {
+    /// The normal appearance selected by the source `/AS`, drawn at `rect`.
+    fn normal_appearance(&self, rect: Rect) -> Option<PaintedAppearance> {
+        let normal = self.appearance.as_ref()?.normal.as_ref()?;
+        let stream = normal.stream(self.appearance_state.as_deref())?;
+        Some(PaintedAppearance {
+            stream: stream.clone(),
+            rect: rect.normalized(),
+        })
+    }
 
-/// Ink without strokes draws its source normal appearance, selected by `/AS`, at its
-/// source rectangle.
-fn drawn_from_appearance(annotation: &Annotation) -> Option<PaintedAppearance> {
-    source_normal_appearance(annotation, annotation.source()?.rect?)
-}
-
-/// A stamp draws its source normal appearance, selected by `/AS`, at its live bounds.
-fn stamp(annotation: &Annotation, stamp: &Stamp) -> Option<PaintedAppearance> {
-    source_normal_appearance(annotation, stamp.bounds)
+    /// A widget's appearance for `state`, drawn at the source `rect`: the down appearance
+    /// while `pressed` when it has one for `state`, else the normal appearance.
+    fn widget_appearance(
+        &self,
+        state: Option<&[u8]>,
+        pressed: bool,
+        rect: Rect,
+    ) -> Option<PaintedAppearance> {
+        let appearance = self.appearance.as_ref()?;
+        let normal = appearance.normal.as_ref()?;
+        let stream = appearance
+            .down
+            .as_ref()
+            .filter(|_| pressed)
+            .and_then(|down| down.stream(state))
+            .or_else(|| normal.stream(state))?;
+        Some(PaintedAppearance {
+            stream: stream.clone(),
+            rect: rect.normalized(),
+        })
+    }
 }
 
 impl AppearanceStreams {
     /// The stream drawn for `state`: the single stream whatever the state, or the
     /// stream named `state`.
-    pub fn stream(&self, state: Option<&[u8]>) -> Option<&PdfObject> {
+    pub(crate) fn stream(&self, state: Option<&[u8]>) -> Option<&PdfObject> {
         match self {
             Self::Stream(stream) => Some(stream),
             Self::States(states) => {
@@ -129,14 +132,4 @@ impl AppearanceStreams {
             }
         }
     }
-}
-
-/// The source normal appearance, selected by `/AS`, drawn at `rect`.
-fn source_normal_appearance(annotation: &Annotation, rect: Rect) -> Option<PaintedAppearance> {
-    let source = annotation.source()?;
-    Some(PaintedAppearance {
-        normal: source.appearance.as_ref()?.normal.clone()?,
-        state: source.appearance_state.as_deref().map(<[u8]>::to_vec),
-        rect: rect.normalized(),
-    })
 }

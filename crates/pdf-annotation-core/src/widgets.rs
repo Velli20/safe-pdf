@@ -56,4 +56,12 @@ impl WidgetBinding {
             | Self::CheckboxOption { field, .. } => field,
         }
     }
+
+    /// The option a radio or checkbox-group widget displays; `None` for a whole field.
+    pub fn option(self) -> Option<OptionId> {
+        match self {
+            Self::Field { .. } => None,
+            Self::RadioOption { option, .. } | Self::CheckboxOption { option, .. } => Some(option),
+        }
+    }
 }
