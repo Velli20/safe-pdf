@@ -179,8 +179,10 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// Returns [`FilterError::Decompression`] if the zlib decompression fails,
-    /// which can happen if the data is corrupted or not valid zlib-compressed data.
+    /// Returns [`FilterError::Decompression`] if the zlib decompression fails
+    /// before producing any output, which can happen if the data is not valid
+    /// zlib-compressed data. A stream that fails after producing output yields
+    /// the output decoded so far.
     pub(crate) fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         /// Most output capacity reserved before decoding. The reservation guesses
         /// a 4:1 ratio; the cap keeps a small stream that expands enormously from
@@ -197,9 +199,15 @@ impl Filter {
 
         use std::io::Read;
 
-        decoder
-            .read_to_end(&mut decoded)
-            .map_err(|e| FilterError::Decompression(e.to_string()))?;
+        // A stream cut short, for example one missing its checksum, or one corrupt
+        // partway still yields the data decoded before that point. `read_to_end`
+        // leaves those bytes in the buffer, so only a stream that decoded nothing
+        // is an error.
+        match decoder.read_to_end(&mut decoded) {
+            Ok(_) => {}
+            Err(_) if !decoded.is_empty() => {}
+            Err(e) => return Err(FilterError::Decompression(e.to_string())),
+        }
 
         // The decoded data outlives this call, so give back a reservation that
         // a low-ratio stream left mostly unused.
