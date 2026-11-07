@@ -36,6 +36,7 @@ pub struct ObservingCanvas {
     pub save_count: usize,
     pub restore_count: usize,
     pub begin_mask_count: usize,
+    pub group_layers: Vec<(f32, Option<BlendMode>)>,
 }
 
 impl ObservingCanvas {
@@ -147,6 +148,20 @@ impl CanvasBackend for ObservingCanvas {
         F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
     {
         self.begin_mask_count += 1;
+        paint(self)
+    }
+
+    /// Observes one group layer's compositing and forwards its painting callback.
+    fn with_group_layer<F>(
+        &mut self,
+        alpha: f32,
+        blend_mode: Option<BlendMode>,
+        paint: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        self.group_layers.push((alpha, blend_mode));
         paint(self)
     }
 }
