@@ -82,6 +82,15 @@ enum RecordingCommand {
         /// Number of following commands belonging to this body, including nested headers.
         len: usize,
     },
+    /// Content composited as one layer occupies the following `len` commands.
+    Group {
+        /// Constant opacity applied to the composited layer.
+        alpha: f32,
+        /// Compositing operation of the layer onto its backdrop.
+        blend_mode: Option<BlendMode>,
+        /// Number of following commands belonging to this body, including nested headers.
+        len: usize,
+    },
 }
 
 /// An in-memory, backend-agnostic canvas that records drawing commands.
@@ -175,9 +184,9 @@ pub enum RecordingError {
     /// A save is unmatched or a restore crosses the current body boundary.
     #[error("unbalanced save/restore in recording")]
     UnbalancedSave,
-    /// A mask body extends outside its enclosing command slice.
-    #[error("invalid mask body in recording")]
-    InvalidMaskBody,
+    /// A mask or group body extends outside its enclosing command slice.
+    #[error("invalid layer body in recording")]
+    InvalidLayerBody,
 }
 
 /// Checks each lexical body independently, preventing restores of caller-owned scopes.
@@ -192,10 +201,10 @@ fn validate_commands(mut commands: &[RecordingCommand]) -> Result<(), RecordingE
             RecordingCommand::Restore => {
                 saves = saves.checked_sub(1).ok_or(RecordingError::UnbalancedSave)?
             }
-            RecordingCommand::Mask { len, .. } => {
+            RecordingCommand::Mask { len, .. } | RecordingCommand::Group { len, .. } => {
                 let (body, rest) = commands
                     .split_at_checked(*len)
-                    .ok_or(RecordingError::InvalidMaskBody)?;
+                    .ok_or(RecordingError::InvalidLayerBody)?;
                 validate_commands(body)?;
                 commands = rest;
             }
@@ -280,8 +289,21 @@ fn replay_commands<B: CanvasBackend>(
                 Mask { mask, len } => {
                     let (body, rest) = commands
                         .split_at_checked(*len)
-                        .ok_or(RecordingError::InvalidMaskBody)?;
+                        .ok_or(RecordingError::InvalidLayerBody)?;
                     backend.with_mask_layer(mask, |backend| replay_commands(body, backend))?;
+                    commands = rest;
+                }
+                Group {
+                    alpha,
+                    blend_mode,
+                    len,
+                } => {
+                    let (body, rest) = commands
+                        .split_at_checked(*len)
+                        .ok_or(RecordingError::InvalidLayerBody)?;
+                    backend.with_group_layer(*alpha, blend_mode.clone(), |backend| {
+                        replay_commands(body, backend)
+                    })?;
                     commands = rest;
                 }
             }
@@ -426,33 +448,73 @@ impl CanvasBackend for RecordingCanvas {
         if mask.is_passthrough() {
             return paint(self);
         }
+        self.record_body(
+            RecordingCommand::Mask {
+                mask: mask.clone(),
+                len: usize::MAX,
+            },
+            paint,
+        )?;
+        self.nest(mask.recording(), mask.recording().replay_cost());
+        Ok(())
+    }
+
+    /// Appends a group body in-place and removes it entirely if painting or validation fails.
+    fn with_group_layer<F>(
+        &mut self,
+        alpha: f32,
+        blend_mode: Option<BlendMode>,
+        paint: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        self.record_body(
+            RecordingCommand::Group {
+                alpha,
+                blend_mode,
+                len: usize::MAX,
+            },
+            paint,
+        )
+    }
+}
+
+impl RecordingCanvas {
+    /// Pushes a body `header`, records `paint` after it, and sets the header's length.
+    ///
+    /// A failed paint or an unbalanced body removes the header and everything after it.
+    fn record_body<F>(&mut self, header: RecordingCommand, paint: F) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
         self.commands.try_reserve(1)?;
         let start = self.commands.len();
-        self.commands.push(RecordingCommand::Mask {
-            mask: mask.clone(),
-            len: usize::MAX,
-        });
+        self.commands.push(header);
         let body_start = self.commands.len();
         let result = paint(self).and_then(|()| {
             let body = self
                 .commands
                 .get(body_start..)
-                .ok_or(RecordingError::InvalidMaskBody)?;
+                .ok_or(RecordingError::InvalidLayerBody)?;
             validate_commands(body)?;
             let len = body.len();
-            let Some(RecordingCommand::Mask {
-                len: recorded_len, ..
-            }) = self.commands.get_mut(start)
+            let Some(
+                RecordingCommand::Mask {
+                    len: recorded_len, ..
+                }
+                | RecordingCommand::Group {
+                    len: recorded_len, ..
+                },
+            ) = self.commands.get_mut(start)
             else {
-                return Err(RecordingError::InvalidMaskBody.into());
+                return Err(RecordingError::InvalidLayerBody.into());
             };
             *recorded_len = len;
             Ok(())
         });
         if result.is_err() {
             self.commands.truncate(start);
-        } else {
-            self.nest(mask.recording(), mask.recording().replay_cost());
         }
         result
     }

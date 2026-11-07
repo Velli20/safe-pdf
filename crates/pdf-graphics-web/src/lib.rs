@@ -14,6 +14,8 @@ mod surface;
 mod surface_pool;
 /// Web canvas backend.
 pub mod web_canvas_backend;
+/// Isolated transparency-group rendering.
+mod web_group;
 /// Image placement and upload.
 mod web_image;
 /// Isolated soft-mask rendering.

@@ -8,7 +8,7 @@ use common::{content_stream, replay};
 use pdf_canvas::{error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
 use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
-use pdf_graphics::{DashPattern, MaskMode, rect::Rect};
+use pdf_graphics::{AlphaConstant, BlendMode, DashPattern, MaskMode, rect::Rect};
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
@@ -157,4 +157,38 @@ fn soft_mask_applies_to_a_transparency_group_as_one_object() {
     let observer = replay(&recording);
     assert_eq!(observer.begin_mask_count, 1);
     assert_eq!(observer.fill_colors.len(), 2);
+}
+
+#[test]
+fn transparency_group_composites_with_the_alpha_and_blend_mode_active_at_do() {
+    // The group's own `gs` restores full opacity and Normal blending for its contents.
+    let group = FormXObject {
+        bbox: None,
+        matrix: None,
+        resources: Some(pdf_object_reader::ObjectHandle::from(
+            graphics_state_resource(vec![
+                ExternalGraphicsStateKey::NonStrokingAlpha(AlphaConstant::new(1.0)),
+                ExternalGraphicsStateKey::BlendMode(BlendMode::Normal),
+            ]),
+        )),
+        content_stream: content_stream(2, b"/GS0 gs 0 0 5 5 re f"),
+        transparency_group: true,
+    };
+    let mut resources = graphics_state_resource(vec![
+        ExternalGraphicsStateKey::NonStrokingAlpha(AlphaConstant::new(0.5)),
+        ExternalGraphicsStateKey::BlendMode(BlendMode::Screen),
+    ]);
+    resources.xobjects = HashMap::from([(
+        PdfName::from(b"Fm0"),
+        pdf_object_reader::ObjectHandle::from(Resource::from(group)),
+    )]);
+    let stream = content_stream(1, b"/GS0 gs /Fm0 Do");
+
+    let recording = render(&stream, &Arc::new(resources)).expect("group should render");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.group_layers, vec![(0.5, Some(BlendMode::Screen))]);
+    assert_eq!(observer.begin_mask_count, 0);
+    let alphas: Vec<f32> = observer.fill_colors.iter().map(|color| color.a).collect();
+    assert_eq!(alphas, vec![1.0]);
 }

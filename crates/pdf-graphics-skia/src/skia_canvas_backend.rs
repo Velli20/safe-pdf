@@ -720,6 +720,36 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         canvas.restore_to_count(parent);
         result
     }
+
+    /// Paints content into a layer that is composited with `alpha` and `blend_mode`.
+    fn with_group_layer<F>(
+        &mut self,
+        alpha: f32,
+        blend_mode: Option<BlendMode>,
+        paint_content: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        let mut paint = skia_safe::Paint::default();
+        paint.set_alpha_f(alpha.clamp(0.0, 1.0));
+        if let Some(mode) = blend_mode {
+            paint.set_blend_mode(to_skia_blend_mode(mode));
+        }
+        let canvas = self.surface.canvas();
+        let parent = canvas.save_count();
+        canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
+        // Protect the initial clip so failed painting can be discarded in its entirety.
+        canvas.save();
+        let result = paint_content(self);
+        let canvas = self.surface.canvas();
+        if result.is_err() {
+            canvas.restore_to_count(parent.saturating_add(1));
+            canvas.clear(skia_safe::Color::TRANSPARENT);
+        }
+        canvas.restore_to_count(parent);
+        result
+    }
 }
 
 /// Rasterizes mask coverage over one region of the destination's native pixels.

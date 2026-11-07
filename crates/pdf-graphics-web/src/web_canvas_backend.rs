@@ -10,6 +10,7 @@ use crate::{
     error::{WebCanvasBackendError as Error, WebResult},
     surface::{Surface, context},
     surface_pool::{SurfacePool, byte_size},
+    web_group::IsolatedGroup,
     web_image::ImageDraw,
     web_mask::IsolatedMask,
     web_paint, web_path,
@@ -151,6 +152,27 @@ impl WebCanvasBackend {
         Ok(backend)
     }
 
+    /// Draws on a backing-size temporary surface under this backend's mapping and clips.
+    ///
+    /// Content painted through the returned backend lines up pixel for pixel with this
+    /// backend, so the surface can be composited back without a transform. The caller
+    /// must keep the surface alive until the returned backend is dropped.
+    pub(crate) fn isolated_on(&self, surface: &Surface) -> WebResult<Self> {
+        let mut backend = Self::on_surface(
+            surface,
+            self.viewport.device_size(),
+            *self.viewport.device_to_backing(),
+            self.surfaces.clone(),
+        )?;
+        for clip in &self.state.clips {
+            backend
+                .context
+                .clip_with_path_2d_and_winding(&clip.path, clip.rule);
+        }
+        backend.state.clips.clone_from(&self.state.clips);
+        Ok(backend)
+    }
+
     /// Replays a recording and balances or aborts its browser scopes.
     pub(crate) fn replay_balanced(&mut self, recording: &RecordingCanvas) -> WebResult<()> {
         self.finish_page()?;
@@ -277,6 +299,18 @@ impl CanvasBackend for WebCanvasBackend {
             return paint(self);
         }
         IsolatedMask::new(self, mask)?.paint(paint)
+    }
+
+    fn with_group_layer<F>(
+        &mut self,
+        alpha: f32,
+        blend_mode: Option<BlendMode>,
+        paint: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        IsolatedGroup::new(self)?.paint(alpha, blend_mode.as_ref(), paint)
     }
 }
 
