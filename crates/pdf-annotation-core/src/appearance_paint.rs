@@ -1,5 +1,6 @@
 //! Source appearances a host paints in place of a native presentation: widgets and ink
-//! without strokes on the page canvas, stamp artwork into the stamp's own presentation.
+//! without strokes on the page canvas, stamp and note artwork into the annotation's own
+//! presentation.
 use crate::{
     engine::DocumentView,
     kind::AnnotationKind as Kind,
@@ -65,21 +66,25 @@ impl PaintedAppearance {
             .and_then(|rect| source.widget_appearance(state, pressed, rect)))
     }
 
-    /// The source artwork of a displayed stamp at its live bounds, or `None`.
+    /// The source artwork of a displayed stamp at its live bounds, or of a displayed
+    /// note at its source rectangle, or `None`.
     ///
-    /// The host draws it into the stamp's own presentation rather than the page
-    /// canvas, so the artwork moves with the stamp while it is dragged.
+    /// The host draws it into the annotation's own presentation rather than the page
+    /// canvas, so the artwork moves with the annotation while it is dragged.
     pub(crate) fn artwork(
         annotation: &Annotation,
         optional_content: &OptionalContentState,
     ) -> Option<Self> {
-        let Kind::Stamp(stamp) = &annotation.content else {
-            return None;
+        let source = annotation.source()?;
+        let rect = match &annotation.content {
+            Kind::Stamp(stamp) => stamp.bounds,
+            Kind::TextNote(_) => source.rect?,
+            _ => return None,
         };
         if !annotation.is_displayed(optional_content) {
             return None;
         }
-        annotation.source()?.normal_appearance(stamp.bounds)
+        source.normal_appearance(rect)
     }
 }
 
@@ -131,5 +136,70 @@ impl AppearanceStreams {
                     .map(|candidate| &candidate.stream)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        overlay::AnnotationOverlay,
+        pdf_data::{
+            AppearanceDictionary, AppearanceStreams, NativeAnnotation, SourceAnnotation,
+            TextAnnotation,
+        },
+    };
+    use pdf_graphics::{rect::Rect, size::Size, viewport::PageViewport};
+    use pdf_object_reader::{object_variant::ObjectVariant, pdf_object::PdfObject};
+
+    #[test]
+    fn text_note_with_normal_appearance_is_drawn_as_artwork() {
+        let rect = Rect {
+            left: 117.0,
+            top: 154.0,
+            right: 135.0,
+            bottom: 176.0,
+        };
+        let note = SourceAnnotation {
+            id: 1,
+            object_number: Some(6),
+            opacity: 1.0,
+            subtype: b"Text".as_slice().into(),
+            rect: Some(rect),
+            contents: Some(b"Note".as_slice().into()),
+            name: None,
+            flags: None,
+            appearance: Some(AppearanceDictionary {
+                normal: Some(AppearanceStreams::Stream(PdfObject::new(
+                    ObjectVariant::Null,
+                ))),
+                down: None,
+            }),
+            appearance_state: None,
+            border: None,
+            color: None,
+            struct_parent: None,
+            optional_content: None,
+            kind: NativeAnnotation::Text(Box::new(TextAnnotation {
+                open: None,
+                name: None,
+                state: None,
+                state_model: None,
+                intent: None,
+            })),
+        };
+        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&note)], None).unwrap();
+        let page = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 450.0,
+            bottom: 250.0,
+        };
+        let viewport = PageViewport::new(page, 0, Size::new(450.0, 250.0)).unwrap();
+        let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+        let entry = prepared.entries().first().unwrap();
+        assert!(entry.artwork);
+        assert_eq!(entry.unsupported, None);
+        let artwork = overlay.artwork(entry.id).unwrap();
+        assert_eq!(artwork.rect, rect.normalized());
     }
 }

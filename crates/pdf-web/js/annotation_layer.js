@@ -83,7 +83,7 @@ export class NativeAnnotationLayer {
     node.setAttribute('aria-label', entry.control?.label || entry.text || entry.subtype);
     const font = { fontSize: `${style.font_size}px`, fontFamily: style.font_family, textAlign: style.alignment };
     Object.assign(container.style, font);
-    // A canvas-painted widget or a stamp drawn from its artwork shows its PDF appearance
+    // A canvas-painted widget or a stamp or note drawn from its artwork shows its PDF appearance
     // through a transparent node.
     Object.assign(node.style, entry.control?.painted || entry.artwork
       ? { ...font, color: 'transparent', backgroundColor: 'transparent', border: 'none' }

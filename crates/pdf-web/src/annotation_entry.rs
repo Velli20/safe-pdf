@@ -10,7 +10,8 @@ use serde::Serialize;
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct WebCss {
     /// `matrix(a,b,c,d,e,f)` from annotation-local top-left units to container CSS pixels,
-    /// honoring the annotation's no-zoom and no-rotate flags.
+    /// honoring the annotation's no-rotate flag. No-zoom annotations scale with the page
+    /// like any other annotation.
     pub transform: String,
     /// Text or stroke color.
     pub color: String,
@@ -98,7 +99,7 @@ pub fn css_color(color: Option<Color>) -> String {
     )
 }
 
-/// Local-to-CSS matrix; no-zoom keeps unit scale and no-rotate drops rotation and skew.
+/// Local-to-CSS matrix; no-rotate drops rotation and skew.
 fn css_matrix(entry: &AnnotationEntry, device_to_css: &Transform) -> String {
     // device_to_css × transform, in CSS `matrix(a,b,c,d,e,f)` component order.
     let Transform {
@@ -109,17 +110,6 @@ fn css_matrix(entry: &AnnotationEntry, device_to_css: &Transform) -> String {
         tx: e,
         ty: f,
     } = device_to_css.post_concatenated(&entry.transform);
-    if entry.no_zoom {
-        let (x, y) = (a.hypot(b), c.hypot(dd));
-        if x > 0.0 {
-            a /= x;
-            b /= x;
-        }
-        if y > 0.0 {
-            c /= y;
-            dd /= y;
-        }
-    }
     if entry.no_rotate {
         let (x, y) = (a.hypot(b), c.hypot(dd));
         a = x;

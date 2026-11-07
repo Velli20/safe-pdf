@@ -174,8 +174,8 @@ impl AnnotationOverlay {
             .collect()
     }
 
-    /// Returns the source artwork of the displayed stamp `id` at its live bounds, for
-    /// drawing into the stamp's own presentation; `None` for other annotations.
+    /// Returns the source artwork of the displayed stamp or note `id`, for drawing into
+    /// the annotation's own presentation; `None` for other annotations.
     pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
         PaintedAppearance::artwork(self.annotation(id)?, &self.optional_content)
     }
