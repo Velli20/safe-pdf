@@ -146,8 +146,8 @@ impl From<&[u8]> for Filter {
             b"FlateDecode" | b"Fl" => Self::FlateDecode,
             b"JPXDecode" => Self::JPXDecode,
             b"CCITTFaxDecode" | b"CCF" => Self::CCITTFaxDecode,
-            b"ASCII85Decode" => Self::ASCII85Decode,
-            b"ASCIIHexDecode" => Self::ASCIIHexDecode,
+            b"ASCII85Decode" | b"A85" => Self::ASCII85Decode,
+            b"ASCIIHexDecode" | b"AHx" => Self::ASCIIHexDecode,
             b"LZWDecode" | b"LZW" => Self::LZWDecode,
             b"RunLengthDecode" | b"RL" => Self::RunLengthDecode,
             b"JBIG2Decode" => Self::JBIG2Decode,
@@ -312,6 +312,12 @@ mod tests {
     ) -> ReadResult<Bytes> {
         let DecodedStream(data) = ObjectReader::new(source).read(&ObjectVariant::Stream(stream))?;
         Ok(data)
+    }
+
+    #[test]
+    fn abbreviated_ascii_filter_names_map_to_their_filters() {
+        assert_eq!(Filter::from(b"AHx".as_slice()), Filter::ASCIIHexDecode);
+        assert_eq!(Filter::from(b"A85".as_slice()), Filter::ASCII85Decode);
     }
 
     #[test]
