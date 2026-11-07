@@ -8,9 +8,9 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct ExponentialFunction {
-    /// Output values at `domain.min`.
+    /// Output values at `x = 0`.
     c0: Vec<f32>,
-    /// Output values at `domain.max`.
+    /// Output values at `x = 1`.
     c1: Vec<f32>,
     /// Interpolation exponent.
     exponent: f32,
@@ -46,19 +46,16 @@ impl FunctionImpl for ExponentialFunction {
                 got: 0,
             })?;
 
-        // Normalize input to [0, 1]
-        let x_normalized = self
-            .domain
-            .normalize(x)
-            .ok_or(FunctionInterpolationError::InvalidDomainInterval)?;
+        // Clip the input to /Domain; the formula uses it unscaled (ISO 32000 §7.10.3).
+        let x = self.domain.clamp(x);
 
         // Guard against 0^(negative) which is undefined
-        if self.exponent < 0.0 && x_normalized == 0.0 {
+        if self.exponent < 0.0 && x == 0.0 {
             return Err(FunctionInterpolationError::UndefinedExponentiationAtZero);
         }
 
         // Apply interpolation formula: c0 + x^N * (c1 - c0)
-        let pow = x_normalized.powf(self.exponent);
+        let pow = x.powf(self.exponent);
         let mut result: Vec<f32> = self
             .c0
             .iter()
@@ -87,12 +84,12 @@ impl FromPdfObject for ExponentialFunction {
         let mut context = context.dictionary()?;
         let domain = context.required::<Interval>(b"Domain")?;
 
-        // /C0: Output values at domain.min. Defaults to [0.0].
+        // /C0: Output values at x = 0. Defaults to [0.0].
         let c0 = context
             .optional::<Vec<f32>>(b"C0")?
             .unwrap_or_else(|| vec![0.0]);
 
-        // /C1: Output values at domain.max. Defaults to [1.0].
+        // /C1: Output values at x = 1. Defaults to [1.0].
         let c1 = context
             .optional::<Vec<f32>>(b"C1")?
             .unwrap_or_else(|| vec![1.0]);
@@ -133,6 +130,14 @@ mod tests {
     fn test_linear_n1() {
         // N=1: result = c0 + x*(c1-c0)
         let f = make_exp(vec![0.0], vec![1.0], 1.0);
+        let out = f.interpolate(&[0.5]).unwrap();
+        assert!((out[0] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_input_is_not_scaled_by_domain() {
+        // A wide /Domain only clips the input: x=0.5 still yields c0 + 0.5*(c1-c0).
+        let f = ExponentialFunction::new(vec![0.0], vec![1.0], 1.0, Interval::new(0.0, 161.4));
         let out = f.interpolate(&[0.5]).unwrap();
         assert!((out[0] - 0.5).abs() < 1e-6);
     }
