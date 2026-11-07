@@ -72,6 +72,12 @@ impl PdfImage {
             )
     }
 
+    /// Returns whether the image is a stencil mask (`/ImageMask true`), whose samples
+    /// decode to coverage rather than color.
+    pub fn is_image_mask(&self) -> bool {
+        self.metadata.image_mask
+    }
+
     /// Returns shared ownership of the payload bytes: filtered for an inline image,
     /// still encoded for an image XObject.
     pub fn shared_data(&self) -> Bytes {

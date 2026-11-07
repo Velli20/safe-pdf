@@ -1,8 +1,9 @@
 use crate::{error::PdfPagesError, resource::Resource};
-use pdf_graphics::Image;
+use pdf_graphics::{Image, PixelFormat};
 use pdf_image::{PdfImage, PdfImageError};
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, pdf_name::PdfName,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
+    pdf_name::PdfName,
 };
 use std::sync::Arc;
 
@@ -14,23 +15,23 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct ImageXObject {
     image: PdfImage,
-    soft_mask: Option<Arc<ImageXObject>>,
+    mask: Option<ImageMask>,
 }
 
 impl ImageXObject {
-    /// Decodes the image and its soft mask into a raster.
+    /// Decodes the image and its mask into a raster.
     ///
     /// Returns `None` when the stream data cannot be decoded into samples, so the image
-    /// cannot be drawn. A soft mask whose data cannot be decoded leaves the image
-    /// unmasked.
+    /// cannot be drawn. A soft mask or stencil mask whose data cannot be decoded leaves
+    /// the image unmasked.
     ///
     /// # Errors
     ///
     /// Returns [`PdfImageError`] when the image or its soft mask fails for any other
     /// reason.
     pub fn decode(&self) -> Result<Option<Image>, PdfImageError> {
-        let soft_mask = match &self.soft_mask {
-            Some(soft_mask) => soft_mask.decode()?,
+        let soft_mask = match &self.mask {
+            Some(mask) => mask.decode()?,
             None => None,
         };
         match self.image.decode(soft_mask.as_ref()) {
@@ -57,8 +58,15 @@ impl FromPdfObject for ImageResource {
             Err(error) if PdfImage::is_unreadable(&error) => return Ok(Self::Unavailable),
             Err(error) => return Err(error),
         };
-        let SoftMaskImage(soft_mask) = context.read(object)?;
-        Ok(Self::Available(Arc::new(ImageXObject { image, soft_mask })))
+        let mask = match context.read(object)? {
+            SoftMaskImage(Some(soft_mask)) => Some(ImageMask::Soft(soft_mask)),
+            SoftMaskImage(None) => context
+                .dictionary()?
+                .optional::<StencilMaskImage>(b"Mask")?
+                .and_then(|StencilMaskImage(stencil)| stencil)
+                .map(ImageMask::Stencil),
+        };
+        Ok(Self::Available(Arc::new(ImageXObject { image, mask })))
     }
 }
 
@@ -67,6 +75,57 @@ impl From<ImageResource> for Resource {
         match image {
             ImageResource::Available(image) => Self::Image(image),
             ImageResource::Unavailable => Self::UnavailableImage,
+        }
+    }
+}
+
+/// What masks an image: its `/SMask` or, without one, its `/Mask` stencil.
+#[derive(Debug)]
+enum ImageMask {
+    Soft(Arc<ImageXObject>),
+    Stencil(Arc<ImageXObject>),
+}
+
+impl ImageMask {
+    /// Decodes the mask into a raster whose coverage is the image's opacity.
+    fn decode(&self) -> Result<Option<Image>, PdfImageError> {
+        match self {
+            Self::Soft(mask) => mask.decode(),
+            // A stencil decodes to coverage in alpha, 255 where the image is painted.
+            // As gray, that coverage reads as soft-mask opacity.
+            Self::Stencil(mask) => Ok(mask.decode()?.map(|mask| match mask.pixel_format {
+                PixelFormat::Alpha8 => Image {
+                    pixel_format: PixelFormat::Gray8,
+                    ..mask
+                },
+                _ => mask,
+            })),
+        }
+    }
+}
+
+/// An image's `/Mask` stencil: an `/ImageMask` image whose painted samples mark where
+/// the image shows.
+///
+/// A color-key array, a stream that is not a stencil mask, an unavailable mask, or a
+/// mask that refers back to its own image leaves the image unmasked.
+struct StencilMaskImage(Option<Arc<ImageXObject>>);
+
+impl FromPdfObject for StencilMaskImage {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let value = context.object();
+        if !matches!(value, ObjectVariant::Stream(_)) {
+            return Ok(Self(None));
+        }
+        match context.read::<ImageResource>(value) {
+            Ok(ImageResource::Available(mask)) if mask.image.is_image_mask() => {
+                Ok(Self(Some(mask)))
+            }
+            Ok(_) => Ok(Self(None)),
+            Err(error) if error.is_cyclic_reference() => Ok(Self(None)),
+            Err(error) => Err(error),
         }
     }
 }
@@ -94,5 +153,79 @@ impl FromPdfObject for SoftMaskImage {
             Ok(_) => Err(PdfPagesError::from(PdfImageError::InvalidSoftMaskXObject).into()),
             Err(error) => Err(error),
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_graphics::PixelFormat;
+    use pdf_object_reader::{
+        EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, pdf_string::PdfString,
+        stream::StreamObject, string_kind::StringKind,
+    };
+
+    use super::ImageResource;
+
+    fn name(value: &[u8]) -> ObjectVariant {
+        PdfString::from(value, StringKind::Name)
+    }
+
+    fn image_stream(entries: Vec<(&[u8], ObjectVariant)>, data: Vec<u8>) -> ObjectVariant {
+        let mut dictionary = BTreeMap::from([
+            (Vec::from(b"Subtype"), name(b"Image")),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+        ]);
+        dictionary.extend(
+            entries
+                .into_iter()
+                .map(|(key, value)| (Vec::from(key), value)),
+        );
+        ObjectVariant::Stream(StreamObject::new(
+            1,
+            0,
+            Dictionary::from_iter(dictionary),
+            data,
+        ))
+    }
+
+    #[test]
+    fn stencil_mask_hides_the_image_where_its_samples_are_one() {
+        let stencil = image_stream(
+            vec![(b"ImageMask", ObjectVariant::Boolean(true))],
+            vec![0b0100_0000],
+        );
+        let image = image_stream(
+            vec![
+                (b"ColorSpace", name(b"DeviceGray")),
+                (b"BitsPerComponent", ObjectVariant::Integer(8)),
+                (b"Mask", stencil),
+            ],
+            vec![0x10, 0x20],
+        );
+
+        let resource = pdf_object_reader::ObjectReader::new(EmptySource)
+            .read::<ImageResource>(&image)
+            .expect("masked image should read");
+        let ImageResource::Available(image) = resource else {
+            unreachable!("masked image should be available");
+        };
+        let raster = image
+            .decode()
+            .expect("masked image should decode")
+            .expect("masked image should have samples");
+
+        assert_eq!(raster.pixel_format, PixelFormat::RGBA8888);
+        let alphas: Vec<u8> = raster
+            .data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|[_, _, _, alpha]| *alpha)
+            .collect();
+        assert_eq!(alphas, [255, 0]);
     }
 }

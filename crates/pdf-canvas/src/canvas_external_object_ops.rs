@@ -7,11 +7,24 @@
 //! Images are placed by handing the backend the full image-space to device-space
 //! matrix, so rotation, shear and mirroring in the CTM are all preserved.
 
-use pdf_graphics::{BlendMode, Image, PixelFormat, size::Size, transform::Transform};
+use std::sync::Arc;
+
+use pdf_graphics::{
+    BlendMode, Image, MaskMode, PathFillType, PixelFormat, pdf_path::PdfPath, rect::Rect,
+    size::Size, transform::Transform,
+};
 use pdf_image::{PdfImage, raster::stencil_image};
 use pdf_resources::{form::FormXObject, resource::Resource};
 
-use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
+use crate::{
+    CanvasPath,
+    canvas_backend::{CanvasBackend, Shader},
+    error::PdfCanvasError,
+    mask_layer::MaskLayer,
+    pdf_canvas::PdfCanvas,
+    recording_canvas::RecordingCanvas,
+    shading::with_clip,
+};
 
 /// Maps image space onto the PDF unit square.
 ///
@@ -149,21 +162,22 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 
     /// Computes image placement before entering the backend-only mask callback.
     ///
-    /// An image mask's coverage is painted in the current non-stroking color.
+    /// An image mask's coverage is painted in the current non-stroking color, which may
+    /// be a pattern.
     fn render_decoded_image(
         &mut self,
         image: &Image,
         inline_image: bool,
     ) -> Result<(), PdfCanvasError> {
         if image.pixel_format == PixelFormat::Alpha8 {
+            if let Some(shader) = self.compute_shader(false)? {
+                return self.paint_image_mask_with_pattern(image, inline_image, &shader);
+            }
             let [r, g, b, _] = self.current_state()?.paint.fill_color.to_rgba8();
             let stencil = stencil_image(image, [r, g, b])?;
             return self.render_decoded_image(&stencil, inline_image);
         }
-        let transform = self
-            .current_state()?
-            .transform
-            .post_concatenated(&IMAGE_SPACE_Y_FLIP);
+        let transform = self.image_transform()?;
         let paint = &self.current_state()?.paint;
         let blend_mode = paint.blend_mode.clone();
         // Images paint with the non-stroking alpha constant (`ca`).
@@ -175,5 +189,65 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 backend.draw_image(image, blend_mode, alpha, transform)
             }
         })
+    }
+
+    /// Returns the matrix that places the current image's samples in device space.
+    fn image_transform(&self) -> Result<Transform, PdfCanvasError> {
+        Ok(self
+            .current_state()?
+            .transform
+            .post_concatenated(&IMAGE_SPACE_Y_FLIP))
+    }
+
+    /// Paints the fill pattern's `shader` where the image mask's coverage paints.
+    ///
+    /// The image's unit square is filled with the pattern, as a path fill would be, inside
+    /// a mask layer whose alpha is the stencil.
+    fn paint_image_mask_with_pattern(
+        &mut self,
+        image: &Image,
+        inline_image: bool,
+        shader: &Shader,
+    ) -> Result<(), PdfCanvasError> {
+        let clip = self.pattern_bbox_clip(false)?;
+        let stencil = self.image_mask_layer(image, inline_image)?;
+        let state = self.current_state()?;
+        let area = CanvasPath::transformed(&PdfPath::from(&Rect::new(1.0, 1.0)), state.transform)?
+            .into_owned();
+        let (color, blend_mode) = (state.paint.fill_color, state.paint.blend_mode.clone());
+        self.with_soft_mask(|backend| {
+            backend.with_mask_layer(&stencil, |backend| {
+                with_clip(backend, clip.as_ref(), |backend| {
+                    backend.fill_path(
+                        &area,
+                        PathFillType::Winding,
+                        color,
+                        Some(shader),
+                        blend_mode,
+                    )
+                })
+            })
+        })
+    }
+
+    /// Records the image mask at its device placement as an alpha mask layer.
+    fn image_mask_layer(
+        &self,
+        image: &Image,
+        inline_image: bool,
+    ) -> Result<MaskLayer, PdfCanvasError> {
+        let coverage = stencil_image(image, [0, 0, 0])?;
+        let transform = self.image_transform()?;
+        let mut recording = RecordingCanvas::new(self.canvas.width(), self.canvas.height());
+        match inline_image {
+            true => recording.draw_inline_image(&coverage, None, 1.0, transform)?,
+            false => recording.draw_image(&coverage, None, 1.0, transform)?,
+        }
+        Ok(MaskLayer::new(
+            Arc::new(recording),
+            Transform::identity(),
+            MaskMode::Alpha,
+            None,
+        )?)
     }
 }

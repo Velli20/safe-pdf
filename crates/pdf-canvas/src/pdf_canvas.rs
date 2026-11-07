@@ -395,7 +395,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     }
 
     /// Returns the device-space clip of the active shading pattern's `/BBox`, if any.
-    fn pattern_bbox_clip(&self, for_stroke: bool) -> Result<Option<PdfPath>, PdfCanvasError> {
+    pub(crate) fn pattern_bbox_clip(
+        &self,
+        for_stroke: bool,
+    ) -> Result<Option<PdfPath>, PdfCanvasError> {
         let state = self.current_state()?;
         let pattern = if for_stroke {
             &state.stroke_pattern
@@ -415,7 +418,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Returns
     ///
     /// An optional `Shader` or an error if pattern rendering fails.
-    fn compute_shader(&mut self, for_stroke: bool) -> Result<Option<Shader>, PdfCanvasError> {
+    pub(crate) fn compute_shader(
+        &mut self,
+        for_stroke: bool,
+    ) -> Result<Option<Shader>, PdfCanvasError> {
         let state: &CanvasState = self.current_state()?;
         let pattern = if for_stroke {
             state.stroke_pattern.clone()
