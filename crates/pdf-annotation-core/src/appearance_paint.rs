@@ -1,6 +1,6 @@
 //! Source appearances a host paints in place of a native presentation: widgets and ink
-//! without strokes on the page canvas, stamp and note artwork into the annotation's own
-//! presentation.
+//! without strokes on the page canvas, stamp, note and free-text artwork into the
+//! annotation's own presentation.
 use crate::{
     engine::DocumentView,
     kind::AnnotationKind as Kind,
@@ -67,11 +67,13 @@ impl PaintedAppearance {
             .and_then(|rect| source.widget_appearance(state, pressed, rect)))
     }
 
-    /// The source artwork of a displayed stamp at its live bounds, or of a displayed
-    /// note at its source rectangle, or `None`.
+    /// The source artwork of a displayed stamp at its live bounds, of a displayed note
+    /// at its source rectangle, or of displayed free text at its live bounds while its
+    /// text is still the source `/Contents`; otherwise `None`.
     ///
     /// The host draws it into the annotation's own presentation rather than the page
-    /// canvas, so the artwork moves with the annotation while it is dragged.
+    /// canvas, so the artwork moves with the annotation while it is dragged. Edited
+    /// free text no longer matches its source appearance, so the host shows its text.
     pub(crate) fn artwork(
         annotation: &Annotation,
         optional_content: &OptionalContentState,
@@ -80,6 +82,9 @@ impl PaintedAppearance {
         let rect = match &annotation.content {
             Kind::Stamp(stamp) => stamp.bounds,
             Kind::TextNote(_) => source.rect?,
+            Kind::FreeText(free_text) if source.contents().ok()? == free_text.text => {
+                free_text.bounds
+            }
             _ => return None,
         };
         if !annotation.is_displayed(optional_content) {
@@ -239,5 +244,51 @@ mod tests {
         assert_eq!(entry.unsupported, None);
         let artwork = overlay.artwork(entry.id).unwrap();
         assert_eq!(artwork.rect, rect.normalized());
+    }
+
+    #[test]
+    fn rich_free_text_with_normal_appearance_is_drawn_as_artwork() {
+        let string = |bytes: &[u8], kind| PdfString::from(bytes, kind);
+        let appearance = StreamObject::new(2, 0, Dictionary::from_entries([]), b"0 g".to_vec());
+        let free_text = ObjectVariant::Dictionary(Dictionary::from_entries([
+            (b"Subtype".as_slice(), string(b"FreeText", StringKind::Name)),
+            (
+                b"Rect".as_slice(),
+                ObjectVariant::Array(PdfArray::new(
+                    [180, 612, 479, 626].map(ObjectVariant::Integer),
+                )),
+            ),
+            (b"Contents".as_slice(), string(b"PDF", StringKind::Literal)),
+            (
+                b"DA".as_slice(),
+                string(b"/Helv 12 Tf", StringKind::Literal),
+            ),
+            (
+                b"RC".as_slice(),
+                string(b"<body><p>PDF</p></body>", StringKind::Literal),
+            ),
+            (
+                b"AP".as_slice(),
+                ObjectVariant::Dictionary(Dictionary::from_entries([(
+                    b"N".as_slice(),
+                    ObjectVariant::Stream(appearance),
+                )])),
+            ),
+        ]));
+        let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&free_text).unwrap();
+        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
+        let page = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 595.0,
+            bottom: 842.0,
+        };
+        let viewport = PageViewport::new(page, 0, Size::new(595.0, 842.0)).unwrap();
+        let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+        let entry = prepared.entries().first().unwrap();
+        assert!(entry.artwork);
+        assert_eq!(entry.unsupported, None);
+        let artwork = overlay.artwork(entry.id).unwrap();
+        assert_eq!(Some(artwork.rect), source.rect);
     }
 }
