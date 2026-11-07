@@ -90,7 +90,10 @@ impl FontFace for OpenTypeType0FontFace {
         _pixels_per_em: f32,
     ) -> Result<Option<GlyphGeometry>, FontError> {
         let program = self.program.borrow_dependent();
-        let cff_glyph = cff_glyph_id(&program.glyphs, self.id(), glyph)?;
+        // A CID outside the charset has no charstring, so it draws nothing.
+        let Ok(cff_glyph) = cff_glyph_id(&program.glyphs, self.id(), glyph) else {
+            return Ok(None);
+        };
         let Some(outline) = program.font.outline_glyphs().get(cff_glyph) else {
             return Ok(None);
         };
