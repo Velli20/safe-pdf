@@ -6,7 +6,7 @@ use crate::{
     layer_error::AnnotationLayerResult,
     models::Annotation,
     pdf_data::{AppearanceStreams, SourceAnnotation},
-    widget_control::ButtonState,
+    widget_control::PaintedState,
 };
 use pdf_graphics::rect::Rect;
 use pdf_object_reader::pdf_object::PdfObject;
@@ -29,8 +29,9 @@ impl PaintedAppearance {
     ///
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
-    /// buttons their source `/AS`. A `pressed` widget draws its down appearance when it has
-    /// one for that state. Ink without strokes draws its source `/AS` state.
+    /// buttons and read-only text fields their source `/AS`. A `pressed` widget draws its
+    /// down appearance when it has one for that state. Ink without strokes draws its source
+    /// `/AS` state.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
@@ -54,10 +55,10 @@ impl PaintedAppearance {
         let Some(source) = annotation.source() else {
             return Ok(None);
         };
-        let state = match annotation.button_state(field) {
-            Some(ButtonState::Source) => source.appearance_state.as_deref(),
-            Some(ButtonState::Checked(true)) => source.button_on_state().ok(),
-            Some(ButtonState::Checked(false)) => Some(OFF_STATE),
+        let state = match annotation.painted_state(field) {
+            Some(PaintedState::Source) => source.appearance_state.as_deref(),
+            Some(PaintedState::Checked(true)) => source.button_on_state().ok(),
+            Some(PaintedState::Checked(false)) => Some(OFF_STATE),
             None => return Ok(None),
         };
         Ok(source
@@ -129,6 +130,49 @@ impl AppearanceStreams {
                     .iter()
                     .find(|candidate| *candidate.name == *state)
                     .map(|candidate| &candidate.stream)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{AnnotationOverlay, SourceAnnotation};
+    use pdf_object_reader::{
+        Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
+        pdf_array::PdfArray, pdf_string::PdfString, string_kind::StringKind,
+    };
+
+    #[test]
+    fn read_only_text_widget_paints_its_normal_appearance() {
+        let name = |bytes: &[u8]| PdfString::from(bytes, StringKind::Name);
+        let rect = PdfArray::new([4, 0, 40, 842].map(ObjectVariant::Integer));
+        let appearance = StreamObject::new(2, 0, Dictionary::from_entries([]), b"0 g".to_vec());
+        // Read-only multiline (`/Ff 4097`) is painted; editable multiline (`/Ff 4096`) is not.
+        for (flags, painted) in [(4097, true), (4096, false)] {
+            let widget = ObjectVariant::Dictionary(Dictionary::from_entries([
+                (b"Subtype".as_slice(), name(b"Widget")),
+                (b"FT".as_slice(), name(b"Tx")),
+                (b"Ff".as_slice(), ObjectVariant::Integer(flags)),
+                (b"Rect".as_slice(), ObjectVariant::Array(rect.clone())),
+                (
+                    b"AP".as_slice(),
+                    ObjectVariant::Dictionary(Dictionary::from_entries([(
+                        b"N".as_slice(),
+                        ObjectVariant::Stream(appearance.clone()),
+                    )])),
+                ),
+            ]));
+            let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
+            let overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
+            let appearances = overlay.painted_appearances(0, None).unwrap();
+            assert_eq!(appearances.len(), usize::from(painted), "/Ff {flags}");
+            if let Some(painted) = appearances.first() {
+                assert_eq!(Some(painted.rect), source.rect);
+                assert_eq!(
+                    painted.stream.value(),
+                    &ObjectVariant::Stream(appearance.clone())
+                );
             }
         }
     }
