@@ -91,12 +91,16 @@ impl PdfParser<'_> {
 
         // Parse the entire lexeme with the standard library. This handles the sign and
         // overflow checks for integers and provides correctly rounded decimal-to-f64
-        // conversion for reals. Both conversion failures use one public numeric error.
+        // conversion for reals. A real too long for `f64` parses as infinity and is
+        // rejected, so every decoded number is finite. Both conversion failures use one
+        // public numeric error.
         let number = if is_real {
             number_str
                 .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite())
                 .map(ObjectVariant::Real)
-                .map_err(|_| ParserError::InvalidNumber(number_str.into_owned()))?
+                .ok_or_else(|| ParserError::InvalidNumber(number_str.into_owned()))?
         } else {
             number_str
                 .parse::<i64>()

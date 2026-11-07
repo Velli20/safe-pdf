@@ -4,20 +4,18 @@ use std::collections::HashSet;
 use crate::error::{CoreError, ValidationError};
 use crate::kind::AnnotationKind;
 use crate::models::{DocumentData, PageIndex};
+use crate::validate::Validate;
 
 impl DocumentData {
-    /// Validate a complete document: finite numbers, allocation counters, unique
-    /// identities, field definitions, page indices, payloads, popup parents, and
+    /// Validate a complete document: allocation counters, unique identities, field definitions, page indices, payloads, popup parents, and
     /// widget bindings.
     pub(crate) fn validate<E: std::error::Error + 'static>(&self) -> Result<(), CoreError<E>> {
-        crate::finite_values::check(self)?;
         self.validate_fields()?;
         self.validate_annotations()
     }
 
     /// Validate `content` placed on `page` against the page count, its own
-    /// payload rules, and the popup parent or field it references. The caller has
-    /// already checked its numbers with [`crate::finite_values::check`].
+    /// payload rules, and the popup parent or field it references.
     pub(crate) fn validate_content<E: std::error::Error + 'static>(
         &self,
         page: PageIndex,
@@ -42,7 +40,7 @@ impl DocumentData {
         if let AnnotationKind::Widget(widget) = content {
             let id = widget.binding.field();
             let field = self.field(id).ok_or(CoreError::MissingField(id))?;
-            widget.binding.validate(field)?;
+            widget.binding.check_target(field)?;
         }
         Ok(())
     }

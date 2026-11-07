@@ -5,49 +5,106 @@ use std::collections::HashSet;
 
 use crate::error::{FieldValidationError, ValidationError};
 use crate::fields::{
-    ChoiceOption, ComboBoxField, ComboValue, Field, FieldKind, ListBoxField, ListSelection,
-    NewField, OptionId, TextField, TextMode,
+    CheckboxGroupField, ChoiceOption, ComboBoxField, ComboValue, Field, FieldKind, ListBoxField,
+    ListSelection, NewField, OptionId, RadioField, TextField, TextMode,
 };
+use crate::validate::Validate;
 use crate::widgets::WidgetBinding;
 
-impl NewField {
-    /// Validate the fixed configuration with its initial value; finiteness is checked
-    /// separately by [`crate::finite_values::check`].
-    pub(crate) fn validate(&self) -> Result<(), FieldValidationError> {
+/// A field kind whose value is checked against its fixed configuration.
+pub(crate) trait FieldValue {
+    /// Value a command may set.
+    type Value: ?Sized;
+    /// Fewest options the configuration allows.
+    const MIN_OPTIONS: usize = 0;
+
+    /// Options the value chooses from; free-text fields have none.
+    fn options(&self) -> &[ChoiceOption] {
+        &[]
+    }
+
+    /// Current value.
+    fn value(&self) -> &Self::Value;
+
+    /// Check `value` against the configuration, which is already valid.
+    fn validate_value(&self, value: &Self::Value) -> Result<(), FieldValidationError>;
+
+    /// Position of option `id`.
+    fn option_position(&self, id: OptionId) -> Result<usize, FieldValidationError> {
+        self.options()
+            .iter()
+            .position(|option| option.id == id)
+            .ok_or(FieldValidationError::UnknownOption(id))
+    }
+
+    /// An absent selection is valid; a present one must name an option.
+    fn validate_selected(&self, selected: Option<OptionId>) -> Result<(), FieldValidationError> {
+        if let Some(id) = selected {
+            self.option_position(id)?;
+        }
+        Ok(())
+    }
+}
+
+/// Enough unique options, and a current value the configuration accepts.
+impl<T: FieldValue> Validate for T {
+    type Error = FieldValidationError;
+
+    fn validate(&self) -> Result<(), FieldValidationError> {
+        if self.options().len() < T::MIN_OPTIONS {
+            return Err(FieldValidationError::EmptyOptions);
+        }
+        self.options().validate()?;
+        self.validate_value(self.value())
+    }
+}
+
+/// The fixed configuration with its initial value.
+impl Validate for NewField {
+    type Error = FieldValidationError;
+
+    fn validate(&self) -> Result<(), FieldValidationError> {
         self.content.validate()
     }
 }
 
-impl FieldKind {
-    /// Options must be unique, checkbox groups and radios need at least one, and the
-    /// current value must satisfy the configuration.
-    pub(crate) fn validate(&self) -> Result<(), FieldValidationError> {
+impl Validate for FieldKind {
+    type Error = FieldValidationError;
+
+    fn validate(&self) -> Result<(), FieldValidationError> {
         match self {
-            Self::Text(text) => text.validate_value(&text.value),
+            Self::Text(v) => v.validate(),
+            Self::CheckboxGroup(v) => v.validate(),
+            Self::Radio(v) => v.validate(),
+            Self::ListBox(v) => v.validate(),
+            Self::ComboBox(v) => v.validate(),
             Self::Checkbox(_) | Self::Button(_) | Self::Unsupported(_) => Ok(()),
-            Self::CheckboxGroup(group) => {
-                check_options(&group.options, true)?;
-                check_selected(&group.options, group.selected)
-            }
-            Self::Radio(radio) => {
-                check_options(&radio.options, true)?;
-                check_selected(&radio.options, radio.selected)
-            }
-            Self::ListBox(list) => {
-                check_options(&list.options, false)?;
-                list.validate_selection(&list.selection)
-            }
-            Self::ComboBox(combo) => {
-                check_options(&combo.options, false)?;
-                combo.validate_value(&combo.value)
-            }
         }
     }
 }
 
-impl TextField {
-    /// Text must fit the maximum length, and only multiline fields accept line breaks.
-    pub(crate) fn validate_value(&self, value: &str) -> Result<(), FieldValidationError> {
+/// Option identities must be unique within one field.
+impl Validate for [ChoiceOption] {
+    type Error = FieldValidationError;
+
+    fn validate(&self) -> Result<(), FieldValidationError> {
+        let mut seen = HashSet::with_capacity(self.len());
+        match self.iter().find(|option| !seen.insert(option.id.0)) {
+            Some(option) => Err(FieldValidationError::DuplicateOption(option.id)),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Text must fit the maximum length, and only multiline fields accept line breaks.
+impl FieldValue for TextField {
+    type Value = str;
+
+    fn value(&self) -> &str {
+        &self.value
+    }
+
+    fn validate_value(&self, value: &str) -> Result<(), FieldValidationError> {
         if let Some(max) = self.max_length
             && u64::try_from(value.chars().count()).unwrap_or(u64::MAX) > u64::from(max)
         {
@@ -60,26 +117,68 @@ impl TextField {
     }
 }
 
-impl ListBoxField {
-    /// The selection keeps the field's cardinality; multiple selections name distinct
-    /// options in option-list order. Input is rejected rather than normalized.
-    pub(crate) fn validate_selection(
-        &self,
-        selection: &ListSelection,
-    ) -> Result<(), FieldValidationError> {
-        if std::mem::discriminant(&self.selection) != std::mem::discriminant(selection) {
+impl FieldValue for CheckboxGroupField {
+    type Value = Option<OptionId>;
+    const MIN_OPTIONS: usize = 1;
+
+    fn options(&self) -> &[ChoiceOption] {
+        &self.options
+    }
+
+    fn value(&self) -> &Option<OptionId> {
+        &self.selected
+    }
+
+    fn validate_value(&self, value: &Option<OptionId>) -> Result<(), FieldValidationError> {
+        self.validate_selected(*value)
+    }
+}
+
+impl FieldValue for RadioField {
+    type Value = Option<OptionId>;
+    const MIN_OPTIONS: usize = 1;
+
+    fn options(&self) -> &[ChoiceOption] {
+        &self.options
+    }
+
+    fn value(&self) -> &Option<OptionId> {
+        &self.selected
+    }
+
+    fn validate_value(&self, value: &Option<OptionId>) -> Result<(), FieldValidationError> {
+        self.validate_selected(*value)
+    }
+}
+
+/// The selection keeps the field's cardinality; multiple selections name distinct
+/// options in option-list order. Input is rejected rather than normalized.
+impl FieldValue for ListBoxField {
+    type Value = ListSelection;
+
+    fn options(&self) -> &[ChoiceOption] {
+        &self.options
+    }
+
+    fn value(&self) -> &ListSelection {
+        &self.selection
+    }
+
+    fn validate_value(&self, value: &ListSelection) -> Result<(), FieldValidationError> {
+        if std::mem::discriminant(&self.selection) != std::mem::discriminant(value) {
             return Err(FieldValidationError::SelectionModeMismatch);
         }
-        match selection {
-            ListSelection::Single(selected) => check_selected(&self.options, *selected),
+        match value {
+            ListSelection::Single(selected) => self.validate_selected(*selected),
             ListSelection::Multiple(selected) => {
+                // `None` orders before every index, so the first option always passes.
                 let mut previous = None;
                 for id in selected {
-                    let index = option_position(&self.options, *id)?;
-                    if previous.is_some_and(|previous| previous >= index) {
+                    let index = Some(self.option_position(*id)?);
+                    if index <= previous {
                         return Err(FieldValidationError::InvalidListSelection);
                     }
-                    previous = Some(index);
+                    previous = index;
                 }
                 Ok(())
             }
@@ -87,11 +186,21 @@ impl ListBoxField {
     }
 }
 
-impl ComboBoxField {
-    /// Options must exist; custom text requires an editable combo and one line.
-    pub(crate) fn validate_value(&self, value: &ComboValue) -> Result<(), FieldValidationError> {
+/// Options must exist; custom text requires an editable combo and one line.
+impl FieldValue for ComboBoxField {
+    type Value = ComboValue;
+
+    fn options(&self) -> &[ChoiceOption] {
+        &self.options
+    }
+
+    fn value(&self) -> &ComboValue {
+        &self.value
+    }
+
+    fn validate_value(&self, value: &ComboValue) -> Result<(), FieldValidationError> {
         match value {
-            ComboValue::Option(id) => check_selected(&self.options, Some(*id)),
+            ComboValue::Option(id) => self.validate_selected(Some(*id)),
             ComboValue::Text(_) if !self.editable => {
                 Err(FieldValidationError::CustomTextNotAllowed)
             }
@@ -106,14 +215,13 @@ impl ComboBoxField {
 impl WidgetBinding {
     /// Option bindings must name an option of a matching checkbox group or radio field;
     /// plain bindings must target any other field kind.
-    pub(crate) fn validate(self, field: &Field) -> Result<(), ValidationError> {
-        let has = |options: &[ChoiceOption], id: OptionId| options.iter().any(|o| o.id == id);
+    pub(crate) fn check_target(self, field: &Field) -> Result<(), ValidationError> {
         let valid = match (self, &field.definition.content) {
             (Self::CheckboxOption { option, .. }, FieldKind::CheckboxGroup(group)) => {
-                has(&group.options, option)
+                group.option_position(option).is_ok()
             }
             (Self::RadioOption { option, .. }, FieldKind::Radio(radio)) => {
-                has(&radio.options, option)
+                radio.option_position(option).is_ok()
             }
             (Self::Field { .. }, FieldKind::Radio(_) | FieldKind::CheckboxGroup(_))
             | (Self::RadioOption { .. } | Self::CheckboxOption { .. }, _) => false,
@@ -125,32 +233,4 @@ impl WidgetBinding {
             Err(ValidationError::InvalidWidgetBinding(field.id))
         }
     }
-}
-
-/// An absent selection is valid; a present one must name an option.
-pub(crate) fn check_selected(
-    options: &[ChoiceOption],
-    selected: Option<OptionId>,
-) -> Result<(), FieldValidationError> {
-    selected.map_or(Ok(()), |id| option_position(options, id).map(drop))
-}
-
-/// Option identities must be unique, and nonempty when `required`.
-fn check_options(options: &[ChoiceOption], required: bool) -> Result<(), FieldValidationError> {
-    if required && options.is_empty() {
-        return Err(FieldValidationError::EmptyOptions);
-    }
-    let mut seen = HashSet::new();
-    match options.iter().find(|option| !seen.insert(option.id.0)) {
-        Some(option) => Err(FieldValidationError::DuplicateOption(option.id)),
-        None => Ok(()),
-    }
-}
-
-/// Position of option `id` in `options`.
-fn option_position(options: &[ChoiceOption], id: OptionId) -> Result<usize, FieldValidationError> {
-    options
-        .iter()
-        .position(|option| option.id == id)
-        .ok_or(FieldValidationError::UnknownOption(id))
 }

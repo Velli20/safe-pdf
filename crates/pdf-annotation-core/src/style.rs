@@ -2,6 +2,7 @@
 use crate::error::SourceAdoptionError;
 use crate::fields::TextMode;
 use crate::pdf_data::{NativeAnnotation, SourceAnnotation, WidgetAnnotation};
+use crate::validate::Validate;
 use num_traits::ToPrimitive;
 use pdf_graphics::{color::Color, rect::Rect};
 use serde::{Deserialize, Serialize};

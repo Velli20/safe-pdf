@@ -76,9 +76,6 @@ pub enum ValidationError {
     /// A number is NaN or infinite, which JSON cannot preserve.
     #[error("annotation numbers must be finite")]
     NonFinite,
-    /// Containers nest deeper than the supported limit.
-    #[error("annotation data nests too deeply")]
-    TooDeep,
     /// Bounds require finite edges and positive extents.
     #[error("annotation bounds must be finite and positive")]
     InvalidBounds,
