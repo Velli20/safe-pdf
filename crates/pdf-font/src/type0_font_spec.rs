@@ -37,7 +37,7 @@ pub struct CidFontSpec {
     pub system_info: CidSystemInfo,
     /// Horizontal and vertical CID metrics.
     pub metrics: PdfMetrics,
-    /// CID-to-glyph identifier mapping, used by CIDFontType2 only.
+    /// CID-to-glyph identifier mapping applied before the descendant's own CID lookup.
     pub cid_to_gid: CidToGidMap,
     /// Best-effort CID-to-Unicode mapping for font substitution.
     pub cid_to_unicode: Option<CidToUnicode>,
@@ -56,7 +56,7 @@ pub struct Type0FontSpec {
     pub to_unicode: Option<Arc<ToUnicodeMap>>,
 }
 
-/// `/CIDToGIDMap` of a CID descendant; CIDFontType0 descendants ignore it.
+/// `/CIDToGIDMap` of a CID descendant of either subtype.
 #[derive(Clone, Default)]
 pub enum CidToGidMap {
     /// `/Identity` or any non-stream value: CIDs are used as glyph identifiers.
