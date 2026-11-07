@@ -61,12 +61,11 @@ impl PdfRenderer {
         Ok(())
     }
 
-    /// Reads the form drawn for `appearance`: its stream, or its state's stream.
+    /// Reads the form XObject of `appearance`'s stream.
     fn appearance_form(&self, appearance: &PaintedAppearance) -> Option<FormXObject> {
-        let stream = appearance.normal.stream(appearance.state.as_deref())?;
         self.document
             .objects()
-            .read::<FormXObject>(stream.value())
+            .read::<FormXObject>(appearance.stream.value())
             .ok()
     }
 }
