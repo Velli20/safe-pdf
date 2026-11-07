@@ -8,8 +8,6 @@ use crate::function::FunctionType;
 pub enum FunctionInterpolationError {
     #[error("interpolation is not implemented for {0:?} functions")]
     UnsupportedFunctionType(FunctionType),
-    #[error("/Domain must define a strictly increasing interval [min, max]")]
-    InvalidDomainInterval,
     #[error("PostScript calculator error: {0}")]
     PostScriptCalculatorError(#[from] CalcError),
     #[error("/Encode must contain exactly two values for each stitched sub-function")]

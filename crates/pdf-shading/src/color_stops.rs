@@ -198,7 +198,7 @@ mod tests {
     fn explicit_domain_includes_both_endpoints() {
         let function = Function::Exponential(ExponentialFunction::new(
             vec![0.0; 3],
-            vec![1.0; 3],
+            vec![0.1; 3],
             1.0,
             Interval::new(0.0, 10.0),
         ));
