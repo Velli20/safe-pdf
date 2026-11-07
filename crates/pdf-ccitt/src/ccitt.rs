@@ -490,6 +490,10 @@ impl<'reader, 'data> CcittDecoder<'reader, 'data> {
         let mut decoded_rows: usize = 0;
         let mut damaged_rows: u32 = 0;
 
+        // Encoders commonly open the stream with an EOL even when `EndOfLine`
+        // is false; for `K > 0` the 1D/2D tag bit follows it.
+        self.consume_eol_marker();
+
         loop {
             if max_rows > 0 && decoded_rows >= max_rows {
                 break;
@@ -530,7 +534,7 @@ impl<'reader, 'data> CcittDecoder<'reader, 'data> {
                 }
             }
 
-            self.consume_post_row_marker();
+            self.consume_eol_marker();
 
             if self.end_of_line {
                 skip_eol(self.reader);
@@ -551,12 +555,12 @@ impl<'reader, 'data> CcittDecoder<'reader, 'data> {
         Ok(())
     }
 
-    /// Consume optional zero fill bits and one following EOL marker after a row.
+    /// Consume optional zero fill bits and one following EOL marker before the
+    /// first row or after a row.
     ///
-    /// This matches the permissive post-row cleanup used by PDF.js for raw
-    /// CCITT streams with `EndOfLine = false`, including the JBIG2 MMR
-    /// halftone-bitplane case.
-    fn consume_post_row_marker(&mut self) {
+    /// This is the permissive cleanup for raw CCITT streams with
+    /// `EndOfLine = false`, including the JBIG2 MMR halftone-bitplane case.
+    fn consume_eol_marker(&mut self) {
         if self.end_of_line {
             return;
         }
@@ -1183,6 +1187,24 @@ mod tests {
         let data = [0xccu8];
         let out = decode(&data, &params_g3_2d(8, 1)).expect("decode failed");
         assert_eq!(out, [0xff]);
+    }
+
+    #[test]
+    fn decode_g3_2d_skips_leading_eol_without_end_of_line() {
+        let data = bits_to_bytes(&[
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOL
+            1, // tag: 1D row
+            0, 1, 1, 1, // white run 2
+            1, 0, // black run 3
+            1, 0, 0, 0, // white run 3
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOL
+            1, // tag: 1D row
+            1, 0, 0, 1, 1, // white run 8
+        ]);
+
+        let out = decode(&data, &params_g3_2d(8, 2)).expect("decode failed");
+
+        assert_eq!(out, [0xc7, 0xff]);
     }
 
     // ── Group 4 ──────────────────────────────────────────────────────────────
