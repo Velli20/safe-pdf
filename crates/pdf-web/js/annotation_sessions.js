@@ -19,7 +19,11 @@ export class FreeTextComponent extends AnnotationComponent {
       if (!this.editor && this.entry.editable && ['Enter', 'F2'].includes(event.key)) { event.preventDefault(); this.begin(); }
     });
   }
-  update() { if (!this.editor) this.node.textContent = this.entry.text; }
+  update() {
+    if (this.editor) return;
+    if (this.entry.artwork) this.drawArtwork();
+    else { this.node.textContent = this.entry.text; this.signature = ''; }
+  }
   begin() {
     if (!this.layer.snapshot) return;
     if (this.editor) { this.editor.focus(); return; }

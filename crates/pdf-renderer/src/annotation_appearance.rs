@@ -1,5 +1,5 @@
 //! Paints annotation appearance streams: widgets over rendered page content, and
-//! stamp and note artwork into a viewport cropped to the annotation.
+//! stamp, note and free-text artwork into a viewport cropped to the annotation.
 use crate::{PdfRenderer, PdfRendererError};
 use pdf_annotation_core::PaintedAppearance;
 use pdf_canvas::{PageViewport, canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
