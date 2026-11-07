@@ -9,9 +9,9 @@ use crate::{
 };
 use num_traits::ToPrimitive;
 
-/// The appearance state a button widget selects when it is painted.
-pub(crate) enum ButtonState {
-    /// A push button draws its source `/AS`.
+/// The appearance state a widget selects when it is painted on the page canvas.
+pub(crate) enum PaintedState {
+    /// A push button or read-only text field draws its source `/AS`.
     Source,
     /// A checkbox or radio option draws its on-state when selected, else `/Off`.
     Checked(bool),
@@ -41,7 +41,7 @@ impl Annotation {
             return None;
         };
         let option = widget.binding.option();
-        let button_state = self.button_state(field);
+        let painted_state = self.painted_state(field);
         let source = self.source_widget();
         let definition = &field.definition;
         let mut model = WidgetControl {
@@ -54,7 +54,7 @@ impl Annotation {
             required: definition.required,
             value: String::new(),
             max_length: None,
-            checked: matches!(button_state, Some(ButtonState::Checked(true))),
+            checked: matches!(painted_state, Some(PaintedState::Checked(true))),
             caption: String::new(),
             options: None,
             multiple: false,
@@ -65,7 +65,7 @@ impl Annotation {
                 .and_then(|w| w.appearance_characteristics.as_ref())
                 .and_then(|mk| mk.rotation)
                 .unwrap_or(0),
-            painted: button_state.is_some() && self.has_normal_appearance(),
+            painted: painted_state.is_some() && self.has_normal_appearance(),
         };
         match &definition.content {
             FieldKind::Text(text) => {
@@ -147,18 +147,21 @@ impl Annotation {
     }
 
     /// How this widget, bound to `field`, selects its appearance state; `None` for
-    /// non-widgets and fields that are not buttons.
-    pub(crate) fn button_state(&self, field: &Field) -> Option<ButtonState> {
+    /// non-widgets and fields whose control presents their value instead: editable text
+    /// fields and choice fields.
+    pub(crate) fn painted_state(&self, field: &Field) -> Option<PaintedState> {
         let AnnotationKind::Widget(widget) = &self.content else {
             return None;
         };
         let option = widget.binding.option();
         let selects = |selected: Option<OptionId>| option.is_some() && selected == option;
         Some(match &field.definition.content {
-            FieldKind::Button(_) => ButtonState::Source,
-            FieldKind::Checkbox(checkbox) => ButtonState::Checked(checkbox.checked),
-            FieldKind::CheckboxGroup(group) => ButtonState::Checked(selects(group.selected)),
-            FieldKind::Radio(radio) => ButtonState::Checked(selects(radio.selected)),
+            FieldKind::Button(_) => PaintedState::Source,
+            // A read-only value never changes, so its source appearance stays current.
+            FieldKind::Text(_) if field.definition.read_only => PaintedState::Source,
+            FieldKind::Checkbox(checkbox) => PaintedState::Checked(checkbox.checked),
+            FieldKind::CheckboxGroup(group) => PaintedState::Checked(selects(group.selected)),
+            FieldKind::Radio(radio) => PaintedState::Checked(selects(radio.selected)),
             _ => return None,
         })
     }
