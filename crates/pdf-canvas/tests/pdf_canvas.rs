@@ -18,6 +18,7 @@ use pdf_object_reader::{
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
     form::FormXObject,
+    pattern::{PaintType, Pattern, TilingType},
     resource::Resource,
     resources::Resources,
 };
@@ -305,4 +306,43 @@ fn inline_image_render_path_matches_image_xobject_path() {
     assert_eq!(xobject_draw.pixel_format, PixelFormat::Gray8);
     assert_eq!(xobject_draw.blend_mode, Some(BlendMode::Multiply));
     assert_eq!(xobject_draw.data, vec![0x00, 0xFF, 0x00, 0xFF]);
+}
+
+#[test]
+fn image_mask_paints_the_fill_pattern_through_its_stencil() {
+    let mut dictionary = image_dictionary();
+    dictionary.insert(Vec::from(b"ImageMask"), ObjectVariant::Boolean(true));
+    let mask = pdf_object_reader::ObjectReader::new(EmptySource)
+        .read::<Resource>(&ObjectVariant::Stream(
+            pdf_object_reader::stream::StreamObject::new(1, 0, dictionary, vec![0b1010_0000]),
+        ))
+        .expect("image mask XObject should be read");
+    let pattern = Resource::Pattern(ObjectHandle::from(Pattern::Tiling {
+        paint_type: PaintType::Colored,
+        tiling_type: TilingType::ConstantSpacing,
+        bbox: Rect::new(4.0, 4.0),
+        x_step: 4.0,
+        y_step: 4.0,
+        matrix: None,
+        resources: ObjectHandle::from(Resources::default()),
+        content_stream: content_stream(3, b"1 0 0 rg 0 0 4 4 re f"),
+    }));
+    let resources = Arc::new(Resources {
+        patterns: HashMap::from([(PdfName::from(b"P0"), pattern)]),
+        xobjects: HashMap::from([(PdfName::from(b"Im"), ObjectHandle::from(mask))]),
+        ..Default::default()
+    });
+
+    let mut recording = RecordingCanvas::new(100.0, 100.0);
+    render(
+        &mut recording,
+        &content_stream(4, b"/Pattern cs /P0 scn 10 0 0 10 0 0 cm /Im Do"),
+        Some(resources),
+    )
+    .expect("pattern-filled image mask should render");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.begin_mask_count, 1);
+    assert_eq!(observer.fill_colors.len(), 1);
+    assert!(observer.images.is_empty());
 }
