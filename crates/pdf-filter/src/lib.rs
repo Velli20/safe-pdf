@@ -32,3 +32,4 @@ pub(crate) mod jpeg_frame;
 pub(crate) mod lzw;
 pub(crate) mod predictor;
 pub(crate) mod runlength;
+pub(crate) mod ycck;
