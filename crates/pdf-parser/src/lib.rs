@@ -6,7 +6,7 @@ pub mod error;
 pub mod header;
 mod hex_string;
 pub mod indirect_object;
-mod inline_image;
+pub mod inline_image;
 mod linear_object_scanner;
 mod literal_string;
 mod name;

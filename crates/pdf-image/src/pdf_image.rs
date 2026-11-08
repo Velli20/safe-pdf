@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use pdf_filter::{
-    filter::Filters,
+    filter::{Filter, Filters},
     image_payload::{EncodedPayload, ImagePayload},
 };
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     dictionary::Dictionary, object_variant::ObjectVariant, pdf_name::PdfName, stream::StreamObject,
 };
+use pdf_parser::inline_image::InlineImageDataEnd;
 
 use crate::{error::PdfImageError, image_metadata::ImageMetadata};
 
@@ -99,7 +100,7 @@ impl From<Dictionary> for InlineImageHeader {
 }
 
 impl InlineImageHeader {
-    /// Returns the expanded dictionary as an object, for reading [`InlineDataLength`].
+    /// Returns the expanded dictionary as an object, for reading [`InlineDataEnd`].
     pub fn object(&self) -> &ObjectVariant {
         &self.0
     }
@@ -115,18 +116,29 @@ impl InlineImageHeader {
     }
 }
 
-/// The byte length of an inline image's data, when its header determines it: the
-/// image is unfiltered and its dimensions, depth, and component count are known.
+/// Where an inline image's data ends, as far as its header determines it: the byte
+/// length of an unfiltered image whose dimensions, depth, and component count are known,
+/// or the end-of-data marker of an ASCII first filter.
 ///
 /// It is a hint for finding the end of the data, so unreadable entries make it unknown
 /// rather than failing the read.
-pub struct InlineDataLength(pub Option<usize>);
+pub struct InlineDataEnd(pub InlineImageDataEnd);
 
-impl FromPdfObject for InlineDataLength {
+impl FromPdfObject for InlineDataEnd {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         if context.contains(Filters::KEY) {
-            return Ok(Self(None));
+            let first = context.lenient::<Filters>(Filters::KEY);
+            return Ok(Self(
+                match first
+                    .as_ref()
+                    .and_then(|filters| filters.into_iter().next())
+                {
+                    Some(Filter::ASCII85Decode) => InlineImageDataEnd::Marker(b"~>"),
+                    Some(Filter::ASCIIHexDecode) => InlineImageDataEnd::Marker(b">"),
+                    _ => InlineImageDataEnd::Unknown,
+                },
+            ));
         }
         let components = match context.lenient(b"ImageMask").unwrap_or(false) {
             true => Some(1),
@@ -146,7 +158,10 @@ impl FromPdfObject for InlineDataLength {
                 .checked_mul(bits_per_component)?;
             height.checked_mul(bits_per_row.div_ceil(8))
         })();
-        Ok(Self(length))
+        Ok(Self(length.map_or(
+            InlineImageDataEnd::Unknown,
+            InlineImageDataEnd::Length,
+        )))
     }
 }
 
