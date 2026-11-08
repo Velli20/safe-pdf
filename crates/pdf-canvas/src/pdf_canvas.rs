@@ -1040,6 +1040,40 @@ mod tests {
     }
 
     #[test]
+    /// Verifies that a `W` issued before the path is built clips to the path ended by `n`.
+    fn clip_before_path_construction_clips_to_ended_path() {
+        use pdf_content_stream_operators::variants::PdfOperatorVariant;
+
+        let page = page();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+
+        let operators = [
+            PdfOperatorVariant::ClipNonZero,
+            PdfOperatorVariant::MoveTo { x: 40.0, y: 20.0 },
+            PdfOperatorVariant::LineTo { x: 160.0, y: 20.0 },
+            PdfOperatorVariant::LineTo { x: 160.0, y: 80.0 },
+            PdfOperatorVariant::LineTo { x: 40.0, y: 80.0 },
+            PdfOperatorVariant::ClosePath,
+            PdfOperatorVariant::EndPath,
+        ];
+        for operator in &operators {
+            canvas
+                .apply_operator(operator)
+                .expect("operator should apply");
+        }
+
+        assert!(
+            canvas
+                .current_state()
+                .expect("state should exist")
+                .clip_path
+                .is_some()
+        );
+    }
+
+    #[test]
     /// Verifies that rejects absurd offscreen recording bbox.
     fn rejects_absurd_offscreen_recording_bbox() {
         assert!(!PdfCanvas::<RecordingCanvas>::can_record_offscreen_bbox(
