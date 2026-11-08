@@ -17,7 +17,7 @@ use pdf_object_reader::{
 };
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
-    form::FormXObject,
+    form::{FormGroup, FormXObject},
     pattern::{PaintType, Pattern, TilingType},
     resource::Resource,
     resources::Resources,
@@ -52,7 +52,7 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
                 matrix: None,
                 resources: None,
                 content_stream: stream,
-                transparency_group: false,
+                group: None,
             })),
         )]),
         ..Default::default()
@@ -332,7 +332,7 @@ fn image_soft_mask_replaces_the_graphics_state_soft_mask() {
         matrix: None,
         resources: None,
         content_stream: content_stream(3, b"q Q"),
-        transparency_group: true,
+        group: Some(FormGroup::Transparency { isolated: false }),
     };
     let graphics_state =
         Resource::ExternalGraphicsState(ObjectHandle::from(ExternalGraphicsState {

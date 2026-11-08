@@ -17,22 +17,34 @@ pub struct FormXObject {
     pub resources: Option<ObjectHandle<Resources>>,
     /// Parsed form operators.
     pub content_stream: ContentStream,
-    /// Whether `/Group` makes this form a transparency group, which composites as one
-    /// object: a soft mask active at `Do` applies to its result, not to its contents.
-    pub transparency_group: bool,
+    /// The form's `/Group`. A transparency group composites as one object: a soft mask
+    /// active at `Do` applies to its result, not to its contents.
+    pub group: Option<FormGroup>,
 }
 
 /// A form's `/Group` dictionary, whose `/S` names the kind of group.
-struct FormGroup {
-    /// Whether `/S` is `/Transparency`.
-    transparency: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormGroup {
+    /// A transparency group (`/S /Transparency`).
+    Transparency {
+        /// Whether `/I` makes the group isolated, so its contents composite against a
+        /// transparent backdrop instead of the group's backdrop.
+        isolated: bool,
+    },
+    /// A group of a kind other than transparency.
+    Other,
 }
 
 impl FromPdfObject for FormGroup {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let subtype = context.dictionary()?.required::<PdfName>(b"S")?;
-        Ok(Self {
-            transparency: subtype.as_bytes() == b"Transparency",
+        let mut dictionary = context.dictionary()?;
+        let subtype = dictionary.required::<PdfName>(b"S")?;
+        if subtype.as_bytes() != b"Transparency" {
+            return Ok(Self::Other);
+        }
+        Ok(Self::Transparency {
+            // A malformed /I leaves the group non-isolated.
+            isolated: dictionary.lenient::<bool>(b"I").unwrap_or(false),
         })
     }
 }
@@ -60,9 +72,7 @@ impl FromPdfObject for FormXObject {
             resources: context.optional(b"Resources")?,
             content_stream,
             // A malformed /Group leaves the form an ordinary one.
-            transparency_group: context
-                .lenient::<FormGroup>(b"Group")
-                .is_some_and(|group| group.transparency),
+            group: context.lenient::<FormGroup>(b"Group"),
         })
     }
 }

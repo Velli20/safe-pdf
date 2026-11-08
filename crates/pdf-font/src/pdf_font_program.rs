@@ -10,7 +10,8 @@ use crate::{
 
 /// Type 1 program read from a FontDescriptor, with FontFile3 taking precedence over FontFile.
 pub(crate) struct Type1Program(FontSource);
-/// TrueType program read from a FontDescriptor's FontFile2.
+/// TrueType program read from a FontDescriptor's FontFile2, which may instead hold an
+/// OpenType container with CFF outlines.
 pub(crate) struct TrueTypeProgram(FontSource);
 /// CID-keyed CFF program read from a FontDescriptor's FontFile3.
 pub(crate) struct CidType0Program(FontSource);
@@ -20,7 +21,7 @@ struct SimpleCffProgram(FontSource);
 struct CidCffProgram(FontSource);
 /// Raw Type 1 stream.
 struct RawType1Program(FontSource);
-/// Raw TrueType stream.
+/// Raw FontFile2 stream, labelled OpenType/CFF when its data carries the `OTTO` signature.
 struct RawTrueTypeProgram(FontSource);
 
 impl FromPdfObject for Type1Program {
@@ -88,10 +89,15 @@ impl FromPdfObject for RawType1Program {
 
 impl FromPdfObject for RawTrueTypeProgram {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let context = context.stream()?;
+        let data = context.stream()?.stream().shared_data();
+        let format = if data.starts_with(b"OTTO") {
+            FontProgramFormat::OpenTypeCff
+        } else {
+            FontProgramFormat::TrueType
+        };
         Ok(Self(FontSource::Memory {
-            data: context.stream().shared_data(),
-            format: FontProgramFormat::TrueType,
+            data,
+            format,
             face_index: 0,
         }))
     }
@@ -205,5 +211,19 @@ mod tests {
 
         assert_eq!(format, FontProgramFormat::Cff);
         assert_eq!(data.as_ref(), b"raw-cff");
+    }
+
+    #[test]
+    fn font_file2_with_open_type_signature_is_open_type_cff() {
+        let stream = StreamObject::new(1, 0, Dictionary::default(), b"OTTO-cff".as_slice());
+        let descriptor =
+            Dictionary::from_entries([(b"FontFile2".as_slice(), ObjectVariant::Stream(stream))]);
+        let source = ObjectReader::new(EmptySource)
+            .read::<TrueTypeProgram>(&ObjectVariant::Dictionary(descriptor))
+            .expect("the FontFile2 source should parse");
+        let (data, format) = memory_source(FontSource::from(source));
+
+        assert_eq!(format, FontProgramFormat::OpenTypeCff);
+        assert_eq!(data.as_ref(), b"OTTO-cff");
     }
 }

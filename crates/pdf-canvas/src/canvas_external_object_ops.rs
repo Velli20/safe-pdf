@@ -14,7 +14,11 @@ use pdf_graphics::{
     size::Size, transform::Transform,
 };
 use pdf_image::{PdfImage, raster::stencil_image};
-use pdf_resources::{form::FormXObject, image_xobject::ImageXObject, resource::Resource};
+use pdf_resources::{
+    form::{FormGroup, FormXObject},
+    image_xobject::ImageXObject,
+    resource::Resource,
+};
 
 use crate::{
     CanvasPath,
@@ -68,10 +72,11 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             Resource::UnavailableImage => {}
             Resource::Form(form) => {
                 let form = form.get()?;
-                if form.transparency_group {
-                    self.render_transparency_group(&form)?;
-                } else {
-                    self.render_form(&form)?;
+                match form.group {
+                    Some(FormGroup::Transparency { isolated }) => {
+                        self.render_transparency_group(&form, isolated)?;
+                    }
+                    _ => self.render_form(&form)?,
                 }
             }
             _ => {
@@ -105,7 +110,15 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Normal blend mode and no soft mask, so a `gs` inside the group cannot override the
     /// outer values, and an `/SMask /None` inside it leaves the outer mask in effect. The
     /// contents are recorded first because a layer's callback holds only the backend.
-    fn render_transparency_group(&mut self, form: &FormXObject) -> Result<(), PdfCanvasError> {
+    ///
+    /// An `isolated` group's contents composite against a transparent backdrop rather than
+    /// the page, so they always get their own layer: a blend mode inside the group must not
+    /// meet what lies beneath it.
+    fn render_transparency_group(
+        &mut self,
+        form: &FormXObject,
+        isolated: bool,
+    ) -> Result<(), PdfCanvasError> {
         let state = self.current_state()?;
         let alpha = state.paint.fill_color.a;
         let blend_mode = state
@@ -114,8 +127,9 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             .clone()
             .filter(|mode| *mode != BlendMode::Normal);
         let mask = state.soft_mask.clone();
-        // Contents painted straight onto the backdrop composite the same way.
-        if mask.is_none() && alpha >= 1.0 && blend_mode.is_none() {
+        // A non-isolated group's contents painted straight onto the backdrop composite
+        // the same way.
+        if !isolated && mask.is_none() && alpha >= 1.0 && blend_mode.is_none() {
             return self.render_form(form);
         }
         // A nested canvas restarts its optional content, so hidden content stops here.
