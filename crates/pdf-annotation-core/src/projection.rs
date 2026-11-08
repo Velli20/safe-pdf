@@ -13,7 +13,9 @@ use crate::{
 use pdf_graphics::{point::Point, viewport::PageViewport};
 use pdf_optional_content::OptionalContentState;
 
-/// Why the host should show a placeholder: the payload's reason, else unsupported field semantics.
+/// Why the host should show a placeholder: the payload's reason, else unsupported field
+/// semantics. A widget of an unsupported field that has a normal appearance is painted on
+/// the page canvas from that appearance, so it needs no placeholder.
 fn unsupported_reason(annotation: &Annotation, field: Option<&Field>) -> Option<String> {
     annotation
         .content
@@ -22,6 +24,7 @@ fn unsupported_reason(annotation: &Annotation, field: Option<&Field>) -> Option<
         .or_else(|| {
             field
                 .filter(|field| matches!(field.definition.content, FieldKind::Unsupported(_)))
+                .filter(|_| !annotation.has_normal_appearance())
                 .map(|_| "Unsupported field semantics".into())
         })
 }
