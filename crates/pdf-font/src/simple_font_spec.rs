@@ -83,7 +83,7 @@ impl FromPdfObject for SimpleFontSpec {
             standard14,
             encoding,
             metrics,
-            to_unicode: context.optional(b"ToUnicode")?.map(Arc::new),
+            to_unicode: context.lenient(b"ToUnicode").map(Arc::new),
         })
     }
 }
