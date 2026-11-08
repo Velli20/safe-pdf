@@ -1,6 +1,7 @@
 //! Composite Type 0 specifications and their CID descendant fonts.
 
 use crate::{
+    cid_vertical_metrics::CidVerticalMetrics,
     error::FontError,
     font::{FontSource, GlyphId},
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
@@ -35,8 +36,10 @@ pub struct CidFontSpec {
     pub program: Option<FontSource>,
     /// CID collection identity.
     pub system_info: CidSystemInfo,
-    /// Horizontal and vertical CID metrics.
+    /// Horizontal CID widths from `/DW` and `/W`.
     pub metrics: PdfMetrics,
+    /// Vertical CID metrics from `/DW2` and `/W2`, used under a vertical encoding CMap.
+    pub vertical: CidVerticalMetrics,
     /// CID-to-glyph identifier mapping applied before the descendant's own CID lookup.
     pub cid_to_gid: CidToGidMap,
     /// Best-effort CID-to-Unicode mapping for font substitution.
@@ -154,6 +157,7 @@ impl FromPdfObject for CidFontSpec {
             .unwrap_or_default()
             .named(base_font.as_deref());
         let metrics: PdfMetrics = context.read(value)?;
+        let vertical: CidVerticalMetrics = context.read(value)?;
         let system_info = context
             .optional::<CidSystemInfo>(b"CIDSystemInfo")?
             .unwrap_or_default();
@@ -175,6 +179,7 @@ impl FromPdfObject for CidFontSpec {
             program,
             system_info,
             metrics,
+            vertical,
             cid_to_gid,
             cid_to_unicode,
         })

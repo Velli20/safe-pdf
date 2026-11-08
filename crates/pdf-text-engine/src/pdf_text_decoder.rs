@@ -7,7 +7,7 @@
 
 use crate::error::TextError;
 use crate::text::TextVector;
-use pdf_cmap::{Cid, CidMapping, PdfCode, ToUnicodeMap, UnicodeSequence};
+use pdf_cmap::{Cid, CidMapping, PdfCode, ToUnicodeMap, UnicodeSequence, WritingMode};
 use pdf_font::{
     CidFontSpec, GlyphId, GlyphName, PdfFontSpec, PdfMetrics, SimpleEncoding, Type0FontSpec,
 };
@@ -36,6 +36,9 @@ pub(crate) struct DecodedGlyph<'a> {
     pub(crate) pdf_advance: TextVector,
     /// Whether `pdf_advance` comes from a width entry rather than the font's default width.
     pub(crate) explicit_width: bool,
+    /// Position vector from the glyph's horizontal origin to its vertical origin, in
+    /// thousandths of a text-space unit; zero in horizontal writing.
+    pub(crate) vertical_origin: TextVector,
 }
 
 /// Decodes `bytes` and immediately passes each logical glyph to `consume`.
@@ -103,15 +106,36 @@ where
 }
 
 /// Converts one CMap result into the selector, Unicode mapping, and PDF advance used by layout.
+///
+/// Under a vertical encoding CMap the glyph advances by its `/W2` or `/DW2` displacement and is
+/// drawn displaced by its position vector; otherwise it advances by its `/W` or `/DW` width.
 fn decode_type0_mapping(font: &Type0FontSpec, mapping: CidMapping) -> DecodedGlyph<'static> {
     let metrics = &font.descendant.metrics;
     let width = metrics.explicit.get(mapping.cid.0);
+    let w0 = width.unwrap_or(metrics.default);
+    let (pdf_advance, vertical_origin) = match font.encoding.writing_mode() {
+        WritingMode::Horizontal => (horizontal_advance(w0), TextVector::default()),
+        WritingMode::Vertical => {
+            let vertical = font.descendant.vertical.get(mapping.cid.0, w0);
+            (
+                TextVector {
+                    x: 0.0,
+                    y: vertical.w1y,
+                },
+                TextVector {
+                    x: vertical.vx,
+                    y: vertical.vy,
+                },
+            )
+        }
+    };
     DecodedGlyph {
         source_code: mapping.source,
         selector: type0_selector(&font.descendant, mapping.cid),
         unicode: type0_unicode(font, mapping),
-        pdf_advance: horizontal_advance(width.unwrap_or(metrics.default)),
+        pdf_advance,
         explicit_width: width.is_some(),
+        vertical_origin,
     }
 }
 
@@ -214,23 +238,29 @@ fn decode_one_byte_mapping<'a>(
             .unwrap_or_else(|| char::from(code).into()),
         pdf_advance: horizontal_advance(width.unwrap_or(metrics.default)),
         explicit_width: width.is_some(),
+        vertical_origin: TextVector::default(),
     })
 }
 
-/// PDF font widths advance horizontally only.
+/// Advance of a horizontally written glyph with PDF width `width`.
 const fn horizontal_advance(width: f32) -> TextVector {
     TextVector { x: width, y: 0.0 }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use pdf_cmap::Type0EncodingCMap;
+    use pdf_font::cid_vertical_metrics::CidVerticalMetrics;
     use pdf_font::glyph_widths_map::GlyphWidthsMap;
     use pdf_font::{CidFontKind, CidSystemInfo, CidToGidMap, PdfFontDescriptor};
+    use pdf_object_reader::object_variant::ObjectVariant;
+    use pdf_object_reader::{EmptySource, ObjectReader, dictionary::Dictionary};
+    use std::sync::Arc;
 
-    #[test]
-    fn cid_font_type0_applies_cid_to_gid_table() {
-        let descendant = CidFontSpec {
+    fn descendant(vertical: CidVerticalMetrics, cid_to_gid: CidToGidMap) -> CidFontSpec {
+        CidFontSpec {
             kind: CidFontKind::Type0,
             descriptor: PdfFontDescriptor::default(),
             program: None,
@@ -239,9 +269,63 @@ mod tests {
                 default: 1000.0,
                 explicit: GlyphWidthsMap::default(),
             },
-            cid_to_gid: CidToGidMap::Table([0, 7, 17].into()),
+            vertical,
+            cid_to_gid,
             cid_to_unicode: None,
-        };
+        }
+    }
+
+    #[test]
+    fn identity_v_advances_down_and_offsets_by_position_vector() {
+        // `/W2 [5 [-500 300 700]]` with the default `/DW2 [880 -1000]`.
+        let w2 = ObjectVariant::Array(
+            vec![
+                ObjectVariant::Integer(5),
+                ObjectVariant::Array(
+                    vec![
+                        ObjectVariant::Integer(-500),
+                        ObjectVariant::Integer(300),
+                        ObjectVariant::Integer(700),
+                    ]
+                    .into(),
+                ),
+            ]
+            .into(),
+        );
+        let vertical = ObjectReader::new(EmptySource)
+            .read::<CidVerticalMetrics>(&ObjectVariant::Dictionary(Dictionary::from_entries([(
+                b"W2".as_slice(),
+                w2,
+            )])))
+            .unwrap();
+        let spec = PdfFontSpec::Type0(Type0FontSpec {
+            base_font: Arc::from(b"Test".as_slice()),
+            encoding: Arc::new(Type0EncodingCMap::from_name(b"Identity-V").unwrap()),
+            descendant: descendant(vertical, CidToGidMap::Identity),
+            to_unicode: None,
+        });
+        let mut glyphs = Vec::new();
+        decode_pdf_text::<TextError>(&spec, &[0, 1, 0, 5], |glyph| {
+            glyphs.push((glyph.pdf_advance, glyph.vertical_origin));
+            Ok(())
+        })
+        .unwrap();
+        let vector = |x, y| TextVector { x, y };
+        assert_eq!(
+            glyphs,
+            [
+                (vector(0.0, -1000.0), vector(500.0, 880.0)),
+                (vector(0.0, -500.0), vector(300.0, 700.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn cid_font_type0_applies_cid_to_gid_table() {
+        let descendant = descendant(
+            CidVerticalMetrics::default(),
+            CidToGidMap::Table([0, 7, 17].into()),
+        );
         assert!(matches!(
             type0_selector(&descendant, Cid(2)),
             GlyphSelector::GlyphId(GlyphId(17))
