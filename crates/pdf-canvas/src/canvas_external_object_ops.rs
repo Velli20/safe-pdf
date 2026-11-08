@@ -14,7 +14,7 @@ use pdf_graphics::{
     size::Size, transform::Transform,
 };
 use pdf_image::{PdfImage, raster::stencil_image};
-use pdf_resources::{form::FormXObject, resource::Resource};
+use pdf_resources::{form::FormXObject, image_xobject::ImageXObject, resource::Resource};
 
 use crate::{
     CanvasPath,
@@ -64,11 +64,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         })?;
 
         match xobj.as_ref() {
-            Resource::Image(image) => {
-                if let Some(image) = self.decode_image_xobject(image)? {
-                    self.render_image_xobject(&image)?;
-                }
-            }
+            Resource::Image(image) => self.render_image_xobject(image)?,
             Resource::UnavailableImage => {}
             Resource::Form(form) => {
                 let form = form.get()?;
@@ -155,9 +151,30 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 }
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
-    /// Renders an image XObject to the canvas.
-    pub(crate) fn render_image_xobject(&mut self, image: &Image) -> Result<(), PdfCanvasError> {
-        self.render_decoded_image(image, false)
+    /// Renders an image XObject to the canvas; an image whose data cannot be decoded
+    /// paints nothing.
+    ///
+    /// An image's own `/SMask` overrides the soft mask in the graphics state, so such an
+    /// image is painted with only its own mask.
+    fn render_image_xobject(&mut self, xobject: &Arc<ImageXObject>) -> Result<(), PdfCanvasError> {
+        let Some(image) = self.decode_image_xobject(xobject)? else {
+            return Ok(());
+        };
+        if xobject.has_soft_mask() {
+            return self.without_soft_mask(|canvas| canvas.render_decoded_image(&image, false));
+        }
+        self.render_decoded_image(&image, false)
+    }
+
+    /// Runs `paint` with the graphics state's soft mask set aside, then restores it.
+    fn without_soft_mask(
+        &mut self,
+        paint: impl FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    ) -> Result<(), PdfCanvasError> {
+        let mask = self.current_state_mut()?.soft_mask.take();
+        let result = paint(self);
+        self.current_state_mut()?.soft_mask = mask;
+        result
     }
 
     /// Computes image placement before entering the backend-only mask callback.
