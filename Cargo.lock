@@ -2417,6 +2417,7 @@ dependencies = [
  "pdf-content-stream-operators",
  "pdf-font",
  "pdf-graphics",
+ "pdf-object-reader",
  "thiserror 2.0.12",
 ]
 

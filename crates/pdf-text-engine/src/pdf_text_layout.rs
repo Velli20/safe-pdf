@@ -186,20 +186,15 @@ where
             (pdf_natural, 1.0)
         };
         let advance = styled_advance(&decoded, natural, self.style, self.writing_mode);
+        let origin = self.glyph_origin(&decoded);
         let transform = glyph_transform(
             self.font.spec(),
             face_metrics,
             self.style,
-            self.pen,
+            origin,
             width_scale,
         );
-        let bounds = glyph_bounds(
-            face_metrics,
-            self.style,
-            self.pen,
-            advance,
-            self.writing_mode,
-        );
+        let bounds = glyph_bounds(face_metrics, self.style, origin, advance, self.writing_mode);
         let glyph = PositionedGlyph {
             glyph_id: resolved.glyph_id,
             local_transform: transform,
@@ -211,6 +206,18 @@ where
         self.pen.x += advance.x;
         self.pen.y += advance.y;
         Ok(())
+    }
+
+    /// Returns where the glyph's own origin lies relative to the layout origin.
+    ///
+    /// A vertically written glyph is placed so its vertical origin, the position vector away from
+    /// its horizontal origin, falls on the pen; a horizontal glyph sits on the pen.
+    fn glyph_origin(&self, decoded: &DecodedGlyph<'_>) -> TextVector {
+        let offset = natural_pdf_advance(self.font.spec(), decoded.vertical_origin);
+        TextVector {
+            x: self.pen.x - offset.x * self.style.font_size * self.style.horizontal_scale,
+            y: self.pen.y - offset.y * self.style.font_size,
+        }
     }
 
     /// Converts the accumulated state into the backend-independent layout result.
@@ -486,9 +493,10 @@ fn glyph_transform(
 
 /// Computes a conservative layout-space cell for one positioned glyph.
 ///
-/// PDF advance determines the cell extent along the writing direction. Horizontal cells use the
-/// face ascender and descender for their vertical extent, with conventional proportions when the
-/// physical face has no global metrics.
+/// `origin` is the glyph's own origin. Horizontal cells span the PDF advance; vertical cells span
+/// one em, since the glyph is drawn upright between the pen positions. Both use the face ascender
+/// and descender for their vertical extent, with conventional proportions when the physical face
+/// has no global metrics.
 fn glyph_bounds(
     face_metrics: Option<FontMetrics>,
     style: &TextStyle,
@@ -519,9 +527,9 @@ fn glyph_bounds(
         .normalized(),
         WritingMode::Vertical => Rect {
             left: origin.x,
-            top: origin.y,
+            top: baseline + descender,
             right: origin.x + style.font_size * style.horizontal_scale,
-            bottom: origin.y + advance.y,
+            bottom: baseline + ascender,
         }
         .normalized(),
     }

@@ -1,5 +1,6 @@
 pub mod base_encoding;
 pub mod cff;
+pub mod cid_vertical_metrics;
 pub mod encoding;
 pub mod error;
 pub mod fallback;
