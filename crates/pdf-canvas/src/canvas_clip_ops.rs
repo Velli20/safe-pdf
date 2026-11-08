@@ -15,13 +15,12 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 }
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
-    /// Marks the current path for clipping with `rule`; the clip is applied when the next
-    /// path-painting operator ends the path. Without a current path there is nothing to
-    /// clip to, so the operator leaves the clipping path unchanged.
+    /// Marks the path ended by the next path-painting operator for clipping with `rule`.
+    ///
+    /// The mark applies even when `W`/`W*` comes before the path is built. If that
+    /// operator ends no path, the mark is dropped and the clipping path stays unchanged.
     fn mark_clip_path(&mut self, rule: PathFillType) -> Result<(), PdfCanvasError> {
-        if self.current_path.is_some() {
-            self.pending_clip = Some(rule);
-        }
+        self.pending_clip = Some(rule);
         Ok(())
     }
 }
