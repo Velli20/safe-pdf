@@ -40,6 +40,12 @@ impl ImageXObject {
             Err(error) => Err(error),
         }
     }
+
+    /// Returns whether the image has its own `/SMask`, which replaces the graphics
+    /// state's soft mask when the image is painted.
+    pub fn has_soft_mask(&self) -> bool {
+        matches!(self.mask, Some(ImageMask::Soft(_)))
+    }
 }
 
 /// An image XObject, or unavailable when its dimensions or filter chain are malformed.

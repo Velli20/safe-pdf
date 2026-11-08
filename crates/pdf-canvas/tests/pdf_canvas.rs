@@ -9,7 +9,7 @@ use pdf_canvas::{pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
-use pdf_graphics::{BlendMode, PixelFormat, rect::Rect};
+use pdf_graphics::{BlendMode, MaskMode, PixelFormat, rect::Rect};
 use pdf_image::PdfImage;
 use pdf_object_reader::{
     EmptySource, ObjectHandle, dictionary::Dictionary, object_variant::ObjectVariant,
@@ -17,10 +17,11 @@ use pdf_object_reader::{
 };
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
-    form::FormXObject,
+    form::{FormGroup, FormXObject},
     pattern::{PaintType, Pattern, TilingType},
     resource::Resource,
     resources::Resources,
+    soft_mask::{MaskTransfer, SoftMask},
 };
 use pdf_text_engine::bundled_font_system;
 
@@ -306,6 +307,60 @@ fn inline_image_render_path_matches_image_xobject_path() {
     assert_eq!(xobject_draw.pixel_format, PixelFormat::Gray8);
     assert_eq!(xobject_draw.blend_mode, Some(BlendMode::Multiply));
     assert_eq!(xobject_draw.data, vec![0x00, 0xFF, 0x00, 0xFF]);
+}
+
+#[test]
+fn image_soft_mask_replaces_the_graphics_state_soft_mask() {
+    let mut dictionary = image_dictionary();
+    dictionary.insert(
+        Vec::from(b"SMask"),
+        ObjectVariant::Stream(pdf_object_reader::stream::StreamObject::new(
+            2,
+            0,
+            image_dictionary(),
+            vec![0b1100_0000],
+        )),
+    );
+    let image = pdf_object_reader::ObjectReader::new(EmptySource)
+        .read::<Resource>(&ObjectVariant::Stream(
+            pdf_object_reader::stream::StreamObject::new(1, 0, dictionary, vec![0b1010_0000]),
+        ))
+        .expect("image XObject should be read");
+    // A luminosity mask whose group paints nothing is black, so it would hide everything.
+    let empty_group = FormXObject {
+        bbox: Some(Rect::new(10.0, 10.0)),
+        matrix: None,
+        resources: None,
+        content_stream: content_stream(3, b"q Q"),
+        group: Some(FormGroup::Transparency { isolated: false }),
+    };
+    let graphics_state =
+        Resource::ExternalGraphicsState(ObjectHandle::from(ExternalGraphicsState {
+            params: vec![ExternalGraphicsStateKey::SoftMask(Some(
+                ObjectHandle::from(SoftMask {
+                    mask_type: MaskMode::Luminosity,
+                    transfer: MaskTransfer::Identity,
+                    shape: empty_group.into(),
+                }),
+            ))],
+        }));
+    let resources = Arc::new(Resources {
+        ext_g_states: HashMap::from([(PdfName::from(b"GS0"), graphics_state)]),
+        xobjects: HashMap::from([(PdfName::from(b"Im"), ObjectHandle::from(image))]),
+        ..Default::default()
+    });
+
+    let mut recording = RecordingCanvas::new(100.0, 100.0);
+    render(
+        &mut recording,
+        &content_stream(4, b"/GS0 gs 10 0 0 10 0 0 cm /Im Do"),
+        Some(resources),
+    )
+    .expect("soft-masked image should render");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.begin_mask_count, 0);
+    assert_eq!(observer.images.len(), 1);
 }
 
 #[test]
