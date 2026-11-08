@@ -39,7 +39,11 @@ impl WebAnnotationEntry {
         let css = WebCss {
             transform: css_matrix(&entry, device_to_css),
             color: css_color(Some(entry.style.color)),
-            background: css_color(entry.style.background),
+            background: if painted_on_canvas(&entry) {
+                css_color(None)
+            } else {
+                css_color(entry.style.background)
+            },
             border: css_border(&entry),
         };
         Self { entry, css }
@@ -63,13 +67,21 @@ fn drawn_from_shapes(kind: &Kind) -> bool {
     )
 }
 
+/// Whether `entry` is painted from its appearance on the page canvas, which already draws
+/// any border and background: supported caret and unknown entries, and widgets without a
+/// control or placeholder.
+fn painted_on_canvas(entry: &AnnotationEntry) -> bool {
+    entry.unsupported.is_none()
+        && match entry.content {
+            Kind::Caret(_) | Kind::Unknown(_) => true,
+            Kind::Widget(_) => entry.control.is_none(),
+            _ => false,
+        }
+}
+
 fn css_border(entry: &AnnotationEntry) -> String {
     let style = &entry.style;
-    // Supported caret and unknown entries are painted from their appearance on the page
-    // canvas, which already draws any border.
-    let painted =
-        matches!(entry.content, Kind::Caret(_) | Kind::Unknown(_)) && entry.unsupported.is_none();
-    if painted || drawn_from_shapes(&entry.content) || style.border_width <= 0.0 {
+    if painted_on_canvas(entry) || drawn_from_shapes(&entry.content) || style.border_width <= 0.0 {
         return String::new();
     }
     let line = if style.dash.as_ref().is_some_and(|dash| !dash.is_empty()) {

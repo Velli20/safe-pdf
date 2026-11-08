@@ -148,7 +148,8 @@ impl Annotation {
 
     /// How this widget, bound to `field`, selects its appearance state; `None` for
     /// non-widgets and fields whose control presents their value instead: editable text
-    /// fields and choice fields.
+    /// fields and choice fields. Signature and unknown-type fields have no control, so
+    /// their source appearance stays current.
     pub(crate) fn painted_state(&self, field: &Field) -> Option<PaintedState> {
         let AnnotationKind::Widget(widget) = &self.content else {
             return None;
@@ -156,7 +157,7 @@ impl Annotation {
         let option = widget.binding.option();
         let selects = |selected: Option<OptionId>| option.is_some() && selected == option;
         Some(match &field.definition.content {
-            FieldKind::Button(_) => PaintedState::Source,
+            FieldKind::Button(_) | FieldKind::Unsupported(_) => PaintedState::Source,
             // A read-only value never changes, so its source appearance stays current.
             FieldKind::Text(_) if field.definition.read_only => PaintedState::Source,
             FieldKind::Checkbox(checkbox) => PaintedState::Checked(checkbox.checked),

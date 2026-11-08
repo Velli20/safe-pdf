@@ -195,6 +195,47 @@ mod tests {
     }
 
     #[test]
+    fn signature_widget_paints_its_normal_appearance_without_placeholder() {
+        let name = |bytes: &[u8]| PdfString::from(bytes, StringKind::Name);
+        let appearance = StreamObject::new(2, 0, Dictionary::from_entries([]), b"q Q".to_vec());
+        let widget = ObjectVariant::Dictionary(Dictionary::from_entries([
+            (b"Subtype".as_slice(), name(b"Widget")),
+            (b"FT".as_slice(), name(b"Sig")),
+            (
+                b"Rect".as_slice(),
+                ObjectVariant::Array(PdfArray::new(
+                    [224, 429, 373, 496].map(ObjectVariant::Integer),
+                )),
+            ),
+            (
+                b"AP".as_slice(),
+                ObjectVariant::Dictionary(Dictionary::from_entries([(
+                    b"N".as_slice(),
+                    ObjectVariant::Stream(appearance.clone()),
+                )])),
+            ),
+        ]));
+        let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
+        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
+        let page = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 612.0,
+            bottom: 792.0,
+        };
+        let viewport = PageViewport::new(page, 0, Size::new(612.0, 792.0)).unwrap();
+        let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+        let entry = prepared.entries().first().unwrap();
+        assert_eq!(entry.unsupported, None);
+        assert!(entry.control.is_none());
+        let appearances = overlay.painted_appearances(0, None).unwrap();
+        let painted = appearances.first().unwrap();
+        assert_eq!(appearances.len(), 1);
+        assert_eq!(Some(painted.rect), source.rect);
+        assert_eq!(painted.stream.value(), &ObjectVariant::Stream(appearance));
+    }
+
+    #[test]
     fn text_note_with_normal_appearance_is_drawn_as_artwork() {
         let rect = Rect {
             left: 117.0,
