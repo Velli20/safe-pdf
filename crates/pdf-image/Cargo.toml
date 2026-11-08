@@ -14,5 +14,6 @@ pdf-graphics = { path = "../pdf-graphics" }
 pdf-jpeg2000 = { path = "../pdf-jpeg2000" }
 pdf-color-space = { path = "../pdf-color-space" }
 pdf-filter = { path = "../pdf-filter" }
+pdf-parser = { path = "../pdf-parser" }
 thiserror = "2.0.12"
 num-traits = "0.2"

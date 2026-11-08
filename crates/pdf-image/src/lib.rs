@@ -9,5 +9,5 @@ mod reduced_image;
 mod smask_in_data;
 
 pub use error::{ImageRasterError, PdfImageError};
-pub use pdf_image::{InlineDataLength, InlineImageHeader, PdfImage};
+pub use pdf_image::{InlineDataEnd, InlineImageHeader, PdfImage};
 pub use reduced_image::ReduceImage;

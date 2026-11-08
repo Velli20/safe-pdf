@@ -2262,6 +2262,7 @@ dependencies = [
  "pdf-graphics",
  "pdf-jpeg2000",
  "pdf-object-reader",
+ "pdf-parser",
  "thiserror 2.0.12",
 ]
 
