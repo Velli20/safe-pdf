@@ -195,7 +195,58 @@ impl FromPdfObject for Type0FontSpec {
             base_font: context.lenient(b"BaseFont").unwrap_or_default(),
             encoding: Arc::new(encoding),
             descendant,
-            to_unicode: context.optional(b"ToUnicode")?.map(Arc::new),
+            to_unicode: context.lenient(b"ToUnicode").map(Arc::new),
         })
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
+mod tests {
+    use crate::pdf_font_spec::PdfFontSpec;
+    use pdf_object_reader::{
+        EmptySource, ObjectReader, dictionary::Dictionary, object_variant::ObjectVariant,
+        pdf_string::PdfString, stream::StreamObject, string_kind::StringKind,
+    };
+
+    fn name(value: &[u8]) -> ObjectVariant {
+        PdfString::from(value, StringKind::Name)
+    }
+
+    #[test]
+    fn unparsable_to_unicode_keeps_the_type0_font() {
+        let descendant = Dictionary::from_entries([
+            (b"Subtype".as_slice(), name(b"CIDFontType2")),
+            (
+                b"W".as_slice(),
+                ObjectVariant::Array(
+                    vec![
+                        ObjectVariant::Integer(70),
+                        ObjectVariant::Array(vec![ObjectVariant::Integer(525)].into()),
+                    ]
+                    .into(),
+                ),
+            ),
+        ]);
+        let to_unicode = StreamObject::new(7, 0, Dictionary::default(), b"s\x80)\x1a4I".as_slice());
+        let font = Dictionary::from_entries([
+            (b"Subtype".as_slice(), name(b"Type0")),
+            (b"Encoding".as_slice(), name(b"Identity-H")),
+            (
+                b"DescendantFonts".as_slice(),
+                ObjectVariant::Array(vec![ObjectVariant::Dictionary(descendant)].into()),
+            ),
+            (b"ToUnicode".as_slice(), ObjectVariant::Stream(to_unicode)),
+        ]);
+
+        let spec = ObjectReader::new(EmptySource)
+            .read::<PdfFontSpec>(&ObjectVariant::Dictionary(font))
+            .expect("the font resource should decode");
+
+        let PdfFontSpec::Type0(spec) = spec else {
+            panic!("a malformed /ToUnicode must not replace the Type 0 font");
+        };
+        assert!(spec.to_unicode.is_none());
+        assert_eq!(spec.descendant.metrics.explicit.get(70), Some(525.0));
     }
 }

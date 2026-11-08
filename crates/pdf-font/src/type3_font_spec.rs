@@ -93,7 +93,7 @@ impl FromPdfObject for Type3FontSpec {
             encoding,
             metrics,
             char_procedures: context.required(b"CharProcs")?,
-            to_unicode: context.optional(b"ToUnicode")?.map(Arc::new),
+            to_unicode: context.lenient(b"ToUnicode").map(Arc::new),
         })
     }
 }
