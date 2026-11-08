@@ -12,7 +12,7 @@ use pdf_graphics::{AlphaConstant, BlendMode, DashPattern, MaskMode, rect::Rect};
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
-    form::FormXObject,
+    form::{FormGroup, FormXObject},
     resource::Resource,
     resources::Resources,
     soft_mask::{MaskTransfer, SoftMask},
@@ -99,7 +99,7 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
             operators: Vec::new(),
             id: 2,
         },
-        transparency_group: false,
+        group: None,
     };
     let resources = Arc::new(graphics_state_resource(vec![
         ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
@@ -128,7 +128,7 @@ fn soft_mask_applies_to_a_transparency_group_as_one_object() {
         matrix: None,
         resources: None,
         content_stream: content_stream(2, b"0 0 10 10 re f"),
-        transparency_group: true,
+        group: Some(FormGroup::Transparency { isolated: false }),
     };
     let group = FormXObject {
         bbox: None,
@@ -137,7 +137,7 @@ fn soft_mask_applies_to_a_transparency_group_as_one_object() {
             graphics_state_resource(vec![ExternalGraphicsStateKey::SoftMask(None)]),
         )),
         content_stream: content_stream(3, b"/GS0 gs 0 0 5 5 re f 5 5 5 5 re f"),
-        transparency_group: true,
+        group: Some(FormGroup::Transparency { isolated: false }),
     };
     let mut resources = graphics_state_resource(vec![ExternalGraphicsStateKey::SoftMask(Some(
         pdf_object_reader::ObjectHandle::from(SoftMask {
@@ -172,7 +172,7 @@ fn transparency_group_composites_with_the_alpha_and_blend_mode_active_at_do() {
             ]),
         )),
         content_stream: content_stream(2, b"/GS0 gs 0 0 5 5 re f"),
-        transparency_group: true,
+        group: Some(FormGroup::Transparency { isolated: false }),
     };
     let mut resources = graphics_state_resource(vec![
         ExternalGraphicsStateKey::NonStrokingAlpha(AlphaConstant::new(0.5)),
@@ -191,4 +191,32 @@ fn transparency_group_composites_with_the_alpha_and_blend_mode_active_at_do() {
     assert_eq!(observer.begin_mask_count, 0);
     let alphas: Vec<f32> = observer.fill_colors.iter().map(|color| color.a).collect();
     assert_eq!(alphas, vec![1.0]);
+}
+
+#[test]
+fn isolated_transparency_group_paints_its_blend_modes_in_its_own_layer() {
+    // SoftLight inside an isolated group blends with a transparent backdrop, not the page.
+    let group = FormXObject {
+        bbox: None,
+        matrix: None,
+        resources: Some(pdf_object_reader::ObjectHandle::from(
+            graphics_state_resource(vec![ExternalGraphicsStateKey::BlendMode(
+                BlendMode::SoftLight,
+            )]),
+        )),
+        content_stream: content_stream(2, b"/GS0 gs 0 0 5 5 re f"),
+        group: Some(FormGroup::Transparency { isolated: true }),
+    };
+    let mut resources = graphics_state_resource(Vec::new());
+    resources.xobjects = HashMap::from([(
+        PdfName::from(b"Fm0"),
+        pdf_object_reader::ObjectHandle::from(Resource::from(group)),
+    )]);
+    let stream = content_stream(1, b"/Fm0 Do");
+
+    let recording = render(&stream, &Arc::new(resources)).expect("group should render");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.group_layers, vec![(1.0, None)]);
+    assert_eq!(observer.fill_colors.len(), 1);
 }
