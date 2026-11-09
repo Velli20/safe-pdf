@@ -415,6 +415,26 @@ mod tests {
     }
 
     #[test]
+    fn recovering_stream_parser_ends_at_endstream_after_stray_byte() {
+        let input = b"1 0 obj\n<< /Length 4 >>\nstream\ndata\x14endstream\rendobj\r\
+2 0 obj\n<< /Length 4 >>\nstream\nnext\nendstream\rendobj\r";
+        let mut parser = PdfParser::from(input.as_slice());
+        stream_header(&mut parser);
+
+        let body = parser
+            .recover_stream_body(Some(4))
+            .expect("the stream should end at its own endstream");
+
+        assert_eq!(input.get(body), Some(b"data\x14".as_slice()));
+        assert_eq!(
+            parse_staged_indirect_object(&mut parser)
+                .unwrap()
+                .map(|(identifier, _)| identifier.number),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn recovering_stream_parser_requires_endobj_after_candidate() {
         let input = b"1 0 obj\n<< /Length 0 >>\nstream\npayload\nendstream\nnot-endobj";
         let mut parser = PdfParser::from(input.as_slice());
