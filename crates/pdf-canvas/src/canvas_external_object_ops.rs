@@ -154,11 +154,14 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             })
     }
 
-    /// Decodes inline image samples before applying the current painting state.
+    /// Decodes inline image samples before applying the current painting state; an inline
+    /// image whose data cannot be decoded paints nothing, like an image XObject.
     pub(crate) fn paint_inline_image(&mut self, image: &PdfImage) -> Result<(), PdfCanvasError> {
-        let decoded = image
-            .decode(None)
-            .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?;
+        let decoded = match image.decode(None) {
+            Ok(decoded) => decoded,
+            Err(error) if error.is_unreadable_data() => return Ok(()),
+            Err(error) => return Err(PdfCanvasError::InvalidImageData(error.to_string())),
+        };
 
         self.render_decoded_image(&decoded, true)
     }
