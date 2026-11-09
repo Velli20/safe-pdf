@@ -428,7 +428,8 @@ fn styled_advance(
     style: &TextStyle,
     writing_mode: WritingMode,
 ) -> TextVector {
-    let word_spacing = if decoded.source_code.value() == 0x20 {
+    let word_spacing = if decoded.source_code.byte_len() == 1 && decoded.source_code.value() == 0x20
+    {
         style.word_spacing
     } else {
         0.0
@@ -532,5 +533,39 @@ fn glyph_bounds(
             bottom: baseline + ascender,
         }
         .normalized(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pdf_cmap::UnicodeSequence;
+
+    #[test]
+    fn word_spacing_applies_only_to_single_byte_space_code() {
+        let style = TextStyle {
+            font_size: 1.0,
+            word_spacing: 2.0,
+            ..TextStyle::default()
+        };
+        let advance = |byte_len| {
+            let decoded = DecodedGlyph {
+                source_code: PdfCode::new(0x20, byte_len).unwrap(),
+                selector: GlyphSelector::Unspecified,
+                unicode: UnicodeSequence::default(),
+                pdf_advance: TextVector { x: 0.0, y: 0.0 },
+                explicit_width: false,
+                vertical_origin: TextVector { x: 0.0, y: 0.0 },
+            };
+            styled_advance(
+                &decoded,
+                TextVector { x: 0.5, y: 0.0 },
+                &style,
+                WritingMode::Horizontal,
+            )
+            .x
+        };
+        assert_eq!(advance(1), 2.5);
+        assert_eq!(advance(2), 0.5);
     }
 }
