@@ -1112,7 +1112,7 @@ mod tests {
             .expect("canvas should build");
 
         canvas
-            .paint_inline_image(&image)
+            .paint_inline_image(&pdf_image::InlineImage::Ready(image))
             .expect("truncated inline image should be skipped");
         drop(canvas);
         assert_eq!(backend.replay_cost(), 0);

@@ -14,7 +14,7 @@ use pdf_graphics::{
     size::Size, transform::Transform,
 };
 use pdf_image::{
-    PdfImage,
+    InlineImage,
     raster::{stencil_image, transfer_colors},
 };
 use pdf_resources::{
@@ -158,8 +158,16 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     }
 
     /// Decodes inline image samples before applying the current painting state; an inline
-    /// image whose data cannot be decoded paints nothing, like an image XObject.
-    pub(crate) fn paint_inline_image(&mut self, image: &PdfImage) -> Result<(), PdfCanvasError> {
+    /// image whose data cannot be decoded paints nothing, like an image XObject, as does
+    /// one that names a color space missing from the current resources.
+    pub(crate) fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), PdfCanvasError> {
+        let resources = self.current_state()?.resources.as_deref();
+        let image = match image.resolve(|name| resources?.color_space(name)) {
+            Ok(Some(image)) => image,
+            // Entries that do not fit the named color space leave nothing to draw, as they
+            // do for an image whose header defines its color space.
+            Ok(None) | Err(_) => return Ok(()),
+        };
         let decoded = match image.decode(None) {
             Ok(decoded) => decoded,
             Err(error) if error.is_unreadable_data() => return Ok(()),

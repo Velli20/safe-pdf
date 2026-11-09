@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pdf_image::{InlineDataEnd, InlineImageHeader, PdfImage};
+use pdf_image::{InlineDataEnd, InlineImage, InlineImageHeader, PdfImage};
 use pdf_object_reader::{
     ArrayContext, EmptySource, ObjectAccess, ReadSession, object_variant::ObjectVariant,
 };
@@ -159,7 +159,7 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
     ///
     /// The data is consumed before the image is read, so an image whose dictionary does
     /// not decode still leaves the parser after its data.
-    fn parse_inline_image(&mut self) -> Result<PdfImage, ParserError> {
+    fn parse_inline_image(&mut self) -> Result<InlineImage, ParserError> {
         let header = InlineImageHeader::from(self.parser.parse_inline_image_dictionary()?);
         let InlineDataEnd(end) = self.session.read(header.object())?;
         let data = self.parser.parse_inline_image_data(end)?;

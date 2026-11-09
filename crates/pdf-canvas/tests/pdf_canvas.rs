@@ -10,7 +10,7 @@ use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
 use pdf_graphics::{BlendMode, MaskMode, PixelFormat, rect::Rect};
-use pdf_image::PdfImage;
+use pdf_image::{InlineImage, PdfImage};
 use pdf_object_reader::{
     EmptySource, ObjectHandle, dictionary::Dictionary, object_variant::ObjectVariant,
     pdf_name::PdfName,
@@ -87,7 +87,7 @@ fn image_dictionary() -> Dictionary {
     ]))
 }
 
-fn inline_image() -> PdfImage {
+fn inline_image() -> InlineImage {
     PdfImage::inline(
         Dictionary::from_iter(std::collections::BTreeMap::from([
             (Vec::from(b"BPC"), ObjectVariant::Integer(1)),

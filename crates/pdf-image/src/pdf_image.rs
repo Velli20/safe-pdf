@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use bytes::Bytes;
+use pdf_color_space::color_space::ColorSpace;
 use pdf_filter::{
     filter::{Filter, Filters},
     image_payload::{EncodedPayload, ImagePayload},
@@ -11,14 +12,17 @@ use pdf_object_reader::{
 };
 use pdf_parser::inline_image::InlineImageDataEnd;
 
-use crate::{error::PdfImageError, image_metadata::ImageMetadata};
+use crate::{
+    error::PdfImageError,
+    image_metadata::{ImageEntries, ImageMetadata},
+};
 
 /// An image stream's metadata and payload, ready to decode into a raster.
 ///
 /// Image XObjects are read from their stream and keep their payload encoded until
 /// [`PdfImage::decode`]; inline images are read from their dictionary and data and
 /// decoded at once, see [`PdfImage::inline`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PdfImage {
     pub(crate) metadata: ImageMetadata,
     pub(crate) payload: EncodedPayload,
@@ -49,15 +53,25 @@ impl PdfImage {
         header: impl Into<InlineImageHeader>,
         data: impl Into<Bytes>,
         access: &mut (impl ObjectAccess + ?Sized),
-    ) -> Result<Self, PdfImageError> {
-        let image = access.read::<Self>(&header.into().into_stream(data))?;
-        match image.payload.decode()? {
-            ImagePayload::Jpx(_) => Err(PdfImageError::InlineJpxFilter),
-            samples @ ImagePayload::Samples(_) => Ok(Self {
-                payload: EncodedPayload::from(samples),
-                ..image
+    ) -> Result<InlineImage, PdfImageError> {
+        let header = header.into();
+        let color_space = header.color_space.clone();
+        let stream = header.into_stream(data);
+        let payload = match access.read::<EncodedPayload>(&stream)?.decode()? {
+            ImagePayload::Jpx(_) => return Err(PdfImageError::InlineJpxFilter),
+            samples @ ImagePayload::Samples(_) => EncodedPayload::from(samples),
+        };
+        Ok(match color_space {
+            Some(name) => InlineImage::ResourceColorSpace {
+                name,
+                entries: access.read(&stream)?,
+                payload,
+            },
+            None => InlineImage::Ready(Self {
+                metadata: access.read(&stream)?,
+                payload,
             }),
-        }
+        })
     }
 
     /// Returns whether a failed read leaves the image without samples to draw: its
@@ -86,28 +100,108 @@ impl PdfImage {
     }
 }
 
+/// An image drawn from a content stream's `BI` operator.
+#[derive(Debug)]
+pub enum InlineImage {
+    /// An image whose header defines its color space, or that needs none.
+    Ready(PdfImage),
+    /// An image whose `/ColorSpace` names an entry of the `/ColorSpace` resources it is
+    /// drawn with (ISO 32000 §8.9.7), so its metadata is completed when it is drawn.
+    ResourceColorSpace {
+        /// The resource name of the color space.
+        name: PdfName,
+        /// The image's other entries.
+        entries: ImageEntries,
+        /// The filtered samples.
+        payload: EncodedPayload,
+    },
+}
+
+impl InlineImage {
+    /// Returns the image to draw, looking up a color space resource by name with
+    /// `color_space`; `None` when the image names a color space that is not found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image's entries do not fit the resolved color space.
+    pub fn resolve(
+        &self,
+        color_space: impl FnOnce(&[u8]) -> Option<Arc<ColorSpace>>,
+    ) -> Result<Option<Cow<'_, PdfImage>>, PdfImageError> {
+        match self {
+            Self::Ready(image) => Ok(Some(Cow::Borrowed(image))),
+            Self::ResourceColorSpace {
+                name,
+                entries,
+                payload,
+            } => {
+                let Some(resolved) = color_space(name.as_bytes()) else {
+                    return Ok(None);
+                };
+                Ok(Some(Cow::Owned(PdfImage {
+                    metadata: ImageMetadata::new(entries.clone(), Some((*resolved).clone()))?,
+                    payload: payload.clone(),
+                })))
+            }
+        }
+    }
+
+    /// Returns shared ownership of the filtered samples.
+    pub fn shared_data(&self) -> Bytes {
+        match self {
+            Self::Ready(image) => image.shared_data(),
+            Self::ResourceColorSpace { payload, .. } => payload.shared_data(),
+        }
+    }
+}
+
 /// An inline image's dictionary with its abbreviated keys and colour-space names
 /// expanded, read before the image data that follows it.
+///
+/// A `/ColorSpace` name other than a device colour space names a colour space resource;
+/// it is taken out of the dictionary and kept apart until the image is drawn.
 #[derive(Debug)]
-pub struct InlineImageHeader(ObjectVariant);
+pub struct InlineImageHeader {
+    /// The expanded dictionary, without a `/ColorSpace` that names a resource.
+    dictionary: ObjectVariant,
+    /// The resource name of the image's color space.
+    color_space: Option<PdfName>,
+}
 
 impl From<Dictionary> for InlineImageHeader {
     fn from(dictionary: Dictionary) -> Self {
-        Self(ObjectVariant::Dictionary(
-            normalize_inline_image_dictionary(dictionary),
-        ))
+        let mut dictionary = normalize_inline_image_dictionary(dictionary);
+        let color_space = match dictionary.get(b"ColorSpace") {
+            Some(ObjectVariant::String(name))
+                if name.kind() == pdf_object_reader::string_kind::StringKind::Name
+                    && !matches!(
+                        name.as_bytes(),
+                        b"DeviceGray" | b"DeviceRGB" | b"DeviceCMYK"
+                    ) =>
+            {
+                Some(PdfName::from(name.as_bytes()))
+            }
+            _ => None,
+        };
+        if color_space.is_some() {
+            dictionary.take(b"ColorSpace");
+        }
+        Self {
+            dictionary: ObjectVariant::Dictionary(dictionary),
+            color_space,
+        }
     }
 }
 
 impl InlineImageHeader {
     /// Returns the expanded dictionary as an object, for reading [`InlineDataEnd`].
     pub fn object(&self) -> &ObjectVariant {
-        &self.0
+        &self.dictionary
     }
 
     /// Combines the dictionary with the image's encoded data.
     fn into_stream(self, data: impl Into<Bytes>) -> ObjectVariant {
-        let dictionary = match self.0 {
+        let dictionary = match self.dictionary {
             ObjectVariant::Dictionary(dictionary) => dictionary,
             // Unreachable: a header is only built from a dictionary.
             _ => Dictionary::default(),
@@ -379,7 +473,11 @@ mod tests {
             data.clone(),
             &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
-        .expect("unfiltered image should be constructed");
+        .expect("unfiltered image should be constructed")
+        .resolve(|_| None)
+        .expect("inline image should resolve")
+        .expect("inline image names no color space resource")
+        .into_owned();
 
         assert_eq!(image.shared_data().as_ptr(), data.as_ptr());
     }
@@ -400,7 +498,11 @@ mod tests {
             b"2A>".to_vec(),
             &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
-        .expect("filter should decode during construction");
+        .expect("filter should decode during construction")
+        .resolve(|_| None)
+        .expect("inline image should resolve")
+        .expect("inline image names no color space resource")
+        .into_owned();
 
         assert_eq!(image.shared_data().as_ref(), &[0x2A]);
     }
@@ -418,6 +520,55 @@ mod tests {
             error,
             crate::error::PdfImageError::InvalidImageDimensions { .. }
         ));
+    }
+
+    #[test]
+    fn inline_image_reads_color_space_named_in_resources() {
+        let name = |value: &[u8]| {
+            pdf_object_reader::pdf_string::PdfString::from(
+                value,
+                pdf_object_reader::string_kind::StringKind::Name,
+            )
+        };
+        let indexed = pdf_object_reader::ObjectReader::new(EmptySource)
+            .read::<pdf_color_space::color_space::ColorSpace>(&ObjectVariant::Array(
+                vec![
+                    name(b"Indexed"),
+                    name(b"DeviceRGB"),
+                    ObjectVariant::Integer(1),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        vec![10, 11, 12, 20, 21, 22],
+                        pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                    ),
+                ]
+                .into(),
+            ))
+            .expect("indexed color space should read");
+        let image = PdfImage::inline(
+            Dictionary::from_iter(BTreeMap::from([
+                (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
+                (Vec::from(b"CS"), name(b"CS0")),
+                (Vec::from(b"H"), ObjectVariant::Integer(1)),
+                (Vec::from(b"W"), ObjectVariant::Integer(2)),
+            ])),
+            vec![0, 1],
+            &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
+        )
+        .expect("inline image naming a color space resource should be read");
+
+        assert!(
+            image
+                .resolve(|_| None)
+                .expect("a missing resource is not an error")
+                .is_none()
+        );
+        let resolved = image
+            .resolve(|resource| (resource == b"CS0").then(|| std::sync::Arc::new(indexed)))
+            .expect("image should fit the indexed color space")
+            .expect("color space resource should be found");
+        let decoded = resolved.decode(None).expect("image should decode");
+
+        assert_eq!(decoded.data.as_ref(), &[10, 11, 12, 255, 20, 21, 22, 255]);
     }
 
     fn gray_dictionary() -> Dictionary {
