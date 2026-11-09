@@ -56,7 +56,9 @@ impl FromPdfObject for SourceAnnotation {
                 .map(AnnotationFlags::from_bits_retain),
             appearance: dictionary.optional(b"AP")?,
             appearance_state: dictionary.optional(b"AS")?,
-            border: dictionary.optional(b"Border")?,
+            // A malformed `/Border` (e.g. an empty array) is treated as absent, so the
+            // default border applies, as in PDFium.
+            border: dictionary.lenient(b"Border"),
             color: dictionary.optional(b"C")?,
             struct_parent: dictionary.optional(b"StructParent")?,
             optional_content: dictionary.optional::<OptionalContentMembership>(b"OC")?,
@@ -120,7 +122,10 @@ impl FromPdfObject for AppearanceDictionary {
     }
 }
 
-/// Reads an `/AP` entry: one stream, or a dictionary of state streams with null states skipped.
+/// Reads an `/AP` entry: one stream, or a dictionary of state streams.
+///
+/// Like PDFium, a state that is null or not a stream (e.g. a name) has no appearance and
+/// is skipped.
 impl FromPdfObject for AppearanceStreams {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let ObjectVariant::Dictionary(_) = context.object() else {
@@ -128,17 +133,18 @@ impl FromPdfObject for AppearanceStreams {
             return Ok(Self::Stream(PdfObject::new(ObjectVariant::Stream(stream))));
         };
         let mut states = context.dictionary()?;
-        states
-            .keys()
-            .filter_map(|name| {
-                let stream = states.optional::<StreamObject>(name).transpose()?;
-                Some(stream.map(|stream| AppearanceState {
-                    name: PdfName::from_bytes(name),
-                    stream: PdfObject::new(ObjectVariant::Stream(stream)),
-                }))
-            })
-            .collect::<ReadResult<_>>()
-            .map(Self::States)
+        Ok(Self::States(
+            states
+                .keys()
+                .filter_map(|name| {
+                    let stream = states.lenient::<StreamObject>(name)?;
+                    Some(AppearanceState {
+                        name: PdfName::from_bytes(name),
+                        stream: PdfObject::new(ObjectVariant::Stream(stream)),
+                    })
+                })
+                .collect(),
+        ))
     }
 }
 
@@ -227,5 +233,49 @@ impl FromPdfObject for BorderEffectStyle {
             b"C" => Self::Cloudy,
             other => Self::Unknown(Vec::from(other)),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::pdf_data::{AppearanceStreams, SourceAnnotation};
+    use pdf_object_reader::{
+        Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
+        pdf_array::PdfArray, pdf_string::PdfString, string_kind::StringKind,
+    };
+
+    #[test]
+    fn malformed_border_and_name_appearance_state_are_skipped() {
+        let name = |bytes: &[u8]| PdfString::from(bytes, StringKind::Name);
+        let on = StreamObject::new(2, 0, Dictionary::from_entries([]), b"q Q".to_vec());
+        let widget = ObjectVariant::Dictionary(Dictionary::from_entries([
+            (b"Subtype".as_slice(), name(b"Widget")),
+            (b"FT".as_slice(), name(b"Btn")),
+            (
+                b"Border".as_slice(),
+                ObjectVariant::Array(PdfArray::new([])),
+            ),
+            (
+                b"AP".as_slice(),
+                ObjectVariant::Dictionary(Dictionary::from_entries([(
+                    b"N".as_slice(),
+                    ObjectVariant::Dictionary(Dictionary::from_entries([
+                        (b"On".as_slice(), ObjectVariant::Stream(on)),
+                        (b"Off".as_slice(), name(b"Foo")),
+                    ])),
+                )])),
+            ),
+        ]));
+
+        let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
+
+        assert!(source.border.is_none());
+        let names: Vec<&[u8]> = match source.appearance.as_ref().and_then(|a| a.normal.as_ref()) {
+            Some(AppearanceStreams::States(states)) => {
+                states.iter().map(|state| state.name.as_ref()).collect()
+            }
+            _ => Vec::new(),
+        };
+        assert_eq!(names, [b"On".as_slice()]);
     }
 }

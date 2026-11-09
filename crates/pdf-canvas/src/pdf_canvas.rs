@@ -1085,4 +1085,36 @@ mod tests {
             }
         ));
     }
+
+    #[test]
+    /// Verifies that an inline image too short for its dimensions paints nothing.
+    fn truncated_inline_image_paints_nothing() {
+        use pdf_object_reader::{
+            Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
+            pdf_string::PdfString, string_kind::StringKind,
+        };
+        let dictionary = Dictionary::from_entries([
+            (b"Width".as_slice(), ObjectVariant::Integer(60)),
+            (b"Height".as_slice(), ObjectVariant::Integer(1)),
+            (b"BitsPerComponent".as_slice(), ObjectVariant::Integer(8)),
+            (
+                b"ColorSpace".as_slice(),
+                PdfString::from(b"DeviceRGB", StringKind::Name),
+            ),
+        ]);
+        let stream = StreamObject::new(0, 0, dictionary, vec![0; 155]);
+        let image: pdf_image::PdfImage = ObjectReader::new(EmptySource)
+            .read(&ObjectVariant::Stream(stream))
+            .expect("image metadata should read");
+        let page = page();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+
+        canvas
+            .paint_inline_image(&image)
+            .expect("truncated inline image should be skipped");
+        drop(canvas);
+        assert_eq!(backend.replay_cost(), 0);
+    }
 }
