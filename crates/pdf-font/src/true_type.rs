@@ -57,15 +57,21 @@ impl<'a> TrueTypeProgramRef<'a> {
         })
     }
 
-    /// Looks up a character code in the cmap subtable with the given platform and encoding.
+    /// Looks up a character code in the first cmap subtable with the given platform and
+    /// encoding, where `None` accepts any encoding of that platform.
     ///
     /// Glyph zero is `.notdef`, so it counts as a miss.
-    fn code_glyph(&self, platform: PlatformId, encoding: u16, code: u32) -> Option<GlyphId> {
+    fn code_glyph(
+        &self,
+        platform: PlatformId,
+        encoding: Option<u16>,
+        code: u32,
+    ) -> Option<GlyphId> {
         let cmap = self.font.cmap().ok()?;
-        let record = cmap
-            .encoding_records()
-            .iter()
-            .find(|record| record.platform_id() == platform && record.encoding_id() == encoding)?;
+        let record = cmap.encoding_records().iter().find(|record| {
+            record.platform_id() == platform
+                && encoding.is_none_or(|encoding| record.encoding_id() == encoding)
+        })?;
         let glyph = record
             .subtable(cmap.offset_data())
             .ok()?
@@ -251,14 +257,19 @@ impl FontFace for TrueTypeFontFace {
     }
 
     /// Looks the code up in a (3,0) Microsoft Symbol subtable, directly and in the `0xF000`
-    /// private-use range, then in a (1,0) Macintosh Roman subtable.
+    /// private-use range, then in a (1,0) Macintosh Roman subtable, and finally in a
+    /// Unicode-platform subtable, the default charmap of fonts that carry neither.
+    ///
+    /// skrifa's charmap skips format 0 subtables, so a font whose only cmap is a byte-keyed
+    /// Unicode-platform table resolves its codes here.
     fn glyph_for_code(&self, code: u8) -> Option<GlyphId> {
         let program = self.program.borrow_dependent();
         let code = u32::from(code);
         program
-            .code_glyph(PlatformId::Windows, 0, code)
-            .or_else(|| program.code_glyph(PlatformId::Windows, 0, 0xF000 | code))
-            .or_else(|| program.code_glyph(PlatformId::Macintosh, 0, code))
+            .code_glyph(PlatformId::Windows, Some(0), code)
+            .or_else(|| program.code_glyph(PlatformId::Windows, Some(0), 0xF000 | code))
+            .or_else(|| program.code_glyph(PlatformId::Macintosh, Some(0), code))
+            .or_else(|| program.code_glyph(PlatformId::Unicode, None, code))
     }
 
     fn horizontal_advance(&self, glyph: GlyphId) -> Result<Option<f32>, FontError> {
