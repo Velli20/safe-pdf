@@ -73,7 +73,7 @@ impl FromPdfObject for MaskTransfer {
         let object = context.object();
         match object {
             ObjectVariant::String(name) if name.as_bytes() == b"Identity" => Ok(Self::Identity),
-            _ => Ok(Self::Table(Self::sample(&context.read(object)?)?)),
+            _ => Ok(Self::Table(Arc::new(Self::sample(&context.read(object)?)?))),
         }
     }
 }
@@ -87,22 +87,22 @@ impl MaskTransfer {
         }
     }
 
-    /// Samples a transfer function into a lookup table.
-    fn sample(function: &Function) -> Result<Arc<[u8; 256]>, PdfPagesError> {
+    /// Samples a transfer function into an 8-bit lookup table.
+    pub(crate) fn sample(function: &Function) -> Result<[u8; 256], PdfPagesError> {
         let mut table = [0; 256];
         for (input, output) in (0_u8..=255).zip(&mut table) {
             *output = Self::sample_one(function, input)?;
         }
-        Ok(Arc::new(table))
+        Ok(table)
     }
 
-    /// Maps one 8-bit mask coverage value through the transfer function.
+    /// Maps one 8-bit value through the transfer function.
     fn sample_one(function: &Function, input: u8) -> Result<u8, PdfPagesError> {
         match function.apply(&[f32::from(input) / 255.0])?.as_slice() {
             [value] if value.is_finite() => (value.clamp(0.0, 1.0) * 255.0).round().to_u8(),
             _ => None,
         }
-        .ok_or(PdfPagesError::InvalidSoftMaskTransfer)
+        .ok_or(PdfPagesError::InvalidTransferFunction)
     }
 }
 

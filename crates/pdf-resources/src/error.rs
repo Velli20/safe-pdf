@@ -39,8 +39,8 @@ pub enum PdfPagesError {
         "invalid /ExtGState entry '/SMask': group XObject must have /Subtype /Form, found /Image"
     )]
     SoftMaskGroupNotForm,
-    #[error("invalid /ExtGState entry '/SMask': /TR must produce one finite output")]
-    InvalidSoftMaskTransfer,
+    #[error("invalid /TR transfer function: it must produce one finite output")]
+    InvalidTransferFunction,
     #[error("invalid /PaintType value: {value}")]
     InvalidPaintType { value: i32 },
     #[error("invalid /PatternType value: {value}")]

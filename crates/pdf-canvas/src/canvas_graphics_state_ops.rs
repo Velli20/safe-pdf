@@ -2,7 +2,10 @@
 use std::sync::Arc;
 
 use pdf_graphics::{DashPattern, LineCap, LineJoin, MaskMode, transform::Transform};
-use pdf_resources::{external_graphics_state::ExternalGraphicsStateKey, resource::Resource};
+use pdf_resources::{
+    color_transfer::ColorTransfer, external_graphics_state::ExternalGraphicsStateKey,
+    resource::Resource,
+};
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
@@ -167,6 +170,12 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 }
                 ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
                     self.set_non_stroking_alpha(*alpha)?;
+                }
+                ExternalGraphicsStateKey::Transfer(transfer) => {
+                    self.current_state_mut()?.transfer = match transfer {
+                        ColorTransfer::Identity => None,
+                        ColorTransfer::Tables(tables) => Some(Arc::clone(tables)),
+                    };
                 }
             }
         }

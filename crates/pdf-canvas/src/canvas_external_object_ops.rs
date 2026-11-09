@@ -13,7 +13,10 @@ use pdf_graphics::{
     BlendMode, Image, MaskMode, PathFillType, PixelFormat, pdf_path::PdfPath, rect::Rect,
     size::Size, transform::Transform,
 };
-use pdf_image::{PdfImage, raster::stencil_image};
+use pdf_image::{
+    PdfImage,
+    raster::{stencil_image, transfer_colors},
+};
 use pdf_resources::{
     form::{FormGroup, FormXObject},
     image_xobject::ImageXObject,
@@ -194,7 +197,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         result
     }
 
-    /// Computes image placement before entering the backend-only mask callback.
+    /// Paints a decoded image through the current transfer function.
     ///
     /// An image mask's coverage is painted in the current non-stroking color, which may
     /// be a pattern.
@@ -211,6 +214,19 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             let stencil = stencil_image(image, [r, g, b])?;
             return self.render_decoded_image(&stencil, inline_image);
         }
+        if let Some(tables) = self.current_state()?.transfer.as_deref() {
+            let transferred = transfer_colors(image, tables)?;
+            return self.draw_decoded_image(&transferred, inline_image);
+        }
+        self.draw_decoded_image(image, inline_image)
+    }
+
+    /// Draws a color image under the current transform, blend mode, alpha and soft mask.
+    fn draw_decoded_image(
+        &mut self,
+        image: &Image,
+        inline_image: bool,
+    ) -> Result<(), PdfCanvasError> {
         let transform = self.image_transform()?;
         let paint = &self.current_state()?.paint;
         let blend_mode = paint.blend_mode.clone();
