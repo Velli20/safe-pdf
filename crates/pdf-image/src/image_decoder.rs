@@ -867,7 +867,11 @@ mod tests {
             b"2A>".to_vec(),
             &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
-        .expect("inline image filters should decode");
+        .expect("inline image filters should decode")
+        .resolve(|_| None)
+        .expect("inline image should resolve")
+        .expect("inline image names no color space resource")
+        .into_owned();
 
         let decoded = image.decode(None).expect("inline image should decode");
 
@@ -893,7 +897,11 @@ mod tests {
             vec![0b1010_0000],
             &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
-        .expect("inline image should be constructed");
+        .expect("inline image should be constructed")
+        .resolve(|_| None)
+        .expect("inline image should resolve")
+        .expect("inline image names no color space resource")
+        .into_owned();
 
         let decoded = image
             .decode(None)
@@ -921,7 +929,11 @@ mod tests {
             vec![12, 34],
             &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
-        .expect("inline image should be constructed");
+        .expect("inline image should be constructed")
+        .resolve(|_| None)
+        .expect("inline image should resolve")
+        .expect("inline image names no color space resource")
+        .into_owned();
         let samples = image.shared_data();
 
         let decoded = image
@@ -964,7 +976,11 @@ mod tests {
             vec![0b1010_0000],
             &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
-        .expect("inline image should be constructed");
+        .expect("inline image should be constructed")
+        .resolve(|_| None)
+        .expect("inline image should resolve")
+        .expect("inline image names no color space resource")
+        .into_owned();
 
         let decoded = image
             .decode(None)

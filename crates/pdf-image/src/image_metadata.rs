@@ -32,12 +32,31 @@ pub(crate) struct ImageMetadata {
     pub(crate) interpolate: bool,
 }
 
-/// Reads an image dictionary, applying the defaults PDF allows and rejecting values
-/// the decoders cannot handle; null entries count as absent.
+/// The entries of an image dictionary other than `/ColorSpace`, whose meaning depends
+/// on the color space the image is drawn in.
 ///
-/// `/ColorSpace` is decoded only for an image that is not a mask, because a mask's
-/// samples carry no color and its `/ColorSpace` is never used.
-impl FromPdfObject for ImageMetadata {
+/// An inline image may name its color space in the resources it is drawn with, so its
+/// entries are read with the content stream and combined with the color space later.
+#[derive(Debug, Clone)]
+pub struct ImageEntries {
+    /// Image dimensions in pixels.
+    size: Rect<usize>,
+    /// `/BitsPerComponent`, absent when the dictionary omits it.
+    bits_per_component: Option<usize>,
+    /// Whether the image samples form a stencil mask instead of color values.
+    pub(crate) image_mask: bool,
+    /// Filter chain declared by the image dictionary.
+    filters: Option<Filters>,
+    /// `/Decode` values, mapped once the number of color components is known.
+    decode: Option<Vec<f32>>,
+    /// How a JPX image's own opacity channel is used.
+    smask_in_data: SMaskInData,
+    /// Whether the image is smoothed when it is enlarged (`/Interpolate`).
+    interpolate: bool,
+}
+
+/// Reads an image dictionary's entries; null entries count as absent.
+impl FromPdfObject for ImageEntries {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         let size = match (
@@ -51,25 +70,68 @@ impl FromPdfObject for ImageMetadata {
                 return Err(PdfImageError::InvalidImageDimensions { width, height }.into());
             }
         };
-        let image_mask = context.optional(b"ImageMask")?.unwrap_or_default();
-        let filters = context.optional::<Filters>(Filters::KEY)?;
-        let is_jpx = filters.as_ref().is_some_and(Filters::has_jpx_filter);
-        let color_space = match image_mask {
-            true => None,
-            false => context.optional::<ColorSpace>(b"ColorSpace")?,
-        };
+        Ok(Self {
+            size,
+            bits_per_component: context.optional(b"BitsPerComponent")?,
+            image_mask: context.optional(b"ImageMask")?.unwrap_or_default(),
+            filters: context.optional::<Filters>(Filters::KEY)?,
+            decode: context.optional(b"Decode")?,
+            smask_in_data: context
+                .optional::<i64>(b"SMaskInData")?
+                .map_or_else(|| Ok(SMaskInData::default()), SMaskInData::try_from)?,
+            interpolate: context.optional(b"Interpolate")?.unwrap_or_default(),
+        })
+    }
+}
 
-        // Image masks and JPX images may omit /BitsPerComponent, with different
-        // defaults. Every other image must provide it.
-        let bits_per_component = match context.optional(b"BitsPerComponent")? {
+/// Reads an image dictionary, applying the defaults PDF allows and rejecting values
+/// the decoders cannot handle; null entries count as absent.
+///
+/// `/ColorSpace` is decoded only for an image that is not a mask, because a mask's
+/// samples carry no color and its `/ColorSpace` is never used.
+impl FromPdfObject for ImageMetadata {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let object = context.object();
+        let entries = context.read::<ImageEntries>(object)?;
+        let color_space = match entries.image_mask {
+            true => None,
+            false => context
+                .dictionary()?
+                .optional::<ColorSpace>(b"ColorSpace")?,
+        };
+        Ok(Self::new(entries, color_space)?)
+    }
+}
+
+impl ImageMetadata {
+    /// Combines an image's entries with the color space its samples are drawn in.
+    ///
+    /// Image masks and JPX images may omit `/BitsPerComponent`, with different defaults;
+    /// every other image must provide it.
+    pub(crate) fn new(
+        entries: ImageEntries,
+        color_space: Option<ColorSpace>,
+    ) -> Result<Self, PdfImageError> {
+        let ImageEntries {
+            size,
+            bits_per_component,
+            image_mask,
+            filters,
+            decode,
+            smask_in_data,
+            interpolate,
+        } = entries;
+        let is_jpx = filters.as_ref().is_some_and(Filters::has_jpx_filter);
+        let bits_per_component = match bits_per_component {
             Some(bits_per_component) => bits_per_component,
             None if image_mask => Self::DEFAULT_IMAGE_MASK_BITS_PER_COMPONENT,
             None if is_jpx => Self::DEFAULT_JPX_BITS_PER_COMPONENT,
             None => {
                 return Err(PdfImageError::Object(ObjectError::MissingRequiredKey {
                     key: "BitsPerComponent".to_string(),
-                })
-                .into());
+                }));
             }
         };
         // PDF ignores /BitsPerComponent for a JPX image: the codestream states
@@ -77,32 +139,28 @@ impl FromPdfObject for ImageMetadata {
         if !is_jpx {
             validate_bits_per_component(bits_per_component, image_mask, color_space.as_ref())?;
         }
-        let smask_in_data = context
-            .optional::<i64>(b"SMaskInData")?
-            .map_or_else(|| Ok(SMaskInData::default()), SMaskInData::try_from)?;
         let num_color_components = color_space
             .as_ref()
             .map_or(1, ColorSpace::num_color_components);
-        let decode = context
-            .optional::<Vec<f32>>(b"Decode")?
+        let decode = decode
             .map(|values| DecodeMap::new(&values, num_color_components))
-            .transpose()
-            .map_err(PdfImageError::from)?;
+            .transpose()?;
 
         Ok(Self {
             size,
             bits_per_component,
-            color_space,
+            color_space: match image_mask {
+                true => None,
+                false => color_space,
+            },
             image_mask,
             filters,
             decode,
             smask_in_data,
-            interpolate: context.optional(b"Interpolate")?.unwrap_or_default(),
+            interpolate,
         })
     }
-}
 
-impl ImageMetadata {
     /// Default bit depth for an image mask when `/BitsPerComponent` is omitted.
     const DEFAULT_IMAGE_MASK_BITS_PER_COMPONENT: usize = 1;
 
