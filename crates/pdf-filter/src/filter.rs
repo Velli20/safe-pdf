@@ -84,6 +84,10 @@ pub enum Filter {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filters {
     filters: Vec<Filter>,
+    /// Whether `/Filter` was written as an array, in which case `/DecodeParms`
+    /// must be an array too; a single filter name takes one dictionary
+    /// (PDF 32000-1:2008 §7.3.8.2, Table 5).
+    listed: bool,
 }
 
 impl Filters {
@@ -104,16 +108,20 @@ impl Filters {
     pub fn has_dct_filter(&self) -> bool {
         self.has_filter(&Filter::DCTDecode)
     }
+
+    /// Returns whether `/Filter` was written as an array rather than a single name.
+    pub(crate) fn is_listed(&self) -> bool {
+        self.listed
+    }
 }
 
 /// Reads a `/Filter` value: one filter name or an array applied in order.
 impl FromPdfObject for Filters {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let filters = match context.object() {
-            ObjectVariant::Array(_) => context.array()?.read_all()?,
-            _ => vec![Filter::from_pdf_object(context)?],
-        };
-        Ok(Self { filters })
+        Ok(match context.object() {
+            ObjectVariant::Array(_) => Self::from(context.array()?.read_all::<Filter>()?),
+            _ => Self::from(Filter::from_pdf_object(context)?),
+        })
     }
 }
 
@@ -124,9 +132,23 @@ impl FromPdfObject for Filter {
     }
 }
 
+/// A chain written as a `/Filter` array.
 impl From<Vec<Filter>> for Filters {
     fn from(filters: Vec<Filter>) -> Self {
-        Self { filters }
+        Self {
+            filters,
+            listed: true,
+        }
+    }
+}
+
+/// A chain written as a single `/Filter` name.
+impl From<Filter> for Filters {
+    fn from(filter: Filter) -> Self {
+        Self {
+            filters: vec![filter],
+            listed: false,
+        }
     }
 }
 
@@ -681,6 +703,50 @@ mod tests {
         .expect("decode failed");
 
         assert_eq!(decoded.as_ref(), b"hello");
+    }
+
+    #[test]
+    fn decode_parms_in_a_different_form_than_filter_are_ignored() {
+        use flate2::{Compression, write::ZlibEncoder};
+        use std::io::Write;
+
+        // Rows written without PNG predictor tag bytes.
+        let samples = [10, 20, 30, 40];
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&samples).expect("zlib write failed");
+        let compressed = encoder.finish().expect("zlib finish failed");
+
+        let predictor = Dictionary::from_iter(BTreeMap::from([
+            (Vec::from(b"Predictor"), ObjectVariant::Integer(12)),
+            (Vec::from(b"Columns"), ObjectVariant::Integer(2)),
+        ]));
+        let flate = || {
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"FlateDecode",
+                pdf_object_reader::string_kind::StringKind::Name,
+            )
+        };
+        let mismatched = [
+            (
+                flate(),
+                ObjectVariant::Array(vec![ObjectVariant::Dictionary(predictor.clone())].into()),
+            ),
+            (
+                ObjectVariant::Array(vec![flate()].into()),
+                ObjectVariant::Dictionary(predictor),
+            ),
+        ];
+
+        for (filter, decode_parms) in mismatched {
+            let dictionary = Dictionary::from_iter(BTreeMap::from([
+                (Vec::from(b"Filter"), filter),
+                (Vec::from(b"DecodeParms"), decode_parms),
+            ]));
+            let stream = StreamObject::new_encoded(1, 0, dictionary, compressed.clone());
+
+            let decoded = decode(stream).expect("decode failed");
+            assert_eq!(decoded.as_ref(), samples);
+        }
     }
 
     #[test]

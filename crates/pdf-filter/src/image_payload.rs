@@ -155,11 +155,12 @@ impl FromPdfObject for FilterPipeline {
         let decode_parms = context
             .optional::<DecodeParms>(b"DecodeParms")?
             .unwrap_or_default();
+        let listed = filters.is_listed();
         let stages = filters
             .into_iter()
             .enumerate()
             .map(|(index, filter)| {
-                let entry = decode_parms.entry(index);
+                let entry = decode_parms.entry(index, listed);
                 let params = match filter {
                     Filter::FlateDecode => entry
                         .map(|entry| context.read::<Option<PredictorParams>>(entry))
@@ -293,17 +294,18 @@ enum DecodeParms {
     /// No parameters; every filter uses its defaults.
     #[default]
     Absent,
-    /// One parameter dictionary, applied to every filter of the chain.
-    Shared(ObjectVariant),
-    /// One entry per filter, matched by position; null entries keep the defaults.
-    PerFilter(PdfArray),
+    /// One parameter dictionary, for a chain written as a single filter name.
+    Dictionary(ObjectVariant),
+    /// One entry per filter of a chain written as an array, matched by
+    /// position; null entries keep the defaults.
+    Array(PdfArray),
 }
 
 impl FromPdfObject for DecodeParms {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object() {
-            dictionary @ ObjectVariant::Dictionary(_) => Ok(Self::Shared(dictionary.clone())),
-            ObjectVariant::Array(array) => Ok(Self::PerFilter(array.clone())),
+            dictionary @ ObjectVariant::Dictionary(_) => Ok(Self::Dictionary(dictionary.clone())),
+            ObjectVariant::Array(array) => Ok(Self::Array(array.clone())),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::Dictionary,
                 actual: context.object().kind(),
@@ -314,11 +316,15 @@ impl FromPdfObject for DecodeParms {
 
 impl DecodeParms {
     /// Returns the parameter entry of the filter at `index`, if it has one.
-    fn entry(&self, index: usize) -> Option<&ObjectVariant> {
-        match self {
-            Self::Absent => None,
-            Self::Shared(dictionary) => Some(dictionary),
-            Self::PerFilter(array) => array.get(index),
+    ///
+    /// `listed` is whether `/Filter` was written as an array. A `/DecodeParms`
+    /// whose form does not match `/Filter`'s gives no parameters, so each filter
+    /// keeps its defaults.
+    fn entry(&self, index: usize, listed: bool) -> Option<&ObjectVariant> {
+        match (self, listed) {
+            (Self::Dictionary(dictionary), false) => Some(dictionary),
+            (Self::Array(array), true) => array.get(index),
+            _ => None,
         }
     }
 }

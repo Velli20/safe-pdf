@@ -233,7 +233,7 @@ mod tests {
 
         assert_eq!(
             metadata.filters,
-            Some(Filters::from(vec![Filter::ASCIIHexDecode]))
+            Some(Filters::from(Filter::ASCIIHexDecode))
         );
     }
 
@@ -292,10 +292,7 @@ mod tests {
             read(&dictionary).expect("JPX metadata should default missing BitsPerComponent");
 
         assert_eq!(metadata.bits_per_component, 8);
-        assert_eq!(
-            metadata.filters,
-            Some(Filters::from(vec![Filter::JPXDecode]))
-        );
+        assert_eq!(metadata.filters, Some(Filters::from(Filter::JPXDecode)));
     }
 
     #[test]
