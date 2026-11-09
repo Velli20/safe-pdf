@@ -11,7 +11,7 @@ use bytes::Bytes;
 use read_fonts::{
     TableProvider,
     tables::{cmap::PlatformId, post::DEFAULT_GLYPH_NAMES},
-    types::Version16Dot16,
+    types::{Tag, Version16Dot16},
 };
 use self_cell::self_cell;
 use skrifa::{
@@ -181,6 +181,7 @@ impl TrueTypeFontFace {
         id: FontFaceId,
         metadata: FontMetadata,
     ) -> Result<Self, FontError> {
+        let data = with_long_loca_when_nonzero(data, face_index);
         let program = TrueTypeProgram::try_new(data, move |data| {
             TrueTypeProgramRef::parse(data, face_index, format)
         })?;
@@ -370,6 +371,42 @@ fn validate_outline_format(
         format,
         message: "the OpenType outline format does not match the declared source".into(),
     })
+}
+
+/// Rewrites a `head.indexToLocFormat` other than 0 or 1 to 1, the long `loca` format.
+///
+/// `skrifa` reads long `loca` offsets only when the field is exactly 1, so a producer that
+/// writes another nonzero value gets its long offsets read as short ones and its glyphs
+/// misplaced. FreeType treats every nonzero value as long; the field is patched to match.
+/// Programs with a valid field, or that fail to parse, are returned unchanged without a copy.
+fn with_long_loca_when_nonzero(data: Bytes, face_index: u32) -> Bytes {
+    let Ok(font) = FontRef::from_index(&data, face_index) else {
+        return data;
+    };
+    let Ok(head) = font.head() else {
+        return data;
+    };
+    if matches!(head.index_to_loc_format(), 0 | 1) {
+        return data;
+    }
+    let field = head.index_to_loc_format_byte_range();
+    let Some(field) = font
+        .table_directory
+        .table_records()
+        .iter()
+        .find(|record| record.tag() == Tag::new(b"head"))
+        .and_then(|record| usize::try_from(record.offset()).ok())
+        .and_then(|offset| Some(offset.checked_add(field.start)?..offset.checked_add(field.end)?))
+    else {
+        return data;
+    };
+
+    let mut repaired = data.to_vec();
+    let Some(bytes) = repaired.get_mut(field) else {
+        return data;
+    };
+    bytes.copy_from_slice(&1_i16.to_be_bytes());
+    Bytes::from(repaired)
 }
 
 /// Parses either a standalone font or one member of a font collection.
