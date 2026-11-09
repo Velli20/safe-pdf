@@ -274,6 +274,34 @@ pub fn transfer_mask(image: &Image, transfer: &[u8; 256]) -> Result<Image, Image
     })
 }
 
+/// Maps each pixel's red, green and blue through a transfer function's tables,
+/// keeping alpha.
+///
+/// Gray8 pixels expand to RGB, since each component may map differently.
+///
+/// # Errors
+/// Returns image validation errors or allocation failures.
+pub fn transfer_colors(image: &Image, tables: &[[u8; 256]; 3]) -> Result<Image, ImageRasterError> {
+    validate_image(image)?;
+    let [red, green, blue] = tables;
+    let mut data = rgba_buffer(image.width, image.height)?;
+    for [r, g, b, a] in rgba_pixels(image) {
+        data.extend_from_slice(&[
+            red.get(usize::from(r)).copied().unwrap_or(r),
+            green.get(usize::from(g)).copied().unwrap_or(g),
+            blue.get(usize::from(b)).copied().unwrap_or(b),
+            a,
+        ]);
+    }
+    Ok(Image {
+        data: data.into(),
+        width: image.width,
+        height: image.height,
+        pixel_format: PixelFormat::RGBA8888,
+        interpolate: image.interpolate,
+    })
+}
+
 /// Paints a stencil mask's coverage in a solid color.
 ///
 /// Each output pixel takes `color` with the mask's coverage as its alpha, so samples

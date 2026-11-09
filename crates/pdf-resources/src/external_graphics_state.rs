@@ -3,7 +3,9 @@ use pdf_object_reader::{
     object_variant::ObjectVariant,
 };
 
-use crate::{error::PdfPagesError, resource::Resource, soft_mask::SoftMask};
+use crate::{
+    color_transfer::ColorTransfer, error::PdfPagesError, resource::Resource, soft_mask::SoftMask,
+};
 use pdf_graphics::{AlphaConstant, BlendMode, DashPattern, LineCap, LineJoin};
 use std::sync::Arc;
 
@@ -41,6 +43,9 @@ pub enum ExternalGraphicsStateKey {
     StrokingAlpha(AlphaConstant),
     /// Non-stroking alpha constant (`ca`): the opacity of all other painting operations.
     NonStrokingAlpha(AlphaConstant),
+    /// Transfer function (`TR2`, or `TR` when `TR2` is absent) applied to device color
+    /// components. A malformed entry is ignored.
+    Transfer(ColorTransfer),
 }
 
 pub struct ExternalGraphicsState {
@@ -84,6 +89,10 @@ impl FromPdfObject for ExternalGraphicsState {
             context
                 .optional(b"ca")?
                 .map(ExternalGraphicsStateKey::NonStrokingAlpha),
+            context
+                .lenient(b"TR2")
+                .or_else(|| context.lenient(b"TR"))
+                .map(ExternalGraphicsStateKey::Transfer),
         ];
         Ok(Self {
             params: params.into_iter().flatten().collect(),
@@ -281,6 +290,49 @@ mod tests {
             ext_gstate.params.as_slice(),
             [ExternalGraphicsStateKey::SoftMask(None)]
         ));
+    }
+
+    #[test]
+    fn transfer_function_entry_is_sampled_per_component() {
+        use crate::color_transfer::ColorTransfer;
+        use pdf_object_reader::stream::StreamObject;
+
+        let unit = || {
+            ObjectVariant::Array(vec![ObjectVariant::Integer(0), ObjectVariant::Integer(1)].into())
+        };
+        let invert = ObjectVariant::Stream(StreamObject::new(
+            8,
+            0,
+            Dictionary::from_entries([
+                (b"FunctionType".as_slice(), ObjectVariant::Integer(4)),
+                (b"Domain".as_slice(), unit()),
+                (b"Range".as_slice(), unit()),
+            ]),
+            b"{1 exch sub}".to_vec(),
+        ));
+        let identity = || ObjectVariant::name_from_bytes(b"Identity");
+        let transfer = |value: ObjectVariant| {
+            let dictionary = Dictionary::from_iter(BTreeMap::from([(Vec::from(b"TR"), value)]));
+            let mut state = parse_ext_gstate(&dictionary)
+                .expect("extgstate should parse")
+                .expect("extgstate should be present");
+            match state.params.pop() {
+                Some(ExternalGraphicsStateKey::Transfer(transfer)) => transfer,
+                _ => panic!("expected a transfer entry"),
+            }
+        };
+
+        let ColorTransfer::Tables(tables) = transfer(ObjectVariant::Array(
+            vec![invert.clone(), identity(), invert, identity()].into(),
+        )) else {
+            panic!("an inverting transfer should produce tables");
+        };
+        for (input, ((red, green), blue)) in
+            (0_u8..=255).zip(tables[0].iter().zip(&tables[1]).zip(&tables[2]))
+        {
+            assert_eq!((*red, *green, *blue), (255 - input, input, 255 - input));
+        }
+        assert!(matches!(transfer(identity()), ColorTransfer::Identity));
     }
 
     #[test]

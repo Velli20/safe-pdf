@@ -1,7 +1,7 @@
 //! PDF graphics-state values retained across saved states.
 use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{CanvasPaint, pdf_path::PdfPath, transform::Transform};
-use pdf_resources::{pattern::Pattern, resources::Resources};
+use pdf_resources::{color_transfer::ColorTransferTables, pattern::Pattern, resources::Resources};
 use std::sync::Arc;
 
 use crate::{mask_layer::MaskLayer, text_state::TextState};
@@ -16,6 +16,8 @@ pub(crate) struct CanvasState {
     pub pattern_parent_transform: Transform,
     /// Selected soft mask and the device transform captured when it was selected.
     pub soft_mask: Option<MaskLayer>,
+    /// Transfer tables applied to painted image colors; `None` leaves them unchanged.
+    pub transfer: Option<Arc<ColorTransferTables>>,
     /// Paint properties used for paths and text glyphs.
     pub paint: CanvasPaint,
     /// The current text state, encapsulating font, size, and text matrix.
@@ -59,6 +61,7 @@ impl Default for CanvasState {
             transform: Transform::identity(),
             pattern_parent_transform: Transform::identity(),
             soft_mask: None,
+            transfer: None,
             paint: CanvasPaint::default(),
             text_state: TextState::default(),
             clip_path: None,
