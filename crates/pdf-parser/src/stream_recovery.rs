@@ -5,9 +5,10 @@
 //! stale, or otherwise incorrect `/Length`:
 //!
 //! 1. A declared boundary followed by `endstream` and `endobj` is used as is.
-//! 2. Otherwise the body ends at a standalone `endstream` keyword followed, apart from
-//!    whitespace and comments, by `endobj`. Some writers truncate the keyword to
-//!    `endstrea`; that form is accepted too.
+//! 2. Otherwise the body ends at an `endstream` keyword followed, apart from whitespace
+//!    and comments, by `endobj`. Some writers truncate the keyword to `endstrea`; that
+//!    form is accepted too. The keyword may directly follow a data byte, since writers
+//!    also leave stray bytes between the data and `endstream`.
 //! 3. With a `/Length` hint, the terminator nearest the declared boundary wins; without
 //!    one, the first in byte order.
 //!
@@ -97,8 +98,10 @@ impl StreamTerminator {
         Self::at(input, data_end.saturating_add(line_ending_len))
     }
 
-    /// Returns every terminator beginning on a token boundary at or after `data_start`,
-    /// in byte order.
+    /// Returns every terminator beginning at or after `data_start`, in byte order.
+    ///
+    /// A terminator may directly follow a stray data byte, so a short `/Length` that
+    /// stops before that byte does not carry the body into later objects.
     fn scan(input: &[u8], data_start: usize) -> impl Iterator<Item = Self> + '_ {
         input
             .get(data_start..)
@@ -107,13 +110,6 @@ impl StreamTerminator {
             .enumerate()
             .filter(|(_, window)| *window == TRUNCATED_ENDSTREAM_KEYWORD)
             .map(move |(offset, _)| data_start.saturating_add(offset))
-            .filter(|&start| {
-                start
-                    .checked_sub(1)
-                    .and_then(|index| input.get(index))
-                    .copied()
-                    .is_some_and(PdfParser::is_pdf_delimiter)
-            })
             .filter_map(|start| Self::at(input, start))
     }
 
