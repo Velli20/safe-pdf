@@ -36,6 +36,8 @@ pub struct ObservingCanvas {
     pub save_count: usize,
     pub restore_count: usize,
     pub begin_mask_count: usize,
+    /// Each mask's recording size and the fill colors it paints.
+    pub masks: Vec<(f32, f32, Vec<Color>)>,
     pub group_layers: Vec<(f32, Option<BlendMode>)>,
 }
 
@@ -143,11 +145,17 @@ impl CanvasBackend for ObservingCanvas {
     }
 
     /// Observes one scoped mask and forwards its painting callback.
-    fn with_mask_layer<F>(&mut self, _mask: &MaskLayer, paint: F) -> Result<(), PdfCanvasError>
+    fn with_mask_layer<F>(&mut self, mask: &MaskLayer, paint: F) -> Result<(), PdfCanvasError>
     where
         F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
     {
         self.begin_mask_count += 1;
+        let recording = mask.recording();
+        self.masks.push((
+            recording.width(),
+            recording.height(),
+            replay(recording).fill_colors,
+        ));
         paint(self)
     }
 

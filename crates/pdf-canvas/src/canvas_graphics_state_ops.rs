@@ -1,7 +1,7 @@
 //! PDF graphics-state selection and save/restore operators.
 use std::sync::Arc;
 
-use pdf_graphics::{DashPattern, LineCap, LineJoin, MaskMode, transform::Transform};
+use pdf_graphics::{DashPattern, LineCap, LineJoin, transform::Transform};
 use pdf_resources::{
     color_transfer::ColorTransfer, external_graphics_state::ExternalGraphicsStateKey,
     resource::Resource,
@@ -113,54 +113,10 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                     // Handle the `/SMask` entry from an `ExtGState` dictionary.
                     if let Some(smask) = smask.as_ref() {
                         let smask = smask.get()?;
-                        if matches!(&smask.mask_type, MaskMode::Unknown(_)) {
-                            continue;
+                        // An unusable mask leaves the current one in effect.
+                        if let Some(layer) = self.soft_mask_layer(&smask)? {
+                            self.current_state_mut()?.soft_mask = Some(layer);
                         }
-
-                        let form = smask.shape.get()?;
-                        // The soft mask is defined by a Form XObject.
-                        // We need to render this form's content into a separate mask surface.
-                        // Without bounds there is no offscreen surface to record into.
-                        let Some(bbox) = form.bbox.as_ref() else {
-                            continue;
-                        };
-                        let matrix = form.matrix.unwrap_or_else(Transform::identity);
-                        let bounds = matrix.map_rect(bbox);
-                        if !Self::can_record_offscreen_bbox(bbox)
-                            || !Self::can_record_offscreen_bbox(&bounds)
-                        {
-                            continue;
-                        }
-
-                        // Backends cover only `[0, w] x [0, h]` of mask space, so mask space
-                        // starts at the group's bounds in the current user space.
-                        let recording_canvas = self.record_content_stream(
-                            &form.content_stream,
-                            Some(
-                                Transform::from_translate(-bounds.left, -bounds.top)
-                                    .post_concatenated(&matrix),
-                            ),
-                            bbox,
-                            form.resources
-                                .as_ref()
-                                .map(|resources| resources.get())
-                                .transpose()?,
-                            None,
-                            None,
-                        )?;
-
-                        let transform = self
-                            .current_state()?
-                            .transform
-                            .post_concatenated(&Transform::from_translate(bounds.left, bounds.top));
-
-                        self.current_state_mut()?.soft_mask =
-                            Some(crate::mask_layer::MaskLayer::new(
-                                Arc::new(recording_canvas),
-                                transform,
-                                smask.mask_type.clone(),
-                                smask.transfer.table().cloned(),
-                            )?);
                     } else {
                         self.current_state_mut()?.soft_mask = None;
                     }

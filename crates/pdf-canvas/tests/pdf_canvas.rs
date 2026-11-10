@@ -340,6 +340,7 @@ fn image_soft_mask_replaces_the_graphics_state_soft_mask() {
                 ObjectHandle::from(SoftMask {
                     mask_type: MaskMode::Luminosity,
                     transfer: MaskTransfer::Identity,
+                    backdrop: None,
                     shape: empty_group.into(),
                 }),
             ))],
