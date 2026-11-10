@@ -61,4 +61,19 @@ impl LabColorSpace {
             LAB_REFERENCE_WHITE,
         ))
     }
+
+    /// Converts one 8-bit encoded `L*a*b*` triple, such as an Indexed palette entry,
+    /// to a [`Color`].
+    ///
+    /// Each byte spans its component's full range linearly: `0..=255` maps L* onto
+    /// `0..=100`, and a* and b* onto the space's `[amin amax]` and `[bmin bmax]` ranges.
+    pub(crate) fn apply_encoded(&self, [l, a, b]: [u8; 3]) -> Result<Color, ColorSpaceError> {
+        let [amin, amax, bmin, bmax] = self.range;
+        let fraction = |byte: u8| f32::from(byte) / 255.0;
+        self.apply(&[
+            fraction(l) * 100.0,
+            amin + fraction(a) * (amax - amin),
+            bmin + fraction(b) * (bmax - bmin),
+        ])
+    }
 }

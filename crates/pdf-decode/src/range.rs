@@ -39,6 +39,18 @@ impl DecodeRange {
         clamped.round().to_u8().unwrap_or(u8::MAX)
     }
 
+    /// Maps one packed sample byte to a palette index.
+    ///
+    /// An Indexed image's range is already in index units (its default is
+    /// `[0 2^bpc-1]`), so the decoded value is rounded rather than scaled.
+    pub fn map_index(&self, sample: u8, sample_max: u8) -> u8 {
+        self.map_f32(sample, sample_max)
+            .round()
+            .clamp(0.0, f32::from(u8::MAX))
+            .to_u8()
+            .unwrap_or(u8::MAX)
+    }
+
     /// Maps one packed sample byte into this range without quantizing the result.
     pub fn map_f32(&self, sample: u8, sample_max: u8) -> f32 {
         let sample_max = f32::from(sample_max.max(1));

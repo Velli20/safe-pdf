@@ -188,13 +188,10 @@ impl DecodedSamples {
     ) -> Result<Self, PdfImageError> {
         let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
         let sample_max = Self::sample_max(metadata.sample_bits())?;
-        let decoded_indices = Self::apply_decode(
-            sample_codes,
-            metadata.decode.as_ref(),
-            sample_max,
-            sample_max,
-            metadata.image_mask,
-        );
+        let decoded_indices = match metadata.decode.as_ref() {
+            Some(decode) => decode.apply_to_indices(&sample_codes, sample_max).into(),
+            None => sample_codes,
+        };
 
         let image_data = expand_indexed_values(
             decoded_indices.as_ref(),
@@ -218,13 +215,10 @@ impl DecodedSamples {
     ) -> Result<Self, PdfImageError> {
         let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
         let sample_max = Self::sample_max(metadata.sample_bits())?;
-        let indices = Self::apply_decode(
-            sample_codes,
-            metadata.decode.as_ref(),
-            sample_max,
-            sample_max,
-            metadata.image_mask,
-        );
+        let indices = match metadata.decode.as_ref() {
+            Some(decode) => decode.apply_to_indices(&sample_codes, sample_max).into(),
+            None => sample_codes,
+        };
 
         let indexed_color_space = ColorSpace::Indexed(indexed.clone());
         let mut palette = Vec::with_capacity(usize::from(indexed.hival).saturating_add(1));
