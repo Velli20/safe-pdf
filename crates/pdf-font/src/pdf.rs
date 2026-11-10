@@ -24,7 +24,7 @@ pub use pdf_cmap::{PdfCode, ToUnicodeMap};
 /// fallback for font programs whose physical metrics are missing or unusable.
 pub const PDF_GLYPH_SPACE_UNITS_PER_EM: f32 = 1_000.0;
 
-/// Advance assumed for a simple-font glyph with neither a `/Widths` entry nor a
+/// Advance assumed for a simple-font glyph when the font has neither `/Widths` nor a
 /// descriptor `/MissingWidth`.
 ///
 /// The specification's `/MissingWidth` default of zero would stack such glyphs on one
