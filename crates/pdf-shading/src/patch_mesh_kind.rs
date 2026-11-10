@@ -294,12 +294,17 @@ mod tests {
         let patch = PatchKind::Tensor
             .build_patch(Vec::from(points), Vec::from(corner_colors()))
             .expect("complete tensor patch should build");
-        let MeshPatch::Tensor { control_points, .. } = patch else {
-            panic!("tensor kind should build a tensor patch");
+        let control_points = match patch {
+            MeshPatch::Tensor { control_points, .. } => Some(control_points),
+            MeshPatch::Coons { .. } => None,
         };
 
-        let expected = [0, 1, 2, 3, 11, 12, 13, 4, 10, 15, 14, 5, 9, 8, 7, 6].map(|i| points[i]);
-        assert_eq!(control_points, expected);
+        let expected = [
+            points[0], points[1], points[2], points[3], points[11], points[12], points[13],
+            points[4], points[10], points[15], points[14], points[5], points[9], points[8],
+            points[7], points[6],
+        ];
+        assert_eq!(control_points, Some(expected));
     }
 
     #[test]
