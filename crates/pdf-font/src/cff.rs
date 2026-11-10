@@ -5,6 +5,10 @@
 //! Unicode lookup from the Adobe Glyph List applied to those names. CID-keyed
 //! programs are accepted too; their charset maps CIDs, so they have no names. Font bytes and the parser view
 //! borrowing them are retained together by each loaded face.
+//!
+//! A name-keyed program declared as PDF `/CIDFontType0C` data is loaded here as well. Its CIDs
+//! then address glyph indices directly, as FreeType does for such fonts. Programs that are
+//! CID-keyed are left to the Type 0 driver, which maps CIDs through the charset.
 
 use std::sync::Arc;
 
@@ -36,17 +40,26 @@ struct CffProgramRef<'a> {
 
 impl<'a> CffProgramRef<'a> {
     /// Parses a program and the private dictionaries its charstrings use.
-    fn parse(data: &'a [u8]) -> Result<Self, FontError> {
+    ///
+    /// A program declared as [`FontProgramFormat::CidCff`] is rejected when it is CID-keyed,
+    /// before its private dictionaries are read, so the Type 0 driver can load it instead.
+    fn parse(data: &'a [u8], format: FontProgramFormat) -> Result<Self, FontError> {
         let font =
             CffFontRef::new_cff(data, 0, None).map_err(|error| FontError::InvalidProgram {
-                format: FontProgramFormat::Cff,
+                format,
                 message: error.to_string(),
             })?;
+        if format == FontProgramFormat::CidCff && font.is_cid() {
+            return Err(FontError::InvalidProgram {
+                format,
+                message: "a CID-keyed CFF program is loaded by the Type 0 driver".into(),
+            });
+        }
         let subfonts = (0..font.num_subfonts())
             .map(|index| font.subfont(index, &[]))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| FontError::InvalidProgram {
-                format: FontProgramFormat::Cff,
+                format,
                 message: error.to_string(),
             })?;
         Ok(Self { font, subfonts })
@@ -135,8 +148,11 @@ impl Default for CffFontDriver {
 
 impl FontDriver for CffFontDriver {
     /// Reports whether this driver handles a bare CFF program.
+    ///
+    /// `CidCff` is accepted provisionally. Loading still verifies that the program is
+    /// name-keyed, because producers also label name-keyed CFF as `/CIDFontType0C`.
     fn supports(&self, format: FontProgramFormat) -> bool {
-        matches!(format, FontProgramFormat::Cff)
+        matches!(format, FontProgramFormat::Cff | FontProgramFormat::CidCff)
     }
 
     /// Parses one in-memory CFF program into an immutable font face.
@@ -168,6 +184,7 @@ impl FontDriver for CffFontDriver {
 
         Ok(Arc::new(CffFontFace::new(
             data.clone(),
+            *format,
             request.face_id,
             request.metadata_hint.clone(),
         )?))
@@ -194,8 +211,13 @@ pub struct CffFontFace {
 
 impl CffFontFace {
     /// Creates a face and parses its retained program exactly once.
-    fn new(data: Bytes, id: FontFaceId, metadata: FontMetadata) -> Result<Self, FontError> {
-        let program = CffProgram::try_new(data, |data| CffProgramRef::parse(data))?;
+    fn new(
+        data: Bytes,
+        format: FontProgramFormat,
+        id: FontFaceId,
+        metadata: FontMetadata,
+    ) -> Result<Self, FontError> {
+        let program = CffProgram::try_new(data, |data| CffProgramRef::parse(data, format))?;
         let unicode_charmap = Charmap::from_glyph_names(program.borrow_dependent().glyph_names());
         let metrics = program.borrow_dependent().metrics();
         Ok(Self {
@@ -294,5 +316,40 @@ impl FontFace for CffFontFace {
         let mut pen = PdfPathPen::default();
         self.program.borrow_dependent().draw(glyph, &mut pen)?;
         Ok(Some(GlyphGeometry::Outline(pen.into_path())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::font::{FontMetadata, FontProgramFormat, FontSource, GlyphGeometry};
+    use crate::font_registry::FontRegistry;
+    use crate::standard14::{Standard14Font, fallback_font_bytes};
+    use crate::type0::Type0FontDriver;
+
+    use super::CffFontDriver;
+
+    #[test]
+    fn name_keyed_cid_font_type0c_addresses_glyph_indices() {
+        let mut registry = FontRegistry::new();
+        registry.register(Arc::new(CffFontDriver::new()));
+        registry.register(Arc::new(Type0FontDriver::new()));
+        let face = registry
+            .load(
+                FontSource::Memory {
+                    data: bytes::Bytes::from_static(fallback_font_bytes(Standard14Font::Helvetica)),
+                    format: FontProgramFormat::CidCff,
+                    face_index: 0,
+                },
+                FontMetadata::default(),
+            )
+            .unwrap();
+        let glyph = face.glyph_for_char('A').unwrap();
+
+        assert!(matches!(
+            face.glyph_geometry(glyph, 12.0),
+            Ok(Some(GlyphGeometry::Outline(outline))) if !outline.verbs.is_empty()
+        ));
     }
 }
