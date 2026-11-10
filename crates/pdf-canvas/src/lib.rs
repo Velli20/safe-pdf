@@ -16,6 +16,8 @@ mod canvas_marked_content_ops;
 mod canvas_operator_dispatch;
 /// PDF path construction and painting operators.
 mod canvas_path_ops;
+/// Soft-mask recording from an `ExtGState` `/SMask`.
+mod canvas_soft_mask;
 /// PDF graphics-state values retained across saved states.
 mod canvas_state;
 /// PDF text operators and glyph painting.

@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 mod common;
 
@@ -8,7 +8,7 @@ use common::{content_stream, replay};
 use pdf_canvas::{error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
 use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
-use pdf_graphics::{AlphaConstant, BlendMode, DashPattern, MaskMode, rect::Rect};
+use pdf_graphics::{AlphaConstant, BlendMode, DashPattern, MaskMode, color::Color, rect::Rect};
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
@@ -105,6 +105,7 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
         ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
             mask_type: MaskMode::Alpha,
             transfer: MaskTransfer::Identity,
+            backdrop: None,
             shape: form.into(),
         }))),
     ]));
@@ -143,6 +144,7 @@ fn soft_mask_applies_to_a_transparency_group_as_one_object() {
         pdf_object_reader::ObjectHandle::from(SoftMask {
             mask_type: MaskMode::Alpha,
             transfer: MaskTransfer::Identity,
+            backdrop: None,
             shape: mask_group.into(),
         }),
     ))]);
@@ -157,6 +159,45 @@ fn soft_mask_applies_to_a_transparency_group_as_one_object() {
     let observer = replay(&recording);
     assert_eq!(observer.begin_mask_count, 1);
     assert_eq!(observer.fill_colors.len(), 2);
+}
+
+#[test]
+fn luminosity_soft_mask_backdrop_covers_the_area_outside_the_group() {
+    // A white `/BC` gives full coverage outside the group's 10 x 10 bounds, so the mask
+    // spans the 100 x 100 page and paints the backdrop before the group's black fill.
+    let mask_group = FormXObject {
+        bbox: Some(Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 10.0,
+            bottom: 10.0,
+        }),
+        matrix: None,
+        resources: None,
+        content_stream: content_stream(2, b"0 g 0 0 10 10 re f"),
+        group: Some(FormGroup::Transparency { isolated: false }),
+    };
+    let resources = Arc::new(graphics_state_resource(vec![
+        ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
+            mask_type: MaskMode::Luminosity,
+            transfer: MaskTransfer::Identity,
+            backdrop: Some(Color::from_rgb(1.0, 1.0, 1.0)),
+            shape: mask_group.into(),
+        }))),
+    ]));
+    let stream = content_stream(1, b"/GS0 gs 0 0 100 100 re f");
+
+    let recording = render(&stream, &resources).expect("masked fill should render");
+
+    let observer = replay(&recording);
+    let [(width, height, fills)] = observer.masks.as_slice() else {
+        panic!("one mask should apply, got {}", observer.masks.len());
+    };
+    assert_eq!((*width, *height), (100.0, 100.0));
+    assert_eq!(
+        fills.as_slice(),
+        &[Color::from_rgb(1.0, 1.0, 1.0), Color::from_gray(0.0)]
+    );
 }
 
 #[test]

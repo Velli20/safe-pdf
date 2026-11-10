@@ -2,7 +2,7 @@
 use crate::{error::PdfPagesError, form::FormXObject, xobject::XObjectSubtype};
 use num_traits::ToPrimitive;
 use pdf_function::function::Function;
-use pdf_graphics::MaskMode;
+use pdf_graphics::{MaskMode, color::Color};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ObjectReadError, ReadResult,
     object_kind::ObjectKind, object_variant::ObjectVariant,
@@ -17,6 +17,10 @@ pub struct SoftMask {
     pub shape: ObjectHandle<FormXObject>,
     /// The `/TR` mapping applied to the mask coverage.
     pub transfer: MaskTransfer,
+    /// The `/BC` backdrop the group composites over before its luminosity is taken; it
+    /// also sets the mask outside the group's bounds. Only `/Luminosity` masks use it, and
+    /// a malformed `/BC` is ignored, leaving the default black backdrop.
+    pub backdrop: Option<Color>,
 }
 
 impl FromPdfObject for SoftMask {
@@ -28,6 +32,7 @@ impl FromPdfObject for SoftMask {
             mask_type: context.required(b"S")?,
             shape,
             transfer: context.optional(b"TR")?.unwrap_or_default(),
+            backdrop: context.lenient::<Color>(b"BC"),
         })
     }
 }
