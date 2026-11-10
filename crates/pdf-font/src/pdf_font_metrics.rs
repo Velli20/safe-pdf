@@ -3,6 +3,7 @@
 use crate::{
     PDF_GLYPH_SPACE_UNITS_PER_EM,
     error::FontError,
+    glyph_widths_map::GlyphWidthsMap,
     pdf::{FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding},
     standard14::Standard14Font,
 };
@@ -16,9 +17,10 @@ impl FromPdfObject for PdfMetrics {
     /// default widths are stored outside the width arrays. Type 0 containers
     /// obtain their metrics from a descendant rather than this decoder.
     ///
-    /// Simple fonts default to the descriptor's `/MissingWidth` or
-    /// [`FALLBACK_GLYPH_WIDTH`], Type 3 fonts to zero, and CID fonts to `/DW` or
-    /// 1000. Missing simple widths and reversed character ranges leave the
+    /// Simple fonts default to the descriptor's `/MissingWidth`; without one, codes
+    /// outside a `/Widths` table advance zero, and a font with no widths at all uses
+    /// [`FALLBACK_GLYPH_WIDTH`]. Type 3 fonts default to zero, and CID fonts to `/DW`
+    /// or 1000. Missing simple widths and reversed character ranges leave the
     /// explicit table empty. Short arrays contribute only available widths;
     /// surplus values remain unread.
     ///
@@ -31,16 +33,17 @@ impl FromPdfObject for PdfMetrics {
         let value = context.object();
         let mut context = context.dictionary()?;
         let subtype: PdfName = context.required(b"Subtype")?;
-        let default_width = match subtype.as_ref() {
+        let declared_default = match subtype.as_ref() {
             // Decode metadata only; font program loading belongs to the font spec.
             b"Type1" | b"MMType1" | b"TrueType" => context
                 .optional::<PdfFontDescriptor>(b"FontDescriptor")?
-                .and_then(|descriptor| descriptor.missing_width)
-                .unwrap_or(FALLBACK_GLYPH_WIDTH),
-            b"Type3" => 0.0,
-            b"CIDFontType0" | b"CIDFontType2" => context
-                .optional::<f32>(b"DW")?
-                .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM),
+                .and_then(|descriptor| descriptor.missing_width),
+            b"Type3" => Some(0.0),
+            b"CIDFontType0" | b"CIDFontType2" => Some(
+                context
+                    .optional::<f32>(b"DW")?
+                    .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM),
+            ),
             other => {
                 return Err(FontError::UnsupportedFontSubtype {
                     subtype: String::from_utf8_lossy(other).into_owned(),
@@ -48,10 +51,15 @@ impl FromPdfObject for PdfMetrics {
                 .into());
             }
         };
-        Ok(Self {
-            default: default_width,
-            explicit: context.read(value)?,
-        })
+        let explicit: GlyphWidthsMap = context.read(value)?;
+        // `/MissingWidth` defaults to zero for codes outside a font's `/Widths`; only a
+        // font without any widths falls back to an average advance.
+        let default = declared_default.unwrap_or(if explicit.is_empty() {
+            FALLBACK_GLYPH_WIDTH
+        } else {
+            0.0
+        });
+        Ok(Self { default, explicit })
     }
 }
 
