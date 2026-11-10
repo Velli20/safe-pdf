@@ -137,7 +137,9 @@ pub enum MeshPatch {
     },
     /// A tensor-product patch with a 4x4 control net and 4 corner colors.
     Tensor {
-        /// Control points for the 4x4 patch net.
+        /// Control points of the 4x4 patch net in row-major order
+        /// (`p00..p03`, `p10..p13`, `p20..p23`, `p30..p33`), reordered from
+        /// the stream order that walks the boundary first.
         control_points: [Point; 16],
         /// Corner colors ordered clockwise from the top-left corner.
         corner_colors: [Color; 4],
