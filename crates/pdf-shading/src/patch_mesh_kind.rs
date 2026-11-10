@@ -74,6 +74,10 @@ impl PatchKind {
     }
 
     /// Converts decoded vectors into the fixed-size public patch model.
+    ///
+    /// Tensor points arrive in stream order, which walks the boundary
+    /// before the four interior points; they are reordered into the
+    /// row-major 4x4 net the patch model stores.
     pub(crate) fn build_patch(
         self,
         control_points: Vec<Point>,
@@ -84,10 +88,33 @@ impl PatchKind {
                 control_points: try_array(control_points, "12 Coons control points")?,
                 corner_colors: try_array(corner_colors, "4 Coons corner colors")?,
             }),
-            Self::Tensor => Ok(MeshPatch::Tensor {
-                control_points: try_array(control_points, "16 tensor control points")?,
-                corner_colors: try_array(corner_colors, "4 tensor corner colors")?,
-            }),
+            Self::Tensor => {
+                let [
+                    p00,
+                    p01,
+                    p02,
+                    p03,
+                    p13,
+                    p23,
+                    p33,
+                    p32,
+                    p31,
+                    p30,
+                    p20,
+                    p10,
+                    p11,
+                    p12,
+                    p22,
+                    p21,
+                ] = try_array(control_points, "16 tensor control points")?;
+                Ok(MeshPatch::Tensor {
+                    control_points: [
+                        p00, p01, p02, p03, p10, p11, p12, p13, p20, p21, p22, p23, p30, p31, p32,
+                        p33,
+                    ],
+                    corner_colors: try_array(corner_colors, "4 tensor corner colors")?,
+                })
+            }
         }
     }
 
@@ -259,6 +286,25 @@ mod tests {
                 .expect("valid tensor continuation should be reconstructed");
             assert_eq!(actual, expected);
         }
+    }
+
+    #[test]
+    fn tensor_stream_order_is_reordered_into_a_row_major_net() {
+        let points = tensor_points();
+        let patch = PatchKind::Tensor
+            .build_patch(Vec::from(points), Vec::from(corner_colors()))
+            .expect("complete tensor patch should build");
+        let control_points = match patch {
+            MeshPatch::Tensor { control_points, .. } => Some(control_points),
+            MeshPatch::Coons { .. } => None,
+        };
+
+        let expected = [
+            points[0], points[1], points[2], points[3], points[11], points[12], points[13],
+            points[4], points[10], points[15], points[14], points[5], points[9], points[8],
+            points[7], points[6],
+        ];
+        assert_eq!(control_points, Some(expected));
     }
 
     #[test]
