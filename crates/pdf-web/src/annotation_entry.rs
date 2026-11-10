@@ -79,9 +79,15 @@ fn painted_on_canvas(entry: &AnnotationEntry) -> bool {
         }
 }
 
+/// The CSS border for `entry`, or empty when nothing draws one: a link is only an
+/// interaction region, and canvas-painted or shape-drawn kinds carry their own outline.
 fn css_border(entry: &AnnotationEntry) -> String {
     let style = &entry.style;
-    if painted_on_canvas(entry) || drawn_from_shapes(&entry.content) || style.border_width <= 0.0 {
+    if matches!(entry.content, Kind::Link(_))
+        || painted_on_canvas(entry)
+        || drawn_from_shapes(&entry.content)
+        || style.border_width <= 0.0
+    {
         return String::new();
     }
     let line = if style.dash.as_ref().is_some_and(|dash| !dash.is_empty()) {
@@ -130,4 +136,60 @@ fn css_matrix(entry: &AnnotationEntry, device_to_css: &Transform) -> String {
         dd = y;
     }
     format!("matrix({a},{b},{c},{dd},{e},{f})")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pdf_annotation_core::{
+        models::{AnnotationId, Revision},
+        style::ResolvedStyle,
+        subtypes::Link,
+    };
+
+    #[test]
+    fn link_has_no_css_border() {
+        let style = ResolvedStyle {
+            border_color: Some(Color::from_rgb(0.0, 0.0, 1.0)),
+            border_width: 112.0,
+            ..ResolvedStyle::default()
+        };
+        let link = Link {
+            bounds: Default::default(),
+            quads: None,
+            highlight_mode: None,
+            destination: None,
+            action: None,
+            style: style.clone(),
+        };
+        let entry = AnnotationEntry {
+            id: AnnotationId(1),
+            page: 0,
+            content: Kind::Link(Box::new(link)),
+            style,
+            action: None,
+            triggers: Vec::new(),
+            text: String::new(),
+            subtype: "Link".into(),
+            unsupported: None,
+            origin: Default::default(),
+            size: Default::default(),
+            transform: Transform::identity(),
+            no_zoom: false,
+            no_rotate: false,
+            draggable: false,
+            editable: false,
+            visible: true,
+            interactive: true,
+            modified_revision: Revision(0),
+            label: String::new(),
+            href: None,
+            has_popup: false,
+            control: None,
+            artwork: false,
+            shapes: Vec::new(),
+        };
+        let web = WebAnnotationEntry::new(entry, &Transform::identity());
+        assert!(web.css.border.is_empty());
+    }
 }
