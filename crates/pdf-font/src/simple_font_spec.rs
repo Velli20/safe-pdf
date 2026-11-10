@@ -3,7 +3,7 @@
 use crate::{
     encoding::Encoding,
     error::FontError,
-    font::FontSource,
+    font::{FontProgramFormat, FontSource},
     pdf::{PdfFontDescriptor, PdfMetrics, SimpleEncoding, ToUnicodeMap},
     pdf_font_program::{TrueTypeProgram, Type1Program},
     standard14::{self, Standard14Font},
@@ -58,13 +58,24 @@ impl FromPdfObject for SimpleFontSpec {
             .optional::<PdfFontDescriptor>(b"FontDescriptor")?
             .unwrap_or_default()
             .named(base_font.as_deref());
-        let symbolic = subtype.as_ref() == b"TrueType" && descriptor.metadata.symbolic;
+        // A symbolic TrueType or classic Type 1 program without `/Encoding` addresses its
+        // glyphs through its own code mapping.
+        let code_keyed_program = subtype.as_ref() == b"TrueType"
+            || matches!(
+                program,
+                Some(FontSource::Memory {
+                    format: FontProgramFormat::Type1,
+                    ..
+                })
+            );
+        let symbolic = code_keyed_program && descriptor.metadata.symbolic;
         let standard14 = base_font
             .as_deref()
             .and_then(standard14::from_base_font_name);
+        // An unknown or malformed `/Encoding` is ignored rather than discarding the font.
         // A non-embedded standard Type 1 font without `/Encoding` uses its built-in encoding,
         // which differs from the standard one for Symbol and ZapfDingbats.
-        let encoding = context.optional::<Encoding>(b"Encoding")?.or_else(|| {
+        let encoding = context.lenient::<Encoding>(b"Encoding").or_else(|| {
             standard14
                 .filter(|_| subtype.as_ref() == b"Type1" && program.is_none())
                 .and_then(Encoding::standard14_built_in)
