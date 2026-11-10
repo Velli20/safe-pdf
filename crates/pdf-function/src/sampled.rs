@@ -83,11 +83,12 @@ struct SampleOutput {
 pub struct SampledFunction {
     /// Interpolation order.
     order: InterpolationOrder,
-    /// Input dimensions, outermost first.
+    /// Input dimensions, in input order.
     axes: Vec<SampleAxis>,
     /// Outputs produced at each sample point.
     outputs: Vec<SampleOutput>,
-    /// The decoded sample values, row-major with the outputs of one sample point adjacent.
+    /// The decoded sample values, first input varying fastest, with the outputs of one sample
+    /// point adjacent.
     samples: Vec<f32>,
 }
 
@@ -201,15 +202,14 @@ impl FromPdfObject for SampledFunction {
             return Err(FunctionReadError::InvalidDecodeLength.into());
         }
 
-        // Row-major strides, innermost axis last; the final product is the sample count.
+        // The first input varies fastest (PDF 32000 §7.10.2); the final product is the sample count.
         let mut strides = Vec::with_capacity(size.len());
-        let samples_count = size.iter().rev().try_fold(range.len(), |stride, &dim| {
+        let samples_count = size.iter().try_fold(range.len(), |stride, &dim| {
             strides.push(stride);
             stride
                 .checked_mul(dim)
                 .ok_or(FunctionReadError::InvalidSizeArray)
         })?;
-        strides.reverse();
 
         let axes = size
             .iter()
@@ -265,9 +265,8 @@ mod tests {
     /// Build a minimal SampledFunction directly for unit testing.
     fn make_sampled(size: Vec<usize>, samples: Vec<f32>, output_count: usize) -> SampledFunction {
         let mut stride = output_count;
-        let mut axes: Vec<SampleAxis> = size
+        let axes: Vec<SampleAxis> = size
             .iter()
-            .rev()
             .map(|&dim| {
                 let axis = SampleAxis {
                     domain: Interval::UNIT,
@@ -280,7 +279,6 @@ mod tests {
                 axis
             })
             .collect();
-        axes.reverse();
         SampledFunction {
             order: InterpolationOrder::Linear,
             axes,
@@ -314,14 +312,16 @@ mod tests {
 
     #[test]
     fn test_2d_bilinear() {
-        // size=[2,2], 2 samples: corners at (0,0)=0, (1,0)=1, (0,1)=0, (1,1)=1
-        // layout: sample[i0 * size[1] + i1]
-        // (0,0)=0.0, (0,1)=0.0, (1,0)=1.0, (1,1)=1.0
-        let samples = vec![0.0, 0.0, 1.0, 1.0];
+        // size=[2,2]; the first input varies fastest: sample[i0 + i1 * size[0]].
+        // (0,0)=0.0, (1,0)=1.0, (0,1)=0.0, (1,1)=1.0, so the value follows input 0.
+        let samples = vec![0.0, 1.0, 0.0, 1.0];
         let f = make_sampled(vec![2, 2], samples, 1);
-        // At (x0=0.5, x1=anything): should interpolate between rows → 0.5
         let out = f.interpolate(&[0.5, 0.0]).unwrap();
         assert!((out[0] - 0.5).abs() < 1e-6, "expected 0.5, got {}", out[0]);
+        let out = f.interpolate(&[1.0, 0.0]).unwrap();
+        assert!((out[0] - 1.0).abs() < 1e-6, "expected 1.0, got {}", out[0]);
+        let out = f.interpolate(&[0.0, 1.0]).unwrap();
+        assert!(out[0].abs() < 1e-6, "expected 0.0, got {}", out[0]);
     }
 
     #[test]
