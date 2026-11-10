@@ -13,7 +13,8 @@ pub(crate) struct Type1Program(FontSource);
 /// TrueType program read from a FontDescriptor's FontFile2, which may instead hold an
 /// OpenType container with CFF outlines.
 pub(crate) struct TrueTypeProgram(FontSource);
-/// CID-keyed CFF program read from a FontDescriptor's FontFile3.
+/// CIDFontType0 program read from a FontDescriptor: CFF from FontFile3, or otherwise a classic
+/// Type 1 program from FontFile, whose glyph indices CIDs address directly.
 pub(crate) struct CidType0Program(FontSource);
 /// Simple-font CFF stream, either bare CFF or an OpenType container.
 struct SimpleCffProgram(FontSource);
@@ -51,10 +52,17 @@ impl FromPdfObject for TrueTypeProgram {
 
 impl FromPdfObject for CidType0Program {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        context
-            .dictionary()?
-            .required::<CidCffProgram>(b"FontFile3")
-            .map(|program| Self(program.0))
+        let mut context = context.dictionary()?;
+        // Presence, including an invalid value, deliberately prevents FontFile fallback.
+        if context.contains(b"FontFile3") {
+            context
+                .required::<CidCffProgram>(b"FontFile3")
+                .map(|program| Self(program.0))
+        } else {
+            context
+                .required::<RawType1Program>(b"FontFile")
+                .map(|program| Self(program.0))
+        }
     }
 }
 
@@ -211,6 +219,20 @@ mod tests {
 
         assert_eq!(format, FontProgramFormat::Cff);
         assert_eq!(data.as_ref(), b"raw-cff");
+    }
+
+    #[test]
+    fn cid_type0_reads_type1_font_file() {
+        let stream = StreamObject::new(1, 0, Dictionary::default(), b"%!PS-AdobeFont".as_slice());
+        let descriptor =
+            Dictionary::from_entries([(b"FontFile".as_slice(), ObjectVariant::Stream(stream))]);
+        let source = ObjectReader::new(EmptySource)
+            .read::<CidType0Program>(&ObjectVariant::Dictionary(descriptor))
+            .expect("a FontFile program should back a CIDFontType0 descendant");
+        let (data, format) = memory_source(FontSource::from(source));
+
+        assert_eq!(format, FontProgramFormat::Type1);
+        assert_eq!(data.as_ref(), b"%!PS-AdobeFont");
     }
 
     #[test]

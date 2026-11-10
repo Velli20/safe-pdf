@@ -6,7 +6,8 @@
 //! fonts with `CIDFontType2` descendants, or with name-keyed OpenType
 //! `CIDFontType0` programs, use the crate's TrueType driver. A name-keyed bare
 //! CFF program labelled `CIDFontType0C` is loaded by the CFF driver, which uses
-//! CIDs directly as glyph indices. The PDF layer applies a `CIDToGIDMap` table
+//! CIDs directly as glyph indices, as does the Type 1 driver for a classic
+//! Type 1 program embedded as `/FontFile`. The PDF layer applies a `CIDToGIDMap` table
 //! for either descendant subtype.
 //!
 //! Two physical representations are supported behind one driver:

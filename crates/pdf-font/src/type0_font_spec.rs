@@ -19,7 +19,8 @@ use std::{collections::HashMap, sync::Arc};
 /// Descendant subtype used by a Type 0 composite font.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CidFontKind {
-    /// CIDFontType0, normally backed by CID-keyed CFF outlines.
+    /// CIDFontType0, normally backed by CID-keyed CFF outlines, and sometimes by a classic Type 1
+    /// program whose glyph indices CIDs address directly.
     Type0,
     /// CIDFontType2, backed by TrueType outlines.
     Type2,
