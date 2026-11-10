@@ -3,9 +3,11 @@
 //! A Type 0 font with a `CIDFontType0` descendant addresses glyphs by CID,
 //! while CFF charstrings are indexed by physical glyph identifier. The CFF
 //! charset is therefore the mapping boundary for every face query. Type 0
-//! fonts with `CIDFontType2` descendants, or with name-keyed `CIDFontType0`
-//! programs, use the crate's TrueType driver. The PDF layer applies a
-//! `CIDToGIDMap` table for either descendant subtype.
+//! fonts with `CIDFontType2` descendants, or with name-keyed OpenType
+//! `CIDFontType0` programs, use the crate's TrueType driver. A name-keyed bare
+//! CFF program labelled `CIDFontType0C` is loaded by the CFF driver, which uses
+//! CIDs directly as glyph indices. The PDF layer applies a `CIDToGIDMap` table
+//! for either descendant subtype.
 //!
 //! Two physical representations are supported behind one driver:
 //!

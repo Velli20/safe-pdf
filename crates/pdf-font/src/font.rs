@@ -39,6 +39,9 @@ pub enum FontProgramFormat {
     /// A name-keyed Compact Font Format program, including PDF `/Type1C` data.
     Cff,
     /// A CID-keyed Compact Font Format program, including PDF `/CIDFontType0C` data.
+    ///
+    /// The label follows the PDF stream subtype, so the program may still turn out to be
+    /// name-keyed; the CFF driver loads such a program instead of the Type 0 driver.
     CidCff,
     /// A standalone TrueType program.
     TrueType,
