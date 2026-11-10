@@ -208,6 +208,17 @@ impl FontFace for Type1FontFace {
         self.resolve_glyph_name(name)
     }
 
+    /// Resolves a one-byte character code through the program's built-in encoding.
+    ///
+    /// Codes the encoding leaves at `.notdef` return `None` so callers can try Unicode.
+    fn glyph_for_code(&self, code: u8) -> Option<GlyphId> {
+        self.font
+            .encoding()?
+            .map(code)
+            .filter(|glyph| *glyph != skrifa::GlyphId::NOTDEF)
+            .map(|glyph| GlyphId(glyph.to_u32()))
+    }
+
     /// Evaluates a charstring without retaining its outline.
     fn horizontal_advance(&self, glyph: GlyphId) -> Result<Option<f32>, FontError> {
         if let Some(advance) = self.advances.get(&glyph) {
