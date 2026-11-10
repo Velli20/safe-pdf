@@ -1,10 +1,8 @@
 //! Vertical glyph metrics decoded from a CID font's `/DW2` and `/W2` entries.
 
-use crate::glyph_widths_map::GlyphWidthsMapError;
-use pdf_cmap::{CodeRange, CodeRanges, code_range};
-use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
-};
+use crate::{cid_metric_runs::CidMetricRuns, metric_run::MetricRun};
+use pdf_cmap::{CodeRanges, code_range};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 /// `/DW2` value used when a CID font omits it: `[vy w1y]`.
 const DEFAULT_DW2: [f32; 2] = [880.0, -1000.0];
@@ -30,7 +28,7 @@ pub struct CidVerticalMetrics {
     /// Default `[vy w1y]` from `/DW2`.
     default: [f32; 2],
     /// `/W2` runs, sorted by first CID and disjoint.
-    runs: Vec<VerticalRun>,
+    runs: Vec<MetricRun<3>>,
 }
 
 impl Default for CidVerticalMetrics {
@@ -50,15 +48,18 @@ impl CidVerticalMetrics {
     pub fn get(&self, cid: u32, w0: f32) -> VerticalMetric {
         self.runs
             .covering(cid)
-            .and_then(|(run, offset)| run.metric(offset))
-            .unwrap_or_else(|| {
-                let [vy, w1y] = self.default;
-                VerticalMetric {
-                    w1y,
-                    vx: w0 / 2.0,
-                    vy,
-                }
-            })
+            .and_then(|(run, offset)| run.value(offset))
+            .map_or_else(
+                || {
+                    let [vy, w1y] = self.default;
+                    VerticalMetric {
+                        w1y,
+                        vx: w0 / 2.0,
+                        vy,
+                    }
+                },
+                |[w1y, vx, vy]| VerticalMetric { w1y, vx, vy },
+            )
     }
 }
 
@@ -72,107 +73,9 @@ impl FromPdfObject for CidVerticalMetrics {
         Ok(Self {
             default: context.lenient(b"DW2").unwrap_or(DEFAULT_DW2),
             runs: context
-                .lenient::<VerticalRuns>(b"W2")
-                .map(|VerticalRuns(runs)| code_range::disjoint(runs))
+                .lenient::<CidMetricRuns<3>>(b"W2")
+                .map(|CidMetricRuns(runs)| code_range::disjoint(runs))
                 .unwrap_or_default(),
         })
-    }
-}
-
-/// The runs of a `/W2` array, omitting empty ones.
-struct VerticalRuns(Vec<VerticalRun>);
-
-/// Reads each `c [w1y v1x v1y ...]` or `c_first c_last w1y v1x v1y` entry of a `/W2` array.
-impl FromPdfObject for VerticalRuns {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let mut items = context.array()?;
-        let mut entries = items.array().iter();
-        let mut runs = Vec::new();
-        while let Some(first) = entries.next() {
-            let first = items.read::<u32>(first)?;
-            let second = entries
-                .next()
-                .ok_or(GlyphWidthsMapError::IncompleteCIDEntry { cid: first })?;
-            // The second item selects the form; an indirect metrics array is allowed.
-            let second = items.resolve(second)?;
-            if let ObjectVariant::Array(_) = second.value() {
-                let values = items.read::<Vec<f32>>(second.value())?;
-                let (triples, _) = values.as_chunks::<3>();
-                if !triples.is_empty() {
-                    let metrics = triples
-                        .iter()
-                        .map(|&[w1y, vx, vy]| VerticalMetric { w1y, vx, vy })
-                        .collect::<Box<[_]>>();
-                    let span = u32::try_from(metrics.len().saturating_sub(1)).unwrap_or(u32::MAX);
-                    runs.push(VerticalRun {
-                        first,
-                        last: first.saturating_add(span),
-                        metrics: RunMetrics::Explicit(metrics),
-                    });
-                }
-                continue;
-            }
-            let last = items.read::<u32>(second.value())?;
-            let mut value = || {
-                entries
-                    .next()
-                    .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: first })
-            };
-            let (w1y, vx, vy) = (value()?, value()?, value()?);
-            if last < first {
-                return Err(GlyphWidthsMapError::InvalidCIDRange {
-                    c_first: first,
-                    c_last: last,
-                }
-                .into());
-            }
-            runs.push(VerticalRun {
-                first,
-                last,
-                metrics: RunMetrics::Uniform(VerticalMetric {
-                    w1y: items.read(w1y)?,
-                    vx: items.read(vx)?,
-                    vy: items.read(vy)?,
-                }),
-            });
-        }
-        Ok(Self(runs))
-    }
-}
-
-/// Vertical metrics for the inclusive CID range `first..=last`.
-#[derive(Debug, Clone)]
-struct VerticalRun {
-    first: u32,
-    last: u32,
-    metrics: RunMetrics,
-}
-
-/// The metrics of one `/W2` run.
-#[derive(Debug, Clone)]
-enum RunMetrics {
-    /// `c_first c_last w1y v1x v1y`: one metric for every CID in the run.
-    Uniform(VerticalMetric),
-    /// `c [w1y v1x v1y ...]`: one metric per consecutive CID.
-    Explicit(Box<[VerticalMetric]>),
-}
-
-impl VerticalRun {
-    /// Returns the metric `offset` CIDs past the start of the run.
-    fn metric(&self, offset: u32) -> Option<VerticalMetric> {
-        match &self.metrics {
-            RunMetrics::Uniform(metric) => Some(*metric),
-            RunMetrics::Explicit(metrics) => metrics.get(usize::try_from(offset).ok()?).copied(),
-        }
-    }
-}
-
-impl CodeRange for VerticalRun {
-    fn first(&self) -> u32 {
-        self.first
-    }
-
-    fn last(&self) -> u32 {
-        self.last
     }
 }

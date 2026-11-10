@@ -1,9 +1,9 @@
 //! Explicit glyph widths decoded from a font dictionary's `/W` or `/Widths` entry.
 
-use pdf_cmap::{CodeRange, CodeRanges, code_range};
+use crate::{cid_metric_runs::CidMetricRuns, metric_run::MetricRun};
+use pdf_cmap::{CodeRanges, code_range};
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
-    pdf_array::PdfArray,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, pdf_array::PdfArray,
 };
 use thiserror::Error;
 
@@ -40,14 +40,14 @@ pub enum GlyphWidthsMapError {
 #[derive(Debug, Clone, Default)]
 pub struct GlyphWidthsMap {
     /// Width runs, sorted by first code and disjoint.
-    runs: Vec<WidthRun>,
+    runs: Vec<MetricRun<1>>,
 }
 
 impl GlyphWidthsMap {
     /// Returns the width the font lists for `code`, if any.
     pub fn get(&self, code: u32) -> Option<f32> {
         let (run, offset) = self.runs.covering(code)?;
-        run.width(offset)
+        run.value(offset).map(|[width]| width)
     }
 
     /// Reports whether the font lists no explicit widths.
@@ -63,7 +63,7 @@ impl FromIterator<(u32, f32)> for GlyphWidthsMap {
             runs: code_range::disjoint(
                 widths
                     .into_iter()
-                    .map(|(code, width)| WidthRun::uniform(code, code, width))
+                    .map(|(code, width)| MetricRun::uniform(code, code, [width]))
                     .collect(),
             ),
         }
@@ -78,8 +78,8 @@ impl FromPdfObject for GlyphWidthsMap {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let object = context.object();
         let mut context = context.dictionary()?;
-        let runs = match context.optional::<CidWidthRuns>(b"W")? {
-            Some(CidWidthRuns(runs)) => runs,
+        let runs = match context.optional::<CidMetricRuns<1>>(b"W")? {
+            Some(CidMetricRuns(runs)) => runs,
             None => context
                 .read::<SimpleWidthRun>(object)?
                 .0
@@ -92,53 +92,12 @@ impl FromPdfObject for GlyphWidthsMap {
     }
 }
 
-/// The runs of a CID font's `/W` array, omitting empty ones.
-struct CidWidthRuns(Vec<WidthRun>);
-
-/// Reads each `c_first [w1 ... wn]` or `c_first c_last w` entry of a `/W` array.
-impl FromPdfObject for CidWidthRuns {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let mut items = context.array()?;
-        let mut entries = items.array().iter();
-        let mut runs = Vec::new();
-        while let Some(first) = entries.next() {
-            let first = items.read::<u32>(first)?;
-            let second = entries
-                .next()
-                .ok_or(GlyphWidthsMapError::IncompleteCIDEntry { cid: first })?;
-            // The second item selects the form; an indirect width array is allowed.
-            let second = items.resolve(second)?;
-            if let ObjectVariant::Array(_) = second.value() {
-                let widths = items.read::<Vec<f32>>(second.value())?;
-                if !widths.is_empty() {
-                    runs.push(WidthRun::explicit(first, widths.into_boxed_slice()));
-                }
-                continue;
-            }
-            let last = items.read::<u32>(second.value())?;
-            let width = entries
-                .next()
-                .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: first })?;
-            let width = items.read::<f32>(width)?;
-            if last < first {
-                return Err(GlyphWidthsMapError::InvalidCIDRange {
-                    c_first: first,
-                    c_last: last,
-                }
-                .into());
-            }
-            runs.push(WidthRun::uniform(first, last, width));
-        }
-        Ok(Self(runs))
-    }
-}
-
 /// A simple or Type 3 font's `/Widths` as one run starting at `/FirstChar`.
 ///
 /// Fonts without `/Widths`, such as Standard 14 fonts, have no run. Only the
 /// `/FirstChar..=/LastChar` widths are decoded, so surplus items stay unread; a reversed
 /// or empty range yields no run.
-struct SimpleWidthRun(Option<WidthRun>);
+struct SimpleWidthRun(Option<MetricRun<1>>);
 
 impl FromPdfObject for SimpleWidthRun {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
@@ -154,67 +113,11 @@ impl FromPdfObject for SimpleWidthRun {
         let widths = widths
             .iter()
             .take(count)
-            .map(|width| context.read(width))
-            .collect::<ReadResult<Box<[f32]>>>()?;
+            .map(|width| context.read(width).map(|width| [width]))
+            .collect::<ReadResult<Box<[_]>>>()?;
         Ok(Self(
-            (!widths.is_empty()).then(|| WidthRun::explicit(u32::from(first), widths)),
+            (!widths.is_empty()).then(|| MetricRun::explicit(u32::from(first), widths)),
         ))
-    }
-}
-
-/// Widths for the inclusive code range `first..=last`.
-#[derive(Debug, Clone)]
-struct WidthRun {
-    first: u32,
-    last: u32,
-    widths: RunWidths,
-}
-
-/// The widths of one run.
-#[derive(Debug, Clone)]
-enum RunWidths {
-    /// `c_first c_last w`: one width for every code in the run.
-    Uniform(f32),
-    /// `c_first [w1 ... wn]` or a simple font's `/Widths`: one width per code.
-    Explicit(Box<[f32]>),
-}
-
-impl WidthRun {
-    /// One width shared by every code in `first..=last`.
-    fn uniform(first: u32, last: u32, width: f32) -> Self {
-        Self {
-            first,
-            last,
-            widths: RunWidths::Uniform(width),
-        }
-    }
-
-    /// Consecutive widths starting at `first`.
-    fn explicit(first: u32, widths: Box<[f32]>) -> Self {
-        let span = u32::try_from(widths.len().saturating_sub(1)).unwrap_or(u32::MAX);
-        Self {
-            first,
-            last: first.saturating_add(span),
-            widths: RunWidths::Explicit(widths),
-        }
-    }
-
-    /// Returns the width `offset` codes past the start of the run.
-    fn width(&self, offset: u32) -> Option<f32> {
-        match &self.widths {
-            RunWidths::Uniform(width) => Some(*width),
-            RunWidths::Explicit(widths) => widths.get(usize::try_from(offset).ok()?).copied(),
-        }
-    }
-}
-
-impl CodeRange for WidthRun {
-    fn first(&self) -> u32 {
-        self.first
-    }
-
-    fn last(&self) -> u32 {
-        self.last
     }
 }
 

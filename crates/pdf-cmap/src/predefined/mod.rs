@@ -34,7 +34,7 @@ pub struct GeneratedCodeSpaceRange {
     pub len: u8,
 }
 
-/// Generated sequential code-to-CID range.
+/// Sequential code-to-CID range, from the generated tables or an embedded CMap.
 #[derive(Debug, Clone, Copy)]
 pub struct GeneratedCidRange {
     /// Packed big-endian inclusive source start code.
@@ -195,7 +195,7 @@ fn find_cid_char(chars: &[GeneratedCidChar], code: u32) -> Option<u16> {
 
 impl GeneratedCidRange {
     /// Returns the CID mapped from the code `offset` places past the range start.
-    fn cid_at(&self, offset: u32) -> Option<u16> {
+    pub(crate) fn cid_at(&self, offset: u32) -> Option<u16> {
         self.cid_start.checked_add(u16::try_from(offset).ok()?)
     }
 }

@@ -8,17 +8,15 @@ use crate::{
     error::CMapError,
 };
 
-use super::{
-    EmbeddedCMap,
-    embedded::{CidRange, CodeSpaceRange},
-};
+use super::{EmbeddedCMap, embedded::CodeSpaceRange};
+use crate::predefined::GeneratedCidRange;
 
 /// Mutable parser state for building an embedded Type0 encoding CMap.
 pub(crate) struct EmbeddedCMapBuilder<'a> {
     pub code_space_ranges: Vec<CodeSpaceRange>,
     pub code_lengths: BTreeSet<usize>,
     pub cid_chars: HashMap<u32, u16>,
-    pub cid_ranges: Vec<CidRange>,
+    pub cid_ranges: Vec<GeneratedCidRange>,
     pub writing_mode: WritingMode,
     pub parser: CMapParser<'a>,
 }
@@ -237,7 +235,7 @@ impl EmbeddedCMapBuilder<'_> {
             }
             EmbeddedCMapSectionState::BfRangeDestination { start, end } => {
                 let cid_start = token.u16_from_bytes()?;
-                self.cid_ranges.push(CidRange {
+                self.cid_ranges.push(GeneratedCidRange {
                     start,
                     end,
                     cid_start,
@@ -255,7 +253,7 @@ impl EmbeddedCMapBuilder<'_> {
             }
             EmbeddedCMapSectionState::CidRangeDestination { start, end } => {
                 let cid_start = token.u16_from_integer()?;
-                self.cid_ranges.push(CidRange {
+                self.cid_ranges.push(GeneratedCidRange {
                     start,
                     end,
                     cid_start,

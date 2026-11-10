@@ -1,5 +1,6 @@
 pub mod base_encoding;
 pub mod cff;
+mod cid_metric_runs;
 pub mod cid_vertical_metrics;
 pub mod encoding;
 pub mod error;
@@ -10,6 +11,7 @@ mod font_metadata;
 pub mod font_registry;
 pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
+mod metric_run;
 pub mod pdf;
 mod pdf_font_descriptor;
 pub mod pdf_font_handle;
