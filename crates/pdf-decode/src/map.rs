@@ -44,6 +44,15 @@ impl DecodeMap {
         out
     }
 
+    /// Maps packed Indexed image samples to palette indices.
+    pub fn apply_to_indices(&self, samples: &[u8], sample_max: u8) -> Vec<u8> {
+        samples
+            .iter()
+            .zip(self.ranges.iter().cycle())
+            .map(|(sample, range)| range.map_index(*sample, sample_max))
+            .collect()
+    }
+
     /// Applies the decode ranges to `samples`, writing their floating-point component values
     /// into `out`. Writing stops at the shorter of the two slices.
     pub fn apply_to_f32(&self, samples: &[u8], sample_max: u8, out: &mut [f32]) {

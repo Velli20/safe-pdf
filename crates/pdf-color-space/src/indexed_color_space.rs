@@ -91,6 +91,13 @@ pub(crate) fn indexed_entry_to_color(
                 entry.len()
             ))),
         },
+        ColorSpace::Lab(lab) => match *entry {
+            [l, a, b] => lab.apply_encoded([l, a, b]),
+            _ => Err(ColorSpaceError::IndexedColorSpaceError(format!(
+                "Indexed Lab palette entry expected 3 bytes, got {}",
+                entry.len()
+            ))),
+        },
         _ => {
             // Generic fallback: normalise each byte to [0.0, 1.0] and delegate
             // to the base color space.
