@@ -2,7 +2,7 @@ use pdf_canvas::{
     PageViewport, canvas_backend::CanvasBackend, error::PdfCanvasError, image_cache::ImageCache,
     pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas,
 };
-use pdf_document::document::PdfDocument;
+use pdf_document::{document::PdfDocument, page::PdfPage};
 use pdf_object_reader::ObjectReadError;
 use pdf_optional_content::OptionalContentState;
 use pdf_text_engine::FontSystem;
@@ -150,9 +150,7 @@ impl PdfRenderer {
                 PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?
                     .with_image_cache(Arc::clone(&self.image_cache))
                     .with_optional_content(&optional_content);
-            if let Some(cs) = self.document.content_stream(page)? {
-                canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
-            }
+            self.draw_page_contents(&mut canvas, page)?;
         }
         Ok(())
     }
@@ -178,9 +176,7 @@ impl PdfRenderer {
         .with_image_cache(Arc::clone(&self.image_cache))
         .with_text_recording()
         .with_optional_content(optional_content);
-        if let Some(cs) = self.document.content_stream(page)? {
-            canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
-        }
+        self.draw_page_contents(&mut canvas, page)?;
         Ok(PageTextLayout::new(canvas.take_text_glyphs()))
     }
 
@@ -203,9 +199,7 @@ impl PdfRenderer {
                     .with_image_cache(Arc::clone(&self.image_cache))
                     .with_text_recording()
                     .with_optional_content(&optional_content);
-            if let Some(cs) = self.document.content_stream(page)? {
-                canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
-            }
+            self.draw_page_contents(&mut canvas, page)?;
             canvas.take_text_glyphs()
         };
         Ok(RecordedPage {
@@ -223,11 +217,22 @@ impl PdfRenderer {
             .unwrap_or_default()
     }
 
-    /// Returns the page at zero-based `page_index`, or [`PdfRendererError::PageNotFound`].
-    pub fn page(
+    /// Parses `page`'s content stream and draws it onto `canvas` with the page's resources.
+    ///
+    /// A page without `/Contents` draws nothing.
+    fn draw_page_contents<B: CanvasBackend>(
         &self,
-        page_index: usize,
-    ) -> Result<&pdf_document::page::PdfPage, PdfRendererError> {
+        canvas: &mut PdfCanvas<'_, B>,
+        page: &PdfPage,
+    ) -> Result<(), PdfRendererError> {
+        if let Some(contents) = self.document.parse_content_stream(page)? {
+            canvas.render_content_stream(&contents, None, None, page.resources.clone(), None)?;
+        }
+        Ok(())
+    }
+
+    /// Returns the page at zero-based `page_index`, or [`PdfRendererError::PageNotFound`].
+    pub fn page(&self, page_index: usize) -> Result<&PdfPage, PdfRendererError> {
         let Some(page) = self.document.pages.get(page_index) else {
             return Err(PdfRendererError::PageNotFound(page_index));
         };

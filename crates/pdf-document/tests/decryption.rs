@@ -212,7 +212,7 @@ fn revision_5_authenticates_and_decrypts_aes_256_content() {
     let page = document.get_page(0).expect("encrypted PDF contains a page");
     assert_eq!(
         document
-            .content_stream(page)
+            .parse_content_stream(page)
             .expect("encrypted content stream parses")
             .expect("encrypted content stream is materialized")
             .operators

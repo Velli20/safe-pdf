@@ -7,7 +7,7 @@ use crate::page::PdfPage;
 
 /// A decoded PDF document with page attributes and resources resolved.
 ///
-/// Page content streams stay unparsed until [`PdfDocument::content_stream`] reads them.
+/// Page content streams stay unparsed until [`PdfDocument::parse_content_stream`] reads them.
 pub struct PdfDocument {
     /// The document's pages, in source order.
     pub pages: Vec<PdfPage>,
@@ -47,9 +47,11 @@ impl PdfDocument {
     /// Parses the operators of `page`'s content stream, or returns `None` when the page
     /// has no `/Contents`.
     ///
-    /// The stream is parsed on every call; callers that draw a page repeatedly should
-    /// cache what they produce from it.
-    pub fn content_stream(&self, page: &PdfPage) -> ReadResult<Option<ContentStream>> {
+    /// `page` must be one of this document's pages, since its contents are resolved through
+    /// this document's objects. The stream is parsed on every call and each result gets a
+    /// new content-stream ID; callers that draw a page repeatedly should cache what they
+    /// produce from it.
+    pub fn parse_content_stream(&self, page: &PdfPage) -> ReadResult<Option<ContentStream>> {
         page.contents
             .as_ref()
             .map(|contents| contents.parse(&self.objects))
