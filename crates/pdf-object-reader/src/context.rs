@@ -510,15 +510,28 @@ impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
     /// Trailing elements are ignored, like the `[T; N]` decoder.
     #[inline]
     pub fn read_array<T: FromPdfObject + Default, const N: usize>(&mut self) -> ReadResult<[T; N]> {
-        if self.array.len() < N {
-            return Err(crate::object_error::ObjectError::InvalidArrayLength {
-                expected: N,
+        self.read_array_from(0)
+    }
+
+    /// Decodes the `N` elements starting at `start` in source order, validating that all of
+    /// them exist first.
+    ///
+    /// Elements past `start + N` are ignored.
+    #[inline]
+    pub fn read_array_from<T: FromPdfObject + Default, const N: usize>(
+        &mut self,
+        start: usize,
+    ) -> ReadResult<[T; N]> {
+        let objects = self
+            .array
+            .get(start..)
+            .and_then(|rest| rest.get(..N))
+            .ok_or_else(|| crate::object_error::ObjectError::InvalidArrayLength {
+                expected: start.saturating_add(N),
                 found: self.array.len(),
-            }
-            .into());
-        }
+            })?;
         let mut values = std::array::from_fn(|_| T::default());
-        for (index, (value, object)) in values.iter_mut().zip(self.array).enumerate() {
+        for (index, (value, object)) in (start..).zip(values.iter_mut().zip(objects)) {
             *value = self
                 .access
                 .read(object)
