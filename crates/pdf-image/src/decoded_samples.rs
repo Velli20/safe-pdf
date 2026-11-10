@@ -132,7 +132,8 @@ impl DecodedSamples {
     ///
     /// Four-component output in a four-component color space is CMYK as encoded, not
     /// converted color: it is left to the regular path, which applies `/Decode` and the
-    /// color space's conversion.
+    /// color space's conversion. `/Decode` applies to the converted samples when their
+    /// component count matches the color space's, the count the decode map was built for.
     fn decode_preconverted_dct(raw_data: &Bytes, metadata: &ImageMetadata) -> Option<Self> {
         let has_dct_filter = metadata
             .filters
@@ -153,10 +154,18 @@ impl DecodedSamples {
             return None;
         }
 
-        let image_data = if raw_data.len() == num_color_components && num_pixels > 1 {
-            raw_data.repeat(num_pixels).into()
+        let samples: Bytes = match metadata
+            .decode
+            .as_ref()
+            .filter(|_| source_components == Some(num_color_components))
+        {
+            Some(decode) => decode.apply_to_bytes(raw_data, u8::MAX, u8::MAX).into(),
+            None => raw_data.clone(),
+        };
+        let image_data = if samples.len() == num_color_components && num_pixels > 1 {
+            samples.repeat(num_pixels).into()
         } else {
-            raw_data.clone()
+            samples
         };
 
         Some(Self {
