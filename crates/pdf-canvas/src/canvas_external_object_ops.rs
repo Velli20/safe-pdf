@@ -28,7 +28,7 @@ use crate::{
     canvas_backend::{CanvasBackend, Shader},
     error::PdfCanvasError,
     mask_layer::MaskLayer,
-    pdf_canvas::PdfCanvas,
+    pdf_canvas::{PatternPaint, PdfCanvas},
     recording_canvas::RecordingCanvas,
     shading::with_clip,
 };
@@ -215,8 +215,12 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         inline_image: bool,
     ) -> Result<(), PdfCanvasError> {
         if image.pixel_format == PixelFormat::Alpha8 {
-            if let Some(shader) = self.compute_shader(false)? {
-                return self.paint_image_mask_with_pattern(image, inline_image, &shader);
+            match self.compute_shader(false)? {
+                PatternPaint::Shader(shader) => {
+                    return self.paint_image_mask_with_pattern(image, inline_image, &shader);
+                }
+                PatternPaint::Nothing => return Ok(()),
+                PatternPaint::Color => {}
             }
             let [r, g, b, _] = self.current_state()?.paint.fill_color.to_rgba8();
             let stencil = stencil_image(image, [r, g, b])?;

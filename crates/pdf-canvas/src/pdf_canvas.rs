@@ -12,7 +12,7 @@ use crate::{
     stroke_style::StrokeStyle,
     text::TextGlyph,
     text_state::TextState,
-    tiling_shader::{TilingShader, TilingShaderError},
+    tiling_shader::{TilingShader, TilingShaderError, validate_geometry},
 };
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
@@ -34,6 +34,26 @@ use pdf_resources::{
 };
 use pdf_shading::{model::Shading, paint::build_shading_paint};
 use pdf_text_engine::FontSystem;
+
+/// How the active pattern paints a fill or stroke.
+pub(crate) enum PatternPaint {
+    /// No pattern applies; paint with the current color.
+    Color,
+    /// Paint through the pattern's shader.
+    Shader(Shader),
+    /// The pattern's cell or repeat step is empty, so painting leaves no marks.
+    Nothing,
+}
+
+impl PatternPaint {
+    /// Returns the shader to paint through, or `None` to paint the current color.
+    pub(crate) fn into_shader(self) -> Option<Shader> {
+        match self {
+            Self::Shader(shader) => Some(shader),
+            Self::Color | Self::Nothing => None,
+        }
+    }
+}
 
 /// Interprets PDF operators and prepares device-space painting for a borrowed backend.
 pub struct PdfCanvas<'a, B: CanvasBackend> {
@@ -413,15 +433,15 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         })
     }
 
-    /// Computes the current shader based on the active pattern.
+    /// Computes how the active pattern paints a fill or stroke.
     ///
     /// # Returns
     ///
-    /// An optional `Shader` or an error if pattern rendering fails.
+    /// The [`PatternPaint`] to use, or an error if pattern rendering fails.
     pub(crate) fn compute_shader(
         &mut self,
         for_stroke: bool,
-    ) -> Result<Option<Shader>, PdfCanvasError> {
+    ) -> Result<PatternPaint, PdfCanvasError> {
         let state: &CanvasState = self.current_state()?;
         let pattern = if for_stroke {
             state.stroke_pattern.clone()
@@ -430,7 +450,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         };
 
         let Some(pattern) = pattern else {
-            return Ok(None);
+            return Ok(PatternPaint::Color);
         };
         let transform = Self::pattern_transform(state, &pattern);
 
@@ -440,12 +460,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     && Arc::ptr_eq(cached, &pattern)
                     && *cached_transform == transform
                 {
-                    return Ok(Some(shader.clone()));
+                    return Ok(PatternPaint::Shader(shader.clone()));
                 }
                 let shader = self.build_shading_shader(shading, &Some(transform), true)?;
                 self.pattern_shading_cache =
                     Some((Arc::clone(&pattern), transform, shader.clone()));
-                Ok(Some(shader))
+                Ok(PatternPaint::Shader(shader))
             }
             Pattern::Tiling {
                 bbox,
@@ -457,8 +477,13 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 ..
             } => {
                 let bbox = *bbox;
+                let step = [*x_step, *y_step];
+                // An empty cell or a zero repeat step tiles nothing.
+                if validate_geometry(&bbox, step).is_err() {
+                    return Ok(PatternPaint::Nothing);
+                }
                 if !Self::can_record_offscreen_bbox(&bbox) {
-                    return Ok(None);
+                    return Ok(PatternPaint::Color);
                 }
 
                 // Uncolored patterns use the current color from the graphics state,
@@ -501,7 +526,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     cell_color,
                 )?;
 
-                let step = [*x_step, *y_step];
                 let shader = match TilingShader::new(
                     Arc::new(recording_canvas),
                     Some(transform),
@@ -518,7 +542,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     )?,
                     shader => shader?,
                 };
-                Ok(Some(Shader::TilingPatternImage(shader)))
+                Ok(PatternPaint::Shader(Shader::TilingPatternImage(shader)))
             }
         }
     }
@@ -541,26 +565,36 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
         let fill = if matches!(mode, PaintMode::Fill | PaintMode::FillAndStroke) {
-            let paint = &self.current_state()?.paint;
-            Some((
-                paint.fill_color,
-                paint.blend_mode.clone(),
-                self.compute_shader(false)?,
-                self.pattern_bbox_clip(false)?,
-            ))
+            match self.compute_shader(false)? {
+                PatternPaint::Nothing => None,
+                pattern_paint => {
+                    let paint = &self.current_state()?.paint;
+                    Some((
+                        paint.fill_color,
+                        paint.blend_mode.clone(),
+                        pattern_paint.into_shader(),
+                        self.pattern_bbox_clip(false)?,
+                    ))
+                }
+            }
         } else {
             None
         };
         let stroke = if matches!(mode, PaintMode::Stroke | PaintMode::FillAndStroke) {
-            let state = self.current_state()?;
-            Some((
-                state.paint.stroke_color,
-                state.paint.blend_mode.clone(),
-                state.paint.line_width * state.transform.area_scale(),
-                StrokeStyle::from_paint(&state.paint, &state.transform)?,
-                self.compute_shader(true)?,
-                self.pattern_bbox_clip(true)?,
-            ))
+            match self.compute_shader(true)? {
+                PatternPaint::Nothing => None,
+                pattern_paint => {
+                    let state = self.current_state()?;
+                    Some((
+                        state.paint.stroke_color,
+                        state.paint.blend_mode.clone(),
+                        state.paint.line_width * state.transform.area_scale(),
+                        StrokeStyle::from_paint(&state.paint, &state.transform)?,
+                        pattern_paint.into_shader(),
+                        self.pattern_bbox_clip(true)?,
+                    ))
+                }
+            }
         } else {
             None
         };
@@ -1114,6 +1148,57 @@ mod tests {
         canvas
             .paint_inline_image(&pdf_image::InlineImage::Ready(image))
             .expect("truncated inline image should be skipped");
+        drop(canvas);
+        assert_eq!(backend.replay_cost(), 0);
+    }
+
+    #[test]
+    /// Verifies that a tiling pattern with an empty cell and zero steps paints nothing.
+    fn degenerate_tiling_pattern_paints_nothing() {
+        use pdf_content_stream_operators::variants::PdfOperatorVariant;
+        use pdf_object_reader::{
+            Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
+        };
+        use pdf_resources::pattern::Pattern;
+
+        let dictionary = Dictionary::from_entries([
+            (b"PatternType".as_slice(), ObjectVariant::Integer(1)),
+            (b"PaintType".as_slice(), ObjectVariant::Integer(2)),
+            (b"TilingType".as_slice(), ObjectVariant::Integer(3)),
+            (
+                b"BBox".as_slice(),
+                ObjectVariant::Array(vec![ObjectVariant::Integer(0); 4].into()),
+            ),
+            (b"XStep".as_slice(), ObjectVariant::Integer(0)),
+            (b"YStep".as_slice(), ObjectVariant::Integer(0)),
+        ]);
+        let stream = StreamObject::new(0, 0, dictionary, b"q Q".to_vec());
+        let pattern: Pattern = ObjectReader::new(EmptySource)
+            .read(&ObjectVariant::Stream(stream))
+            .expect("pattern should read");
+        let page = page();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+        canvas
+            .current_state_mut()
+            .expect("state should exist")
+            .fill_pattern = Some(std::sync::Arc::new(pattern));
+
+        let operators = [
+            PdfOperatorVariant::Rectangle {
+                x: 10.0,
+                y: 10.0,
+                width: 50.0,
+                height: 50.0,
+            },
+            PdfOperatorVariant::FillPathNonZero,
+        ];
+        for operator in &operators {
+            canvas
+                .apply_operator(operator)
+                .expect("operator should apply");
+        }
         drop(canvas);
         assert_eq!(backend.replay_cost(), 0);
     }
