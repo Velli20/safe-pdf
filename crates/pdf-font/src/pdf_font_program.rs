@@ -99,7 +99,7 @@ impl FromPdfObject for RawTrueTypeProgram {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let data = context.stream()?.stream().shared_data();
         let format = if data.starts_with(b"OTTO") {
-            FontProgramFormat::OpenTypeCff
+            FontProgramFormat::GlyphIndexedOpenTypeCff
         } else {
             FontProgramFormat::TrueType
         };
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn font_file2_with_open_type_signature_is_open_type_cff() {
+    fn font_file2_with_open_type_signature_is_glyph_indexed_open_type_cff() {
         let stream = StreamObject::new(1, 0, Dictionary::default(), b"OTTO-cff".as_slice());
         let descriptor =
             Dictionary::from_entries([(b"FontFile2".as_slice(), ObjectVariant::Stream(stream))]);
@@ -245,7 +245,7 @@ mod tests {
             .expect("the FontFile2 source should parse");
         let (data, format) = memory_source(FontSource::from(source));
 
-        assert_eq!(format, FontProgramFormat::OpenTypeCff);
+        assert_eq!(format, FontProgramFormat::GlyphIndexedOpenTypeCff);
         assert_eq!(data.as_ref(), b"OTTO-cff");
     }
 }

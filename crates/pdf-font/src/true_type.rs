@@ -125,6 +125,7 @@ impl FontDriver for TrueTypeFontDriver {
             FontProgramFormat::TrueType
                 | FontProgramFormat::OpenTypeTrueType
                 | FontProgramFormat::OpenTypeCff
+                | FontProgramFormat::GlyphIndexedOpenTypeCff
         )
     }
 
@@ -354,7 +355,7 @@ fn validate_outline_format(
     format: FontProgramFormat,
 ) -> Result<(), FontError> {
     let valid = match format {
-        FontProgramFormat::OpenTypeCff => matches!(
+        FontProgramFormat::OpenTypeCff | FontProgramFormat::GlyphIndexedOpenTypeCff => matches!(
             outlines.format(),
             Some(OutlineGlyphFormat::Cff | OutlineGlyphFormat::Cff2)
         ),

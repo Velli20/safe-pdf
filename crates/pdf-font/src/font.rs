@@ -48,7 +48,14 @@ pub enum FontProgramFormat {
     /// An OpenType container with TrueType outlines.
     OpenTypeTrueType,
     /// An OpenType container with CFF or CFF2 outlines.
+    ///
+    /// A CID-keyed CFF table addresses its glyphs by CID through the CFF charset.
     OpenTypeCff,
+    /// An OpenType container with CFF or CFF2 outlines whose glyphs are addressed by glyph index.
+    ///
+    /// PDF `/FontFile2` data addresses glyphs by glyph index, so an OpenType/CFF program embedded
+    /// there is indexed by physical glyph ID even when its CFF table is CID-keyed.
+    GlyphIndexedOpenTypeCff,
     /// A PDF Type 3 program whose glyphs are content streams rather than font bytes.
     Type3,
 }
