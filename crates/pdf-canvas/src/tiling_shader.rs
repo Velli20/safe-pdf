@@ -199,7 +199,7 @@ impl TilingShader {
 }
 
 /// Validates cell bounds and signed repeat steps before transform or range preparation.
-fn validate_geometry(bounds: &Rect, step: [f32; 2]) -> Result<(), TilingShaderError> {
+pub(crate) fn validate_geometry(bounds: &Rect, step: [f32; 2]) -> Result<(), TilingShaderError> {
     if !bounds.is_valid() || step.iter().any(|value| !value.is_finite() || *value == 0.0) {
         return Err(TilingShaderError::InvalidGeometry);
     }
