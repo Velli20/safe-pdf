@@ -82,10 +82,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         _blend_mode: Option<pdf_graphics::BlendMode>,
     ) -> Result<(), PdfCanvasError> {
         let stroke_space = stroke_style.stroke_space_path(path, line_width)?;
-        let path = match &stroke_space {
-            Some(stroke_space) => to_femtovg_path(&CanvasPath::device(stroke_space))?,
-            None => to_femtovg_path(path)?,
-        };
+        let path = to_femtovg_path(stroke_space.as_ref().unwrap_or(path))?;
 
         let mut stroke_paint = Paint::color(Color::rgbf(color.r, color.g, color.b));
         stroke_paint.set_anti_alias(true);
