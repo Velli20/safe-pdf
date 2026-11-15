@@ -25,6 +25,7 @@ use crate::font::{
     FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
     FontProgramFormat, FontSource, GlyphGeometry, GlyphId, GlyphName,
 };
+use crate::glyph_name_to_unicode::glyph_name_to_unicode;
 use crate::pdf_path_pen::PdfPathPen;
 use crate::query_cache::QueryCache;
 
@@ -95,6 +96,34 @@ impl<'a> TrueTypeProgramRef<'a> {
             .or_else(|| self.code_glyph(PlatformId::Macintosh, Some(0), code))
             .or_else(|| self.code_glyph(PlatformId::Unicode, None, code))
             .or_else(|| self.code_glyph(PlatformId::Windows, Some(1), code))
+    }
+
+    /// Resolves a PDF encoding glyph name.
+    ///
+    /// A TrueType font addresses its glyphs by Unicode when it has a (3,1) Windows Unicode cmap,
+    /// so the name's Unicode value is looked up there first. A subset may reuse the slot of a
+    /// glyph whose `post` name differs from the encoding name, so the `post` names are only a
+    /// fallback for names the cmap does not resolve.
+    fn glyph_for_name(&self, name: &GlyphName) -> Option<GlyphId> {
+        glyph_name_to_unicode(name.0.as_ref())
+            .and_then(|character| {
+                self.code_glyph(PlatformId::Windows, Some(1), u32::from(character))
+            })
+            .or_else(|| self.glyph_for_post_name(name))
+    }
+
+    /// Scans the `post` glyph names without reparsing the font container.
+    fn glyph_for_post_name(&self, name: &GlyphName) -> Option<GlyphId> {
+        self.glyph_names
+            .as_ref()?
+            .iter()
+            .find_map(|(glyph, candidate)| {
+                // `skrifa` invents `gidNNN` names for fonts without real
+                // PostScript names. Synthetic names are not valid PDF name
+                // mappings and must remain lookup misses.
+                (!candidate.is_synthesized() && candidate.as_str().as_bytes() == name.0.as_ref())
+                    .then_some(GlyphId(glyph.to_u32()))
+            })
     }
 }
 
@@ -225,27 +254,11 @@ impl TrueTypeFontFace {
             return glyph;
         }
 
-        let glyph = self.find_glyph_name(name);
+        let glyph = self.program.borrow_dependent().glyph_for_name(name);
         // Cache misses as well as hits because malformed PDFs often repeat the
         // same unavailable encoding name across multiple text operators.
         self.glyphs_by_name.insert(name.clone(), glyph);
         glyph
-    }
-
-    /// Scans the retained name provider without reparsing the font container.
-    fn find_glyph_name(&self, name: &GlyphName) -> Option<GlyphId> {
-        self.program
-            .borrow_dependent()
-            .glyph_names
-            .as_ref()?
-            .iter()
-            .find_map(|(glyph, candidate)| {
-                // `skrifa` invents `gidNNN` names for fonts without real
-                // PostScript names. Synthetic names are not valid PDF name
-                // mappings and must remain lookup misses.
-                (!candidate.is_synthesized() && candidate.as_str().as_bytes() == name.0.as_ref())
-                    .then_some(GlyphId(glyph.to_u32()))
-            })
     }
 }
 
@@ -449,5 +462,27 @@ mod tests {
 
         assert_eq!(program.glyph_for_code(0x18), Some(GlyphId(0x18)));
         assert_eq!(program.glyph_for_code(0x46), None);
+    }
+
+    #[test]
+    fn encoding_name_resolves_through_windows_unicode_cmap() {
+        let data = windows_unicode_only_font();
+        let font = FontRef::new(&data).unwrap();
+        let program = TrueTypeProgramRef {
+            outlines: font.outline_glyphs(),
+            glyph_names: None,
+            font,
+        };
+
+        let name = |name: &[u8]| {
+            GlyphName(pdf_object_reader::inline_bytes::InlineBytes::from_bytes(
+                name,
+            ))
+        };
+        assert_eq!(
+            program.glyph_for_name(&name(b"hyphen")),
+            Some(GlyphId(0x2D))
+        );
+        assert_eq!(program.glyph_for_name(&name(b"g99")), None);
     }
 }
