@@ -242,7 +242,7 @@ impl CanvasBackend for WebCanvasBackend {
         match style.stroke_space_path(path, width)? {
             Some(stroke_space) => PreparedPath::new(
                 self,
-                &CanvasPath::device(&stroke_space),
+                &stroke_space,
                 color,
                 shader,
                 mode,

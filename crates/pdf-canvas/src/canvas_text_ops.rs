@@ -61,10 +61,10 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         // Apply any glyph outlines accumulated for clip-mode text rendering (modes 4–7).
         // Per ISO 32000 §9.3.6, the clip path is set at the end of the text object.
         if let Some(clip_path) = self.current_state_mut()?.pending_text_clip.take() {
-            self.canvas.set_clip_region(
-                &CanvasPath::device(&clip_path),
-                pdf_graphics::PathFillType::Winding,
-            )?;
+            let clip_path =
+                CanvasPath::shared(std::sync::Arc::new(clip_path), Transform::identity())?;
+            self.canvas
+                .set_clip_region(&clip_path, pdf_graphics::PathFillType::Winding)?;
             self.current_state_mut()?.clip_path = Some(clip_path);
         }
         Ok(())
@@ -210,17 +210,17 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             TextRenderingMode::Invisible => Ok(()),
             TextRenderingMode::FillAndClip => {
                 self.draw_path(&path, PaintMode::Fill, PathFillType::Winding)?;
-                self.add_to_text_clip(&path.to_pdf_path()?)
+                self.add_to_text_clip(&path)
             }
             TextRenderingMode::StrokeAndClip => {
                 self.draw_path(&path, PaintMode::Stroke, PathFillType::Winding)?;
-                self.add_to_text_clip(&path.to_pdf_path()?)
+                self.add_to_text_clip(&path)
             }
             TextRenderingMode::FillStrokeAndClip => {
                 self.draw_path(&path, PaintMode::FillAndStroke, PathFillType::Winding)?;
-                self.add_to_text_clip(&path.to_pdf_path()?)
+                self.add_to_text_clip(&path)
             }
-            TextRenderingMode::Clip => self.add_to_text_clip(&path.to_pdf_path()?),
+            TextRenderingMode::Clip => self.add_to_text_clip(&path),
         }
     }
 

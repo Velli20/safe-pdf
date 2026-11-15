@@ -516,10 +516,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         let stroke_space = stroke_style.stroke_space_path(path, line_width)?;
         // A single-point subpath has no direction, so only a round cap can mark it.
         let point_contours = stroke_style.line_cap == pdf_graphics::LineCap::Round;
-        let sk_path = match &stroke_space {
-            Some(stroke_space) => to_skia_path(&CanvasPath::device(stroke_space), point_contours)?,
-            None => to_skia_path(path, point_contours)?,
-        };
+        let sk_path = to_skia_path(stroke_space.as_ref().unwrap_or(path), point_contours)?;
         // Skia draws zero-width strokes as hairlines.
         let line_width = device_stroke_width(line_width, 0.0)
             .ok_or(SkiaCanvasBackendError::InvalidStrokeWidth)?;

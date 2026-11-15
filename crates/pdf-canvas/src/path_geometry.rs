@@ -169,14 +169,23 @@ impl<'a> CanvasPath<'a> {
         }))
     }
 
-    /// Materializes a mutable device-space path, validating all mapped coordinates.
-    pub fn to_pdf_path(&self) -> Result<PdfPath, TransformError> {
-        let mut path = PdfPath::default();
+    /// Borrows the same source geometry with `transform` applied after this path's mapping.
+    ///
+    /// The mappings are composed rather than applied in turn, so no intermediate path is
+    /// allocated. Rejects a nonfinite composed matrix.
+    pub fn remapped(&self, transform: &Transform) -> Result<CanvasPath<'_>, TransformError> {
+        let mut composed = self.transform.unwrap_or_else(Transform::identity);
+        composed.concat(transform);
+        CanvasPath::transformed(self.source(), composed)
+    }
+
+    /// Appends the mapped verbs to `target`, validating all mapped coordinates.
+    pub fn extend_into(&self, target: &mut PdfPath) -> Result<(), TransformError> {
         for verb in self.verbs() {
             match verb? {
-                PathVerb::MoveTo { x, y } => path.move_to(x, y),
-                PathVerb::LineTo { x, y } => path.line_to(x, y),
-                PathVerb::QuadTo { x1, y1, x2, y2 } => path.quad_to(x1, y1, x2, y2),
+                PathVerb::MoveTo { x, y } => target.move_to(x, y),
+                PathVerb::LineTo { x, y } => target.line_to(x, y),
+                PathVerb::QuadTo { x1, y1, x2, y2 } => target.quad_to(x1, y1, x2, y2),
                 PathVerb::CubicTo {
                     x1,
                     y1,
@@ -184,11 +193,11 @@ impl<'a> CanvasPath<'a> {
                     y2,
                     x3,
                     y3,
-                } => path.curve_to(x1, y1, x2, y2, x3, y3),
-                PathVerb::Close => path.close(),
+                } => target.curve_to(x1, y1, x2, y2, x3, y3),
+                PathVerb::Close => target.close(),
             }
         }
-        Ok(path)
+        Ok(())
     }
 }
 
