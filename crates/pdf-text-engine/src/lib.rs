@@ -4,12 +4,15 @@
 
 pub mod error;
 mod pdf_text_decoder;
+pub mod pdf_text_encoder;
+mod pdf_text_host_font;
 mod pdf_text_layout;
 pub mod system;
 pub mod text;
 pub mod text_style;
 
 pub use error::TextError;
+pub use pdf_text_encoder::PdfTextEncoder;
 pub use system::FontSystem;
 
 /// Builds the standard font registry and bundled fallback policy.

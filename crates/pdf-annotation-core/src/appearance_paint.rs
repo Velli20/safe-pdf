@@ -7,6 +7,7 @@ use crate::{
     layer_error::AnnotationLayerResult,
     models::Annotation,
     pdf_data::{AppearanceStreams, SourceAnnotation},
+    variable_text::VariableText,
     widget_control::PaintedState,
 };
 use pdf_graphics::rect::Rect;
@@ -23,6 +24,9 @@ pub struct PaintedAppearance {
     pub stream: PdfObject,
     /// The annotation rectangle in PDF page user space.
     pub rect: Rect,
+    /// The live value of a text-entry widget, drawn in place of the value inside the
+    /// stream's `/Tx` marked content; `None` draws the stream as it is.
+    pub text: Option<VariableText>,
 }
 
 impl PaintedAppearance {
@@ -30,9 +34,11 @@ impl PaintedAppearance {
     ///
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
-    /// buttons and read-only text fields their source `/AS`. A `pressed` widget draws its
-    /// down appearance when it has one for that state. Ink without strokes draws its source
-    /// `/AS` state.
+    /// buttons and read-only text fields their source `/AS`, and editable text fields and
+    /// editable combo boxes their normal appearance with the live value. A `pressed` widget
+    /// draws its down appearance when it has one for that state. A text entry being
+    /// `editing` draws without its value, which its control shows instead. Ink without
+    /// strokes draws its source `/AS` state.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
@@ -41,6 +47,7 @@ impl PaintedAppearance {
         view: &DocumentView<'_>,
         optional_content: &OptionalContentState,
         pressed: bool,
+        editing: bool,
     ) -> AnnotationLayerResult<Option<Self>> {
         if !annotation.is_displayed(optional_content) {
             return Ok(None);
@@ -56,6 +63,18 @@ impl PaintedAppearance {
         let Some(source) = annotation.source() else {
             return Ok(None);
         };
+        if let Some(mut text) = annotation.variable_text(field) {
+            if editing {
+                text.value.clear();
+            }
+            return Ok(source
+                .rect
+                .and_then(|rect| source.normal_appearance(rect))
+                .map(|appearance| Self {
+                    text: Some(text),
+                    ..appearance
+                }));
+        }
         let state = match annotation.painted_state(field) {
             Some(PaintedState::Source) => source.appearance_state.as_deref(),
             Some(PaintedState::Checked(true)) => source.button_on_state().ok(),
@@ -102,6 +121,7 @@ impl SourceAnnotation {
         Some(PaintedAppearance {
             stream: stream.clone(),
             rect: rect.normalized(),
+            text: None,
         })
     }
 
@@ -124,6 +144,7 @@ impl SourceAnnotation {
         Some(PaintedAppearance {
             stream: stream.clone(),
             rect: rect.normalized(),
+            text: None,
         })
     }
 }
@@ -182,7 +203,7 @@ mod tests {
             ]));
             let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
             let overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
-            let appearances = overlay.painted_appearances(0, None).unwrap();
+            let appearances = overlay.painted_appearances(0, None, None).unwrap();
             assert_eq!(appearances.len(), usize::from(painted), "/Ff {flags}");
             if let Some(painted) = appearances.first() {
                 assert_eq!(Some(painted.rect), source.rect);
@@ -228,7 +249,7 @@ mod tests {
         let entry = prepared.entries().first().unwrap();
         assert_eq!(entry.unsupported, None);
         assert!(entry.control.is_none());
-        let appearances = overlay.painted_appearances(0, None).unwrap();
+        let appearances = overlay.painted_appearances(0, None, None).unwrap();
         let painted = appearances.first().unwrap();
         assert_eq!(appearances.len(), 1);
         assert_eq!(Some(painted.rect), source.rect);

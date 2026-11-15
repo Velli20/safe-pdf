@@ -88,8 +88,9 @@ pub struct WidgetControl {
     pub top_index: u32,
     /// Counterclockwise content rotation in degrees from the source appearance.
     pub rotation: i32,
-    /// Whether the host paints the source appearance on the page canvas, leaving the
-    /// control a transparent hit and input target.
+    /// Whether the host paints the source appearance on the page canvas, with a text-entry
+    /// widget's live value, leaving the control a transparent hit and input target until a
+    /// text entry is focused for editing.
     pub painted: bool,
 }
 

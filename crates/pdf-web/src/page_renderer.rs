@@ -5,12 +5,15 @@ use crate::{
     annotation_overlay::{PreparedAnnotationOverlay, WebAnnotationOverlay},
     error::{WebError as Error, WebResult},
 };
-use pdf_annotation_core::PaintedAppearance;
+use pdf_annotation_core::{PaintedAppearance, models::AnnotationId};
 use pdf_document::document::PdfDocument;
 use pdf_graphics::size::Size;
 use pdf_graphics_web::WebCanvasBackend;
 use pdf_renderer::{PageTextLayout, PdfRenderer};
-use std::sync::Arc;
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    sync::Arc,
+};
 
 /// Results of one page-content pass and independently prepared annotation presentation.
 pub struct WebPageOutput {
@@ -22,6 +25,14 @@ pub struct WebPageOutput {
     pub content_revision: u32,
     /// Native annotation presentation, independent of page pixels.
     pub annotations: PreparedAnnotationOverlay,
+}
+
+/// The font a text entry's value is edited in, for a browser `FontFace`.
+pub struct FieldFont {
+    /// A family name unique to the program, so entries sharing a font share one face.
+    pub family: String,
+    /// The program, mapped by Unicode onto the glyphs the canvas paints the value with.
+    pub data: Vec<u8>,
 }
 
 /// Thin orchestration around PdfRenderer; no new content-stream or font rendering engine.
@@ -98,6 +109,34 @@ impl WebPageRenderer {
             let _ = backend.abort_page();
         }
         result
+    }
+
+    /// The font text entry `id` on page `page_index` paints its value in, for the host
+    /// control that shows the value while it is edited; `None` for other annotations and
+    /// for a font a browser program cannot be built from.
+    ///
+    /// # Errors
+    /// Rejects a widget whose bound field is missing, and propagates font building errors.
+    pub fn field_font(
+        &self,
+        overlay: &WebAnnotationOverlay,
+        page_index: u32,
+        id: AnnotationId,
+    ) -> WebResult<Option<FieldFont>> {
+        let Some(appearance) = overlay.text_entry(id)? else {
+            return Ok(None);
+        };
+        let index = usize::try_from(page_index).map_err(|_| Error::ResourceLimit)?;
+        let Some(program) = self.renderer.field_font_program(index, &appearance)? else {
+            return Ok(None);
+        };
+        let data = program.into_data();
+        let mut hasher = DefaultHasher::new();
+        data.hash(&mut hasher);
+        Ok(Some(FieldFont {
+            family: format!("pdf-field-{:016x}", hasher.finish()),
+            data,
+        }))
     }
 
     /// Draws `artwork` of page `page_index` through `viewport`, the artwork layout from

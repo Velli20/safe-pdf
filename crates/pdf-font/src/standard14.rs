@@ -186,6 +186,13 @@ pub(crate) fn from_flags(flags: FontFlags) -> Standard14Font {
 }
 
 impl Standard14Font {
+    /// The font a `Tf` operand selects when no resources define the font resource `name`:
+    /// the Standard 14 font the name names, or Helvetica, as other viewers draw it.
+    #[must_use]
+    pub fn for_missing_resource(name: &[u8]) -> Self {
+        from_base_font_name(name).unwrap_or(Self::Helvetica)
+    }
+
     /// Returns whether the TrueType core font behind this identity, such as Arial for Helvetica,
     /// keeps the standard Macintosh glyph order. The symbol fonts do not.
     #[must_use]

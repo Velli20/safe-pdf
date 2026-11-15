@@ -80,10 +80,12 @@ fn painted_on_canvas(entry: &AnnotationEntry) -> bool {
 }
 
 /// The CSS border for `entry`, or empty when nothing draws one: a link is only an
-/// interaction region, and canvas-painted or shape-drawn kinds carry their own outline.
+/// interaction region, canvas-painted or shape-drawn kinds carry their own outline, and
+/// a widget draws a border only in its `/MK /BC` color.
 fn css_border(entry: &AnnotationEntry) -> String {
     let style = &entry.style;
     if matches!(entry.content, Kind::Link(_))
+        || matches!(entry.content, Kind::Widget(_)) && style.border_color.is_none()
         || painted_on_canvas(entry)
         || drawn_from_shapes(&entry.content)
         || style.border_width <= 0.0

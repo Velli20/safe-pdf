@@ -6,6 +6,7 @@ use crate::validate::Validate;
 use num_traits::ToPrimitive;
 use pdf_graphics::{color::Color, rect::Rect};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Stroke width used when a resolved style has no positive border width.
 const DEFAULT_STROKE_WIDTH: f32 = 1.0;
@@ -110,12 +111,7 @@ pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) -> bool {
     let text = String::from_utf8_lossy(bytes);
     let mut operands: Vec<&str> = Vec::new();
     let mut auto_size = false;
-    for token in text.lines().flat_map(|line| {
-        line.split('%')
-            .next()
-            .unwrap_or_default()
-            .split_ascii_whitespace()
-    }) {
+    for token in default_appearance_tokens(&text) {
         match token {
             "Tf" => {
                 if let [name, size] = operands.as_slice() {
@@ -154,7 +150,27 @@ pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) -> bool {
     auto_size
 }
 
+/// The whitespace-separated tokens of a `/DA` string, without `%` comments.
+fn default_appearance_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.lines().flat_map(|line| {
+        line.split('%')
+            .next()
+            .unwrap_or_default()
+            .split_ascii_whitespace()
+    })
+}
+
 impl WidgetAnnotation {
+    /// The font resource name the last `Tf` of `/DA` selects, without its leading slash.
+    pub(crate) fn default_font_name(&self) -> Option<Arc<[u8]>> {
+        let text = String::from_utf8_lossy(self.default_appearance.as_deref()?);
+        let tokens: Vec<&str> = default_appearance_tokens(&text).collect();
+        tokens.windows(3).rev().find_map(|window| match window {
+            [name, _, "Tf"] => name.strip_prefix('/').map(|name| name.as_bytes().into()),
+            _ => None,
+        })
+    }
+
     /// Font size for a `/DA` auto size (`0 Tf`) that fits the text inside `rect` less
     /// `border_width` on each side, or `None` to keep the default size.
     ///
@@ -227,6 +243,10 @@ pub fn resolve_source_style(
     if let Some(border) = border {
         style.border_width = border.resolved_width();
         style.dash = border.dash_pattern.clone();
+    } else if annotation.border.is_none() && matches!(annotation.kind, NativeAnnotation::Widget(_))
+    {
+        // A widget without `/BS` or `/Border` has the default `/Border [0 0 1]`.
+        style.border_width = DEFAULT_STROKE_WIDTH;
     }
     style.background = interior.copied();
     let mut widget = None;

@@ -13,6 +13,7 @@ mod annotation_appearance;
 mod document_text_selection;
 pub mod page_cache;
 pub mod text_selection;
+mod variable_text;
 
 pub use page_cache::PageRecordingCache;
 pub use text_selection::{
@@ -63,6 +64,8 @@ pub enum PdfRendererError {
     PdfCanvasError(#[source] pdf_utils::TracedError<pdf_canvas::error::PdfCanvasError>),
     #[error("Failed to read page content stream: {0}")]
     ContentStream(#[from] ObjectReadError),
+    #[error("Failed to build a field font program: {0}")]
+    Text(#[from] pdf_text_engine::TextError),
 }
 
 impl From<PdfCanvasError> for PdfRendererError {
@@ -77,7 +80,7 @@ impl PdfRendererError {
     pub fn trace(&self) -> Option<&pdf_utils::ErrorTrace> {
         match self {
             Self::PdfCanvasError(error) => Some(error.trace()),
-            Self::PageNotFound(_) | Self::ContentStream(_) => None,
+            Self::PageNotFound(_) | Self::ContentStream(_) | Self::Text(_) => None,
         }
     }
 }

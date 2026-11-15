@@ -100,20 +100,23 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         Ok(())
     }
 
-    /// Handles `Tf`: selects a font resource and size.
+    /// Handles `Tf`: selects a font resource and size, looking a name the current
+    /// resources lack up in the fallback fonts, then substituting a Standard 14 font.
     pub(crate) fn set_font_and_size(
         &mut self,
         font_name: &[u8],
         size: f32,
     ) -> Result<(), PdfCanvasError> {
-        let (font, nested_resources) = self
+        let found = self
             .current_state()?
             .resources
             .as_ref()
             .and_then(|resources| resources.font(font_name))
-            .ok_or_else(|| {
-                PdfCanvasError::FontNotFound(String::from_utf8_lossy(font_name).into_owned())
-            })?;
+            .or_else(|| self.fallback_fonts.as_ref()?.font(font_name));
+        // A name no resources define selects the Standard 14 font it names, or Helvetica,
+        // rather than abandoning the rest of the stream.
+        let (font, nested_resources) =
+            found.unwrap_or_else(|| (self.missing_font(font_name), None));
         let handle = self.load_pdf_font(&font)?;
         let text_state = &mut self.current_state_mut()?.text_state;
         text_state.font = Some(handle);

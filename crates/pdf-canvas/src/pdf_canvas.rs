@@ -18,7 +18,7 @@ use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
 use pdf_font::pdf_font_handle::PdfFontHandle;
-use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec};
+use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec, Standard14Font};
 use pdf_graphics::{
     AlphaConstant, BlendMode, Image, PaintMode, PathFillType, color::Color, pdf_path::PdfPath,
     rect::Rect, size::Size, transform::Transform,
@@ -88,6 +88,11 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) text_glyphs: Option<Vec<TextGlyph>>,
     /// Hides content whose optional content is off; `None` when nothing can be hidden.
     pub(crate) optional_content: Option<OptionalContentFilter<'a>>,
+    /// Resources whose fonts `Tf` selects when the current resources lack the name.
+    pub(crate) fallback_fonts: Option<Arc<Resources>>,
+    /// Standard 14 fonts substituted for `Tf` names no resources define, kept for the
+    /// render so `font_cache`'s address keys stay unique.
+    missing_fonts: HashMap<Standard14Font, Arc<PdfFontSpec>>,
 }
 
 impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
@@ -147,6 +152,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             content_stream_render_state: ContentStreamRenderState::default(),
             text_glyphs: None,
             optional_content: None,
+            fallback_fonts: None,
+            missing_fonts: HashMap::new(),
         })
     }
 
@@ -170,6 +177,14 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     #[must_use]
     pub fn with_optional_content(mut self, state: &'a OptionalContentState) -> Self {
         self.optional_content = Some(OptionalContentFilter::new(state));
+        self
+    }
+
+    /// Resolves a `Tf` font name the current resources lack in `resources`, as widget
+    /// appearances resolve theirs in the interactive form's `/DR`.
+    #[must_use]
+    pub fn with_fallback_fonts(mut self, resources: Option<Arc<Resources>>) -> Self {
+        self.fallback_fonts = resources;
         self
     }
 
@@ -301,10 +316,13 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 .optional_content
                 .as_ref()
                 .map(OptionalContentFilter::restarted),
+            fallback_fonts: self.fallback_fonts.clone(),
+            missing_fonts: std::mem::take(&mut self.missing_fonts),
         };
 
         let result = paint(&mut other);
         self.font_cache = other.font_cache;
+        self.missing_fonts = other.missing_fonts;
         self.glyph_cache = other.glyph_cache;
         self.content_stream_render_state = other.content_stream_render_state;
         self.text_glyphs = other.text_glyphs.or_else(|| self.text_glyphs.take());
@@ -323,6 +341,17 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     }
 
     /// Loads a PDF font once for each resource specification used by this canvas.
+    /// The Standard 14 font a `Tf` name no resources define selects: the font the name
+    /// names, or Helvetica.
+    pub(crate) fn missing_font(&mut self, name: &[u8]) -> Arc<PdfFontSpec> {
+        let standard14 = Standard14Font::for_missing_resource(name);
+        Arc::clone(
+            self.missing_fonts
+                .entry(standard14)
+                .or_insert_with(|| Arc::new(PdfFontSpec::from(standard14))),
+        )
+    }
+
     pub(crate) fn load_pdf_font(
         &mut self,
         spec: &PdfFontSpec,

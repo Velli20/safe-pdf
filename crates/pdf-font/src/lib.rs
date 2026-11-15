@@ -11,6 +11,7 @@ mod font_metadata;
 pub mod font_registry;
 pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
+pub mod host_font_program;
 mod metric_run;
 pub mod pdf;
 mod pdf_font_descriptor;

@@ -155,7 +155,7 @@ impl AnnotationOverlay {
     /// Returns the source appearances of `page`'s displayed button and read-only text
     /// widgets, selected by live field state, and of annotations drawn from their appearance,
     /// in presentation order, for painting on the page canvas. The `pressed` widget draws its
-    /// down appearance.
+    /// down appearance, and the text entry being `editing` draws without its value.
     ///
     /// # Errors
     /// Rejects absent pages and widgets whose bound field is missing.
@@ -163,14 +163,20 @@ impl AnnotationOverlay {
         &self,
         page: u32,
         pressed: Option<AnnotationId>,
+        editing: Option<AnnotationId>,
     ) -> AnnotationLayerResult<Vec<PaintedAppearance>> {
         let view = self.page_view(page)?;
         self.page_annotations(&view, page)
             .into_iter()
             .filter_map(|annotation| {
-                let pressed = pressed == Some(annotation.id);
-                PaintedAppearance::new(annotation, &view, &self.optional_content, pressed)
-                    .transpose()
+                PaintedAppearance::new(
+                    annotation,
+                    &view,
+                    &self.optional_content,
+                    pressed == Some(annotation.id),
+                    editing == Some(annotation.id),
+                )
+                .transpose()
             })
             .collect()
     }
@@ -179,6 +185,22 @@ impl AnnotationOverlay {
     /// drawing into the annotation's own presentation; `None` for other annotations.
     pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
         PaintedAppearance::artwork(self.annotation(id)?, &self.optional_content)
+    }
+
+    /// Returns the painted appearance of the displayed text entry `id` with its live value,
+    /// whose `/DA` font a host shows the value being edited in; `None` for other annotations.
+    ///
+    /// # Errors
+    /// Rejects a widget whose bound field is missing.
+    pub fn text_entry(&self, id: AnnotationId) -> AnnotationLayerResult<Option<PaintedAppearance>> {
+        let Some(annotation) = self.annotation(id) else {
+            return Ok(None);
+        };
+        let view = self.document.engine.view();
+        Ok(
+            PaintedAppearance::new(annotation, &view, &self.optional_content, false, false)?
+                .filter(|appearance| appearance.text.is_some()),
+        )
     }
 
     /// Validates a GUI context, clamps interactive dragging, and dispatches one edit.

@@ -209,7 +209,7 @@ where
 }
 
 /// Converts one byte into its borrowed name selector, Unicode mapping, and PDF advance.
-fn decode_one_byte_mapping<'a>(
+pub(crate) fn decode_one_byte_mapping<'a>(
     encoding: &'a SimpleEncoding,
     metrics: &PdfMetrics,
     to_unicode: Option<&ToUnicodeMap>,

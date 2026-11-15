@@ -132,13 +132,16 @@ impl FontSystem {
             PdfFontSpec::Type3(font) => Some(type3_source(font)),
             other => other.source().cloned(),
         };
-        let primary = source.map(|source| self.load_with_metadata(source, spec.metadata().clone()));
+        let primary = source.map(|source| {
+            self.load_with_metadata(source.clone(), spec.metadata().clone())
+                .map(|face| (face, source))
+        });
 
         match primary.transpose() {
-            Ok(Some(face)) => Ok(PdfFontHandle::new(spec, face)),
+            Ok(Some((face, source))) => Ok(PdfFontHandle::new(spec, face, source)),
             Ok(None) | Err(_) => {
-                let face = self.load_whole_font_fallback(spec.as_ref())?;
-                Ok(PdfFontHandle::new_with_substitute(spec, face))
+                let (face, source) = self.load_whole_font_fallback(spec.as_ref())?;
+                Ok(PdfFontHandle::new_with_substitute(spec, face, source))
             }
         }
     }
@@ -211,7 +214,8 @@ impl FontSystem {
         Ok(face)
     }
 
-    /// Returns the first loadable whole-font fallback candidate in provider order.
+    /// Returns the first loadable whole-font fallback candidate in provider order, with the
+    /// source it was loaded from.
     ///
     /// A candidate-specific load error does not stop the search because later candidates may use a
     /// different format or driver. If the provider supplies no loadable face, the error is
@@ -219,7 +223,7 @@ impl FontSystem {
     fn load_whole_font_fallback(
         &self,
         spec: &PdfFontSpec,
-    ) -> Result<Arc<dyn FontFace>, pdf_font::FontError> {
+    ) -> Result<(Arc<dyn FontFace>, FontSource), pdf_font::FontError> {
         let candidates = self
             .fallback
             .whole_font_candidates(&WholeFontFallbackRequest {
@@ -228,8 +232,9 @@ impl FontSystem {
                 excluded_faces: &[],
             })?;
         for candidate in candidates {
-            if let Ok(face) = self.load_with_metadata(candidate.source, candidate.metadata) {
-                return Ok(face);
+            if let Ok(face) = self.load_with_metadata(candidate.source.clone(), candidate.metadata)
+            {
+                return Ok((face, candidate.source));
             }
         }
         Err(pdf_font::FontError::FallbackExhausted)

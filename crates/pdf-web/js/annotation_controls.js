@@ -37,6 +37,7 @@ export class FormControl extends AnnotationComponent {
     if (node instanceof HTMLButtonElement) node.type = 'button';
     this.bindDraftEvents();
     this.bindPressEvents();
+    this.bindEditEvents();
     this.bindTriggerEvents();
     this.listen(node, 'click', event => {
       if (this.control().kind === ControlKind.Button) { event.preventDefault(); layer.onAction(this.entry, 'activate'); }
@@ -59,11 +60,24 @@ export class FormControl extends AnnotationComponent {
       this.layer.onPress(this.entry, false);
     };
     this.listen(this.node, 'pointerdown', event => {
-      if (event.button !== 0 || !this.control().painted || !this.entry.editable && this.control().kind !== ControlKind.Button) return;
+      const { painted, kind } = this.control();
+      // Text entries have no down appearance; only buttons are pressed.
+      if (event.button !== 0 || !painted || kind === ControlKind.Text || kind === ControlKind.ComboBox || !this.entry.editable && kind !== ControlKind.Button) return;
       pressed = true;
       this.layer.onPress(this.entry, true);
     });
     for (const name of /** @type {const} */ (['pointerup', 'pointercancel', 'pointerleave'])) this.listen(this.node, name, release);
+  }
+
+  /** Reports focus on a canvas-painted text entry so the host paints it without its value
+   * while the control shows the value being edited. `change` commits before `blur`. */
+  bindEditEvents() {
+    const edits = () => {
+      const { painted, kind } = this.control();
+      return painted && (kind === ControlKind.Text || kind === ControlKind.ComboBox);
+    };
+    this.listen(this.node, 'focus', () => { if (edits()) this.layer.onEdit(this.entry, true); });
+    this.listen(this.node, 'blur', () => { if (edits()) this.layer.onEdit(this.entry, false); });
   }
 
   /** @returns {import('./annotation_contract').WidgetControl} */

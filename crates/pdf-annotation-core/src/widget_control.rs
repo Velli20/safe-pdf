@@ -65,7 +65,8 @@ impl Annotation {
                 .and_then(|w| w.appearance_characteristics.as_ref())
                 .and_then(|mk| mk.rotation)
                 .unwrap_or(0),
-            painted: painted_state.is_some() && self.has_normal_appearance(),
+            painted: (painted_state.is_some() && self.has_normal_appearance())
+                || self.variable_text(field).is_some(),
         };
         match &definition.content {
             FieldKind::Text(text) => {

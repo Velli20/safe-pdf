@@ -9,6 +9,11 @@
 .native-control:is(input,textarea,select) { background-image: linear-gradient(var(--native-form-highlight), var(--native-form-highlight)); }
 .native-control:is(input[type=radio],input[type=checkbox]):not(.native-painted) { appearance: auto; }
 .native-control.native-painted { appearance: none; resize: none; }
+/* The canvas paints a text entry's value in its PDF font; while focused, the host paints the
+   entry without its value and the control shows the value being edited. */
+.native-control.native-painted:is(input,textarea):focus { color: var(--native-field-color) !important; }
+/* A PDF text field has a fixed rectangle, so the browser's resize grip is not drawn. */
+textarea.native-control { resize: none; }
 button.native-control { cursor: pointer; white-space: nowrap; text-align: center; }
 button.native-control:hover:not(:disabled) { filter: brightness(0.94); }
 button.native-control:active:not(:disabled) { filter: brightness(0.67); }

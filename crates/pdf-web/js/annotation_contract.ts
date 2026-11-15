@@ -2118,8 +2118,9 @@ top_index: number,
  */
 rotation: number,
 /**
- * Whether the host paints the source appearance on the page canvas, leaving the
- * control a transparent hit and input target.
+ * Whether the host paints the source appearance on the page canvas, with a text-entry
+ * widget's live value, leaving the control a transparent hit and input target until a
+ * text entry is focused for editing.
  */
 painted: boolean, };
 

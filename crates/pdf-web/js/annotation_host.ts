@@ -16,6 +16,13 @@ export interface AnnotationLayerCallbacks {
   onAction?(entry: WebAnnotationEntry, trigger: ActionTrigger): void;
   /** Reports a canvas-painted widget held down (`true`) or released (`false`). */
   onPress?(entry: WebAnnotationEntry, pressed: boolean): void;
+  /** Starts or ends editing a canvas-painted text entry; the host repaints its page with
+   * the entry's value left out while `editing`, so only the control shows it. */
+  onEdit?(entry: WebAnnotationEntry, editing: boolean): void;
+  /** Returns the font a canvas-painted text entry paints its value in, or nothing when no
+   * browser font can be built for it. Called once per entry; the layer registers each
+   * family once as a `FontFace` and edits the value in it. */
+  loadFont?(entry: WebAnnotationEntry): { family: string, data: Uint8Array } | undefined;
   /** Draws the source artwork of an entry with `artwork` into `canvas`, sizing it to the
    * entry's local box at the page's pixel density. */
   renderArtwork?(entry: WebAnnotationEntry, canvas: HTMLCanvasElement): void;

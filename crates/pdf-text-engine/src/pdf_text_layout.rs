@@ -371,7 +371,7 @@ fn fallback_fit(
 /// then use the first Unicode scalar as a recovery path. Without an explicit selector, a one-byte
 /// code is looked up in the face's code-keyed cmap subtables: before Unicode for a symbolic font,
 /// whose codes address those subtables directly, and after it otherwise.
-fn select_glyph(
+pub(crate) fn select_glyph(
     face: &dyn FontFace,
     decoded: &DecodedGlyph<'_>,
     prefer_unicode: bool,
