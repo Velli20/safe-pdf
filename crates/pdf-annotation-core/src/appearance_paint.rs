@@ -46,7 +46,8 @@ impl PaintedAppearance {
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
     /// buttons and read-only text fields their source `/AS`, and editable text fields and
-    /// editable combo boxes their normal appearance with the live value. The widget
+    /// editable combo boxes their normal appearance with the live value, drawn as it is
+    /// while a text field's value is still its source `/V`. The widget
     /// `presentation` marks pressed draws its down appearance when it has one for that
     /// state, and the text entry it marks editing draws without its value. Ink without
     /// strokes draws its source `/AS` state.
@@ -71,12 +72,20 @@ impl PaintedAppearance {
             return Ok(None);
         };
         if let Some(mut appearance) = annotation.text_entry_appearance(field) {
-            if presentation.editing == Some(annotation.id)
-                && let Some(text) = &mut appearance.text
-            {
-                text.value.clear();
+            if presentation.editing == Some(annotation.id) {
+                if let Some(text) = &mut appearance.text {
+                    text.value.clear();
+                }
+            } else if annotation.shows_source_value(field) {
+                // The source appearance already shows the value, laid out by its author.
+                appearance.text = None;
             }
             return Ok(Some(appearance));
+        }
+        // A text field without a value layout cannot leave its value out, so while it is
+        // edited only its control shows it.
+        if presentation.editing == Some(annotation.id) {
+            return Ok(None);
         }
         let Some(source) = annotation.source() else {
             return Ok(None);
@@ -207,7 +216,8 @@ impl AppearanceStreams {
 #[cfg(test)]
 mod tests {
     use crate::{
-        AnnotationOverlay, PresentationState,
+        AnnotationCommandRequest, AnnotationOverlay, PresentationState,
+        commands::{AnnotationCommand, Operation},
         pdf_data::{
             AppearanceDictionary, AppearanceStreams, NativeAnnotation, SourceAnnotation,
             TextAnnotation,
@@ -218,18 +228,26 @@ mod tests {
         Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
         pdf_array::PdfArray, pdf_object::PdfObject, pdf_string::PdfString, string_kind::StringKind,
     };
+    use std::sync::Arc;
 
     #[test]
-    fn read_only_text_widget_paints_its_normal_appearance() {
+    fn text_widget_draws_its_appearance_as_is_until_its_value_is_edited() {
         let name = |bytes: &[u8]| PdfString::from(bytes, StringKind::Name);
         let rect = PdfArray::new([4, 0, 40, 842].map(ObjectVariant::Integer));
         let appearance = StreamObject::new(2, 0, Dictionary::from_entries([]), b"0 g".to_vec());
-        // Read-only multiline (`/Ff 4097`) is painted; editable multiline (`/Ff 4096`) is not.
-        for (flags, painted) in [(4097, true), (4096, false)] {
+        // The widget declares no `/DA`, so it takes the interactive form's.
+        let form_appearance: Arc<[u8]> = Arc::from(b"/Helv 10 Tf 0 g".as_slice());
+        // Read-only (`/Ff 4097`) and editable (`/Ff 4096`) multiline fields both draw their
+        // stored appearance unchanged while their value is the source `/V`.
+        for flags in [4097, 4096] {
             let widget = ObjectVariant::Dictionary(Dictionary::from_entries([
                 (b"Subtype".as_slice(), name(b"Widget")),
                 (b"FT".as_slice(), name(b"Tx")),
                 (b"Ff".as_slice(), ObjectVariant::Integer(flags)),
+                (
+                    b"V".as_slice(),
+                    PdfString::from(b"Lorem", StringKind::Literal),
+                ),
                 (b"Rect".as_slice(), ObjectVariant::Array(rect.clone())),
                 (
                     b"AP".as_slice(),
@@ -240,17 +258,58 @@ mod tests {
                 ),
             ]));
             let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
-            let overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
+            let mut overlay = AnnotationOverlay::new(
+                [std::slice::from_ref(&source)],
+                None,
+                Some(&form_appearance),
+            )
+            .unwrap();
             let appearances = overlay
                 .painted_appearances(0, PresentationState::default())
                 .unwrap();
-            assert_eq!(appearances.len(), usize::from(painted), "/Ff {flags}");
-            if let Some(painted) = appearances.first() {
-                assert_eq!(Some(painted.rect), source.rect);
-                assert_eq!(
-                    painted.stream.value(),
-                    &ObjectVariant::Stream(appearance.clone())
-                );
+            let painted = appearances.first().unwrap();
+            assert_eq!(appearances.len(), 1, "/Ff {flags}");
+            assert_eq!(Some(painted.rect), source.rect);
+            assert_eq!(
+                painted.stream.value(),
+                &ObjectVariant::Stream(appearance.clone())
+            );
+            assert!(painted.text.is_none(), "/Ff {flags}");
+            if flags == 4096 {
+                // An edited value is laid out in the form's `/DA` font instead.
+                let page = Rect {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 612.0,
+                    bottom: 842.0,
+                };
+                let viewport = PageViewport::new(page, 0, Size::new(612.0, 842.0)).unwrap();
+                let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+                let field = prepared
+                    .entries()
+                    .first()
+                    .unwrap()
+                    .control
+                    .as_ref()
+                    .unwrap()
+                    .field;
+                let request = AnnotationCommandRequest {
+                    target: None,
+                    command: AnnotationCommand {
+                        expected_revision: overlay.revision(),
+                        operation: Operation::SetText {
+                            field,
+                            value: "Ipsum".into(),
+                        },
+                    },
+                };
+                overlay.accept_event(request, None, None).unwrap();
+                let appearances = overlay
+                    .painted_appearances(0, PresentationState::default())
+                    .unwrap();
+                let text = appearances.first().unwrap().text.as_ref().unwrap();
+                assert_eq!(text.value, "Ipsum");
+                assert_eq!(text.font.as_ref(), b"Helv");
             }
         }
     }
@@ -277,7 +336,8 @@ mod tests {
             ),
         ]));
         let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
-        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
         let page = Rect {
             left: 0.0,
             top: 0.0,
@@ -334,7 +394,8 @@ mod tests {
                 intent: None,
             })),
         };
-        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&note)], None).unwrap();
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&note)], None, None).unwrap();
         let page = Rect {
             left: 0.0,
             top: 0.0,
@@ -380,7 +441,8 @@ mod tests {
             ),
         ]));
         let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&free_text).unwrap();
-        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
         let page = Rect {
             left: 0.0,
             top: 0.0,

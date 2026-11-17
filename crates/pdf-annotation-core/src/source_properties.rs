@@ -148,6 +148,11 @@ impl WidgetAnnotation {
         self.field_flags.unwrap_or_default().contains(flag)
     }
 
+    /// Whether the comb flag is set.
+    pub fn is_comb(&self) -> bool {
+        self.has_flag(WidgetFieldFlags::COMB)
+    }
+
     /// Whether the radio flag is set.
     pub fn is_radio_button(&self) -> bool {
         self.has_flag(WidgetFieldFlags::RADIO_BUTTON)

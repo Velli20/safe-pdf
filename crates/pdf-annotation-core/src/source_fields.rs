@@ -181,7 +181,7 @@ impl WidgetAnnotation {
     }
 
     /// Live text value from `/V` of a text or choice field.
-    fn text_value(&self) -> Result<String, SourceAdoptionError> {
+    pub(crate) fn text_value(&self) -> Result<String, SourceAdoptionError> {
         match &self.value {
             None | Some(WidgetFieldValue::Null) => Ok(String::new()),
             Some(WidgetFieldValue::Bytes(bytes)) => decode_text(Some(bytes)),

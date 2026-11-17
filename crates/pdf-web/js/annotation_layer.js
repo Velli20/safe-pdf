@@ -12,6 +12,9 @@ import { VisualComponent } from './annotation_visuals.js';
  * submit consumes that promise and reports each failure once through onError,
  * returning acceptance to its owner.
  */
+/** A registered field font and the distance between its baselines, in ems.
+ * @typedef {{ family: string, lineHeight: number }} FieldFont */
+
 export class NativeAnnotationLayer {
   /** @param {HTMLElement} root
    * @param {import('./annotation_host').AnnotationLayerCallbacks} callbacks */
@@ -19,8 +22,8 @@ export class NativeAnnotationLayer {
     this.root = root; this.onCommand = onCommand; this.toPageDelta = toPageDelta; this.onAction = onAction; this.onPress = onPress; this.onEdit = onEdit; this.loadFont = loadFont; this.renderArtwork = renderArtwork; this.onError = onError;
     /** @type {Map<string, import('./annotation_dom.js').AnnotationComponent>} */
     this.nodes = new Map();
-    /** The field font family of each text entry, or `null` when it has none.
-     * @type {Map<string, string | null>} */
+    /** The field font of each text entry, or `null` when it has none.
+     * @type {Map<string, FieldFont | null>} */
     this.fieldFonts = new Map();
     /** Field fonts registered with `document.fonts`, one per family.
      * @type {Map<string, FontFace>} */
@@ -87,7 +90,9 @@ export class NativeAnnotationLayer {
     container.tabIndex = entry.editable || entry.draggable ? 0 : -1;
     container.setAttribute('aria-label', entry.text || entry.subtype);
     node.setAttribute('aria-label', entry.control?.label || entry.text || entry.subtype);
-    const font = { fontSize: `${style.font_size}px`, fontFamily: this.fontFamily(entry), textAlign: style.alignment };
+    const field = this.fieldFont(entry);
+    const fontFamily = field ? `"${field.family}", ${style.font_family}` : style.font_family;
+    const font = { fontSize: `${style.font_size}px`, fontFamily, textAlign: style.alignment };
     Object.assign(container.style, font);
     // A canvas-painted widget, or a stamp, note or free text drawn from its artwork, shows its
     // PDF appearance through a transparent node.
@@ -118,30 +123,30 @@ export class NativeAnnotationLayer {
       return false;
     }
   }
-  /** The CSS font family of `entry`: for a canvas-painted text entry, the font the canvas
-   * paints its value in, registered once per family, ahead of the generic family.
-   * @param {import('./annotation_contract').WebAnnotationEntry} entry */
-  fontFamily(entry) {
-    const generic = entry.style.font_family;
-    if (!FormControl.isPaintedTextEntry(entry.control)) return generic;
-    let family = this.fieldFonts.get(entry.id);
-    if (family === undefined) {
-      family = null;
+  /** The font a canvas-painted text entry paints its value in, registered once per family,
+   * or `null` for other entries and when no browser font can be built.
+   * @param {import('./annotation_contract').WebAnnotationEntry} entry
+   * @returns {FieldFont | null} */
+  fieldFont(entry) {
+    if (!FormControl.isPaintedTextEntry(entry.control)) return null;
+    let font = this.fieldFonts.get(entry.id);
+    if (font === undefined) {
+      font = null;
       try {
-        const font = this.loadFont(entry);
-        if (font) {
-          family = font.family;
-          if (!this.faces.has(family)) {
-            const face = new FontFace(family, font.data);
-            this.faces.set(family, face);
+        const loaded = this.loadFont(entry);
+        if (loaded) {
+          font = { family: loaded.family, lineHeight: loaded.lineHeight };
+          if (!this.faces.has(font.family)) {
+            const face = new FontFace(font.family, loaded.data);
+            this.faces.set(font.family, face);
             document.fonts.add(face);
             face.load().catch(error => this.onError(error));
           }
         }
       } catch (error) { this.onError(error); }
-      this.fieldFonts.set(entry.id, family);
+      this.fieldFonts.set(entry.id, font);
     }
-    return family ? `"${family}", ${generic}` : generic;
+    return font;
   }
   remove(component) { this.drag.remove(component); component.dispose(); }
   /** Releases pointer capture, draft sessions, all component listeners, and nodes. */

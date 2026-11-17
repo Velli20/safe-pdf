@@ -66,6 +66,10 @@ pub struct PdfFontDescriptor {
     pub italic_angle: Option<f32>,
     /// Stem thickness hint.
     pub stem_v: Option<f32>,
+    /// Declared height above the baseline, in thousandths of an em.
+    pub ascent: Option<f32>,
+    /// Declared depth below the baseline, in thousandths of an em.
+    pub descent: Option<f32>,
 }
 
 /// Registry and ordering information from a CID font dictionary.

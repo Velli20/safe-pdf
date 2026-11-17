@@ -2,13 +2,17 @@
 //! appearance's `/Tx` marked content, which show the value the document was saved with,
 //! are replaced by operators showing the live value in the widget's `/DA` font.
 use crate::{PdfRenderer, PdfRendererError};
+use num_traits::ToPrimitive;
 use pdf_annotation_core::{PaintedAppearance, VariableText, style::Alignment};
 use pdf_canvas::{
     canvas_backend::CanvasBackend, font_selection::FontSelection, pdf_canvas::PdfCanvas,
 };
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::{PdfTextItem, variants::PdfOperatorVariant as Op};
-use pdf_font::{host_font_program::HostFontProgram, pdf_font_handle::PdfFontHandle};
+use pdf_font::{
+    host_font_program::HostFontProgram,
+    pdf_font_handle::{LineMetrics, PdfFontHandle},
+};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_resources::resources::Resources;
@@ -17,10 +21,6 @@ use std::ops::Range;
 
 /// The marked-content tag enclosing a widget's variable text.
 const VARIABLE_TEXT_TAG: &[u8] = b"Tx";
-/// Ascender, as a fraction of the font size, of a font without usable metrics.
-const FALLBACK_ASCENT: f32 = 0.8;
-/// Descender, as a fraction of the font size, of a font without usable metrics.
-const FALLBACK_DESCENT: f32 = -0.2;
 
 impl PdfRenderer {
     /// `content`, an appearance stream drawn in `bbox` with `resources` on `canvas`, with
@@ -48,8 +48,9 @@ impl PdfRenderer {
 
     /// The program of `appearance`'s `/DA` font on page `page_index`, mapped by Unicode
     /// onto the glyphs the value is painted with, for a host that shows the value being
-    /// edited in that font. `None` for an appearance without a live value and for a font
-    /// a host program cannot be built from.
+    /// edited in that font. A comb field's program spaces its glyphs one per cell, as the
+    /// value is painted. `None` for an appearance without a live value and for a font a
+    /// host program cannot be built from.
     ///
     /// # Errors
     /// Returns an error if the page is missing, the appearance's resources cannot be read,
@@ -72,9 +73,14 @@ impl PdfRenderer {
             self.form_resources().map(AsRef::as_ref),
         );
         let family = String::from_utf8_lossy(&text.font);
+        // The cell in thousandths of an em, the unit of PDF glyph widths.
+        let comb_cell = form
+            .bbox
+            .and_then(|bbox| text.comb_cell_width(bbox.normalized().width()))
+            .map(|cell| cell / text.font_size * 1000.0);
         Ok(self
             .font_system
-            .host_font_program(selection.spec(), &family)?)
+            .host_font_program(selection.spec(), &family, comb_cell)?)
     }
 }
 
@@ -109,33 +115,16 @@ impl<'a> ValueLayout<'a> {
         })
     }
 
-    /// The border inset that clips the value: the border width, at least one unit.
-    fn clip_inset(&self) -> f32 {
-        self.text.border_width.max(1.0)
-    }
-
-    /// The box the value is laid out in, inside the border and an equal padding.
-    fn text_box(&self) -> Rect {
-        let inset = self.clip_inset() * 2.0;
+    /// The box the value is laid out in and clipped to: the appearance box less the
+    /// text inset on each side.
+    fn plate(&self) -> Rect {
+        let inset = self.text.inset;
         Rect {
             left: self.bbox.left + inset,
             top: self.bbox.top + inset,
             right: self.bbox.right - inset,
             bottom: self.bbox.bottom - inset,
         }
-    }
-
-    /// The font's ascender and descender as fractions of the font size.
-    fn vertical_metrics(&self) -> (f32, f32) {
-        self.font
-            .primary()
-            .metrics()
-            .and_then(|metrics| {
-                let units = f32::from(metrics.units_per_em);
-                (units > 0.0 && metrics.ascender > metrics.descender)
-                    .then(|| (metrics.ascender / units, metrics.descender / units))
-            })
-            .unwrap_or((FALLBACK_ASCENT, FALLBACK_DESCENT))
     }
 
     /// The advance of `codes` at the value's font size.
@@ -156,8 +145,8 @@ impl<'a> ValueLayout<'a> {
     }
 
     /// The encoded lines of the value with their widths: the whole value on one line, or
-    /// each paragraph of a multiline value wrapped at spaces to the text box width. `None`
-    /// when the font has no code for a character of the value.
+    /// each paragraph of a multiline value wrapped to the plate width. `None` when the font
+    /// has no code for a character of the value.
     fn lines(&self) -> Option<Vec<(Vec<u8>, f32)>> {
         if !self.text.multiline {
             let codes = self.encoder.encode(&self.text.value)?;
@@ -171,64 +160,125 @@ impl<'a> ValueLayout<'a> {
         Some(lines)
     }
 
-    /// Appends the lines of `paragraph` to `lines`, broken at spaces so each fits the text
-    /// box width where it can; a word wider than that gets a line of its own. Each word is
-    /// encoded and measured once.
+    /// Appends the lines of `paragraph` to `lines`, as viewers wrap form text: a word moves
+    /// to the next line with the spaces after it when they overflow the plate width, and
+    /// those spaces count in the width of the line they end. A word wider than the plate
+    /// is broken between characters. Each word is encoded and measured once.
     fn wrap(&self, paragraph: &str, lines: &mut Vec<(Vec<u8>, f32)>) -> Option<()> {
-        let max_width = self.text_box().width();
-        let mut space = None;
-        let mut line: Vec<u8> = Vec::new();
+        let max_width = self.plate().width();
+        let mut line = Vec::new();
         let mut width = 0.0;
-        for word in paragraph.split(' ') {
+        for word in Words(paragraph) {
             let codes = self.encoder.encode(word)?;
             let word_width = self.width(&codes);
-            if line.is_empty() {
-                line = codes;
-                width = word_width;
-                continue;
-            }
-            let (space_codes, space_width) = match &space {
-                Some(space) => space,
-                None => {
-                    let codes = self.encoder.encode(" ")?;
-                    let width = self.width(&codes);
-                    space.insert((codes, width))
-                }
-            };
-            if width + space_width + word_width > max_width {
+            if width + word_width <= max_width {
+                line.extend(codes);
+                width += word_width;
+            } else if !line.is_empty() && word_width <= max_width {
                 lines.push((std::mem::replace(&mut line, codes), width));
                 width = word_width;
             } else {
-                line.extend_from_slice(space_codes);
-                line.extend(codes);
-                width += space_width + word_width;
+                self.break_word(word, max_width, lines, &mut line, &mut width)?;
             }
         }
         lines.push((line, width));
         Some(())
     }
 
+    /// Appends `word`, wider than the space left on `line`, character by character,
+    /// starting a new line before each character that overflows `max_width`; a line's
+    /// first character always stays on it.
+    fn break_word(
+        &self,
+        word: &str,
+        max_width: f32,
+        lines: &mut Vec<(Vec<u8>, f32)>,
+        line: &mut Vec<u8>,
+        width: &mut f32,
+    ) -> Option<()> {
+        let mut buffer = [0; 4];
+        for character in word.chars() {
+            let codes = self.encoder.encode(character.encode_utf8(&mut buffer))?;
+            let character_width = self.width(&codes);
+            if !line.is_empty() && *width + character_width > max_width {
+                lines.push((std::mem::take(line), *width));
+                *width = 0.0;
+            }
+            line.extend(codes);
+            *width += character_width;
+        }
+        Some(())
+    }
+
+    /// The encoded runs of the value with the point each starts at: one per line, or one
+    /// per character of a comb field. `None` when the font has no code for a character of
+    /// the value.
+    fn runs(&self) -> Option<Vec<(Vec<u8>, f32, f32)>> {
+        if let Some(cells) = self.text.comb {
+            return self.comb_runs(cells);
+        }
+        let lines = self.lines()?;
+        let baselines = self.baselines(lines.len());
+        Some(
+            lines
+                .into_iter()
+                .zip(baselines)
+                .map(|((codes, width), baseline)| {
+                    let x = self.line_start(width);
+                    (codes, x, baseline)
+                })
+                .collect(),
+        )
+    }
+
+    /// One run per character of a comb field's value, each centred in its own of `cells`
+    /// equal cells across the plate as viewers space comb text: the characters fill the
+    /// first cells, the last cells, or the cells nearest the middle under the value's
+    /// alignment. Characters beyond the last cell are left out.
+    fn comb_runs(&self, cells: u32) -> Option<Vec<(Vec<u8>, f32, f32)>> {
+        let characters = self.text.value.chars().take(usize::try_from(cells).ok()?);
+        let count = u32::try_from(characters.clone().count()).ok()?;
+        let free = cells.checked_sub(count)?;
+        let start = match self.text.alignment {
+            Alignment::Left => 0,
+            Alignment::Center => free / 2,
+            Alignment::Right => free,
+        };
+        let plate = self.plate();
+        let cell = self.text.comb_cell_width(self.bbox.width())?;
+        let baseline = self.baselines(1).next()?;
+        let mut buffer = [0; 4];
+        let mut runs = Vec::new();
+        for (index, character) in (start..).zip(characters) {
+            let codes = self.encoder.encode(character.encode_utf8(&mut buffer))?;
+            let center = plate.left + cell * (index.to_f32()? + 0.5);
+            let x = center - self.width(&codes) / 2.0;
+            runs.push((codes, x, baseline));
+        }
+        Some(runs)
+    }
+
     /// The left end of a line `width` wide under the value's alignment.
     fn line_start(&self, width: f32) -> f32 {
-        let text_box = self.text_box();
+        let plate = self.plate();
         match self.text.alignment {
-            Alignment::Left => text_box.left,
-            Alignment::Center => (text_box.left + text_box.right - width) / 2.0,
-            Alignment::Right => text_box.right - width,
+            Alignment::Left => plate.left,
+            Alignment::Center => (plate.left + plate.right - width) / 2.0,
+            Alignment::Right => plate.right - width,
         }
     }
 
-    /// The baselines of `count` lines: one line centered vertically in the text box, or
-    /// lines stepping down from its top by the font's line height.
+    /// The baselines of `count` lines: one line centered vertically in the plate, or lines
+    /// stepping down from its top by the font's line height.
     fn baselines(&self, count: usize) -> impl Iterator<Item = f32> {
-        let (ascent, descent) = self.vertical_metrics();
+        let LineMetrics { ascent, descent } = self.font.line_metrics();
         let size = self.text.font_size;
-        let text_box = self.text_box();
+        let plate = self.plate();
         let (first, step) = if self.text.multiline {
-            (text_box.bottom - ascent * size, (ascent - descent) * size)
+            (plate.bottom - ascent * size, (ascent - descent) * size)
         } else {
             (
-                (text_box.top + text_box.bottom - (ascent + descent) * size) / 2.0,
+                (plate.top + plate.bottom - (ascent + descent) * size) / 2.0,
                 0.0,
             )
         };
@@ -239,19 +289,19 @@ impl<'a> ValueLayout<'a> {
         })
     }
 
-    /// The operators showing the value, clipped inside the border; `None` when the font
-    /// has no code for a character of the value.
+    /// The operators showing the value, clipped to the plate; `None` when the font has no
+    /// code for a character of the value.
     fn operators(&self) -> Option<Vec<Op>> {
-        let lines = self.lines()?;
-        let inset = self.clip_inset();
+        let runs = self.runs()?;
+        let plate = self.plate();
         let color = self.text.color;
         let mut operators = vec![
             Op::SaveGraphicsState,
             Op::Rectangle {
-                x: self.bbox.left + inset,
-                y: self.bbox.top + inset,
-                width: self.bbox.width() - inset * 2.0,
-                height: self.bbox.height() - inset * 2.0,
+                x: plate.left,
+                y: plate.top,
+                width: plate.width(),
+                height: plate.height(),
             },
             Op::ClipNonZero,
             Op::EndPath,
@@ -266,12 +316,12 @@ impl<'a> ValueLayout<'a> {
                 b: color.b,
             },
         ];
-        for ((codes, width), baseline) in lines.iter().zip(self.baselines(lines.len())) {
+        for (codes, x, baseline) in runs {
             if codes.is_empty() {
                 continue;
             }
             operators.push(Op::SetTextMatrix {
-                matrix: Transform::from_translate(self.line_start(*width), baseline),
+                matrix: Transform::from_translate(x, baseline),
             });
             operators.push(Op::ShowText {
                 text: PdfTextItem::Text(codes.as_slice().into()),
@@ -279,6 +329,28 @@ impl<'a> ValueLayout<'a> {
         }
         operators.extend([Op::EndText, Op::RestoreGraphicsState]);
         Some(operators)
+    }
+}
+
+/// The words of a paragraph, each with the spaces that follow it, which wrap together.
+struct Words<'a>(&'a str);
+
+impl<'a> Iterator for Words<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let spaces = self.0.find(' ').unwrap_or(self.0.len());
+        let end = self
+            .0
+            .get(spaces..)
+            .and_then(|tail| tail.find(|character| character != ' '))
+            .map_or(self.0.len(), |offset| spaces + offset);
+        let (word, rest) = self.0.split_at_checked(end)?;
+        self.0 = rest;
+        Some(word)
     }
 }
 

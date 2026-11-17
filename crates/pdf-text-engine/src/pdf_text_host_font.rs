@@ -18,7 +18,9 @@ impl FontSystem {
     /// glyph the page draws for its code, advancing by the code's PDF width.
     ///
     /// Characters take the codes of [`PdfTextEncoder`], so a host editing text in this
-    /// program shows the glyphs drawn text shows. Returns `None` for Type 0 and Type 3
+    /// program shows the glyphs drawn text shows, and lines take the font's line metrics,
+    /// so its lines are spaced as drawn lines are. A `comb_cell` width, in thousandths of
+    /// an em, spaces the glyphs one per cell. Returns `None` for Type 0 and Type 3
     /// fonts and for a program the host program cannot be built from.
     ///
     /// # Errors
@@ -27,6 +29,7 @@ impl FontSystem {
         &self,
         spec: Arc<PdfFontSpec>,
         family: &str,
+        comb_cell: Option<f32>,
     ) -> Result<Option<HostFontProgram>, TextError> {
         let font = match spec.as_ref() {
             PdfFontSpec::Type1(font)
@@ -58,6 +61,12 @@ impl FontSystem {
                 });
             }
         }
-        Ok(HostFontProgram::new(handle.source(), family, &glyphs)?)
+        Ok(HostFontProgram::new(
+            handle.source(),
+            family,
+            &glyphs,
+            handle.line_metrics(),
+            comb_cell,
+        )?)
     }
 }

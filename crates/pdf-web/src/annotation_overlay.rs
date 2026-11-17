@@ -80,7 +80,14 @@ impl WebAnnotationOverlay {
             .iter()
             .map(|page| page.annotations.as_deref().unwrap_or_default());
         Ok(Self {
-            overlay: AnnotationOverlay::new(pages, document.optional_content.as_ref())?,
+            overlay: AnnotationOverlay::new(
+                pages,
+                document.optional_content.as_ref(),
+                document
+                    .interactive_form
+                    .as_ref()
+                    .and_then(|form| form.default_appearance.as_ref()),
+            )?,
             presentation: PresentationState::default(),
         })
     }

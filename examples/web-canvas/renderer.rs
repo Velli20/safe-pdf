@@ -18,6 +18,7 @@ use wasm_bindgen::prelude::*;
 pub struct WebFieldFont {
     family: String,
     data: Vec<u8>,
+    line_height: f32,
 }
 
 #[wasm_bindgen]
@@ -32,6 +33,12 @@ impl WebFieldFont {
     #[wasm_bindgen(getter)]
     pub fn data(&self) -> Vec<u8> {
         self.data.clone()
+    }
+
+    /// The distance between baselines, in ems, the value is painted with.
+    #[wasm_bindgen(getter)]
+    pub fn line_height(&self) -> f32 {
+        self.line_height
     }
 }
 
@@ -153,6 +160,7 @@ impl WebDocument {
             .map(|font| WebFieldFont {
                 family: font.family,
                 data: font.data,
+                line_height: font.line_height,
             }))
     }
 
