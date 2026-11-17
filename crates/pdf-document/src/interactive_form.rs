@@ -9,6 +9,8 @@ pub struct InteractiveForm {
     /// `/DR`: the form's default resources, where a field's `/DA` font is defined and
     /// where widget appearances find fonts their own resources lack.
     pub default_resources: Option<Arc<Resources>>,
+    /// `/DA`: the default appearance of fields whose hierarchy declares none.
+    pub default_appearance: Option<Arc<[u8]>>,
 }
 
 impl FromPdfObject for InteractiveForm {
@@ -18,6 +20,9 @@ impl FromPdfObject for InteractiveForm {
             .optional::<ObjectHandle<Resources>>(b"DR")?
             .map(|handle| handle.get())
             .transpose()?;
-        Ok(Self { default_resources })
+        Ok(Self {
+            default_resources,
+            default_appearance: context.optional(b"DA")?,
+        })
     }
 }

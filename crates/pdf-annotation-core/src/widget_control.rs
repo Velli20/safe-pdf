@@ -11,7 +11,8 @@ use num_traits::ToPrimitive;
 
 /// The appearance state a widget selects when it is painted on the page canvas.
 pub(crate) enum PaintedState {
-    /// A push button or read-only text field draws its source `/AS`.
+    /// A push button, or a text field whose value is still its source `/V`, draws its
+    /// source `/AS`.
     Source,
     /// A checkbox or radio option draws its on-state when selected, else `/Off`.
     Checked(bool),
@@ -152,7 +153,7 @@ impl Annotation {
     }
 
     /// How this widget, bound to `field`, selects its appearance state; `None` for
-    /// non-widgets and fields whose control presents their value instead: editable text
+    /// non-widgets and fields whose control presents their value instead: edited text
     /// fields and choice fields. Signature and unknown-type fields have no control, so
     /// their source appearance stays current.
     pub(crate) fn painted_state(&self, field: &Field) -> Option<PaintedState> {
@@ -164,7 +165,11 @@ impl Annotation {
         Some(match &field.definition.content {
             FieldKind::Button(_) | FieldKind::Unsupported(_) => PaintedState::Source,
             // A read-only value never changes, so its source appearance stays current.
-            FieldKind::Text(_) if field.definition.read_only => PaintedState::Source,
+            // The source appearance stays current while the value is still the source `/V`,
+            // which a read-only value always is.
+            FieldKind::Text(_) if field.definition.read_only || self.shows_source_value(field) => {
+                PaintedState::Source
+            }
             FieldKind::Checkbox(checkbox) => PaintedState::Checked(checkbox.checked),
             FieldKind::CheckboxGroup(group) => PaintedState::Checked(selects(group.selected)),
             FieldKind::Radio(radio) => PaintedState::Checked(selects(radio.selected)),

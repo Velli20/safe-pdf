@@ -78,6 +78,8 @@ impl AnnotationOverlay {
     ///
     /// `optional_content` is the document catalog's `/OCProperties`, which seeds
     /// which groups start visible. A document that declares none hides nothing.
+    /// `form_appearance` is the interactive form's `/DA`, which widgets whose field
+    /// hierarchy declares none are drawn and edited with.
     ///
     /// # Errors
     ///
@@ -86,8 +88,9 @@ impl AnnotationOverlay {
     pub fn new<'a>(
         pages: impl IntoIterator<Item = &'a [SourceAnnotation]>,
         optional_content: Option<&OptionalContentProperties>,
+        form_appearance: Option<&Arc<[u8]>>,
     ) -> AnnotationLayerResult<Self> {
-        let document = import::import(pages)?;
+        let document = import::import(pages, form_appearance)?;
         let imported = document.engine.view().data().revision;
         Ok(Self {
             document,

@@ -6,7 +6,7 @@ use crate::{
     kind::SourceLayout,
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
     models::{AnnotationId, DocumentDescriptor, DocumentId, NewAnnotation, PageIndex},
-    pdf_data::{NativeAnnotation as Source, SourceAnnotation},
+    pdf_data::{NativeAnnotation as Source, SourceAnnotation, WidgetAnnotation},
     session_store::SessionStore,
     source_fields::SourceFieldGroup,
     widgets::WidgetBinding,
@@ -15,7 +15,7 @@ use pdf_object_reader::{
     diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind},
     object_id::ObjectId,
 };
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
 pub(crate) type Engine = AnnotationEngine<SessionStore>;
 
@@ -100,7 +100,10 @@ impl<'a> Importer<'a> {
     }
 
     /// Adopts every standalone source and queues widgets and popups for later passes.
-    fn collect(&mut self, pages: &[&'a [SourceAnnotation]]) -> AnnotationLayerResult<()> {
+    fn collect(
+        &mut self,
+        pages: &'a [Vec<Cow<'a, SourceAnnotation>>],
+    ) -> AnnotationLayerResult<()> {
         for (page, sources) in pages.iter().enumerate() {
             let page = u32::try_from(page).map_err(|_| AnnotationLayerError::ResourceLimit)?;
             for (order, source) in sources.iter().enumerate() {
@@ -197,11 +200,21 @@ impl<'a> Importer<'a> {
     }
 }
 
-/// Adopts one source annotation slice per page, in page order.
+/// Adopts one source annotation slice per page, in page order. A widget whose field
+/// hierarchy has no `/DA` takes `form_appearance`, the interactive form's `/DA`.
 pub(crate) fn import<'a>(
     pages: impl IntoIterator<Item = &'a [SourceAnnotation]>,
+    form_appearance: Option<&Arc<[u8]>>,
 ) -> AnnotationLayerResult<ImportedDocument> {
-    let pages = pages.into_iter().collect::<Vec<_>>();
+    let pages = pages
+        .into_iter()
+        .map(|sources| {
+            sources
+                .iter()
+                .map(|source| source.with_form_appearance(form_appearance))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
     let descriptor = DocumentDescriptor {
         id: DocumentId("session".into()),
         page_count: u32::try_from(pages.len()).map_err(|_| AnnotationLayerError::ResourceLimit)?,
@@ -211,6 +224,25 @@ pub(crate) fn import<'a>(
     importer.import_groups();
     importer.import_popups();
     Ok(importer.finish())
+}
+
+impl SourceAnnotation {
+    /// This source as adopted under an interactive form whose `/DA` is `form_appearance`:
+    /// a widget without a `/DA` of its own takes the form's; any other source is kept.
+    fn with_form_appearance(&self, form_appearance: Option<&Arc<[u8]>>) -> Cow<'_, Self> {
+        match (&self.kind, form_appearance) {
+            (Source::Widget(widget), Some(form)) if widget.default_appearance.is_none() => {
+                Cow::Owned(Self {
+                    kind: Source::Widget(Box::new(WidgetAnnotation {
+                        default_appearance: Some(Arc::clone(form)),
+                        ..widget.as_ref().clone()
+                    })),
+                    ..self.clone()
+                })
+            }
+            _ => Cow::Borrowed(self),
+        }
+    }
 }
 
 fn dispatch(engine: &mut Engine, operation: Operation) -> AnnotationLayerResult<Change> {
