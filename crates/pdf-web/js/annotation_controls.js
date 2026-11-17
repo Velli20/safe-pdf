@@ -178,8 +178,23 @@ export class FormControl extends AnnotationComponent {
     else if (p.input_type === 'checkbox' || p.input_type === 'radio' || p.tag === 'button') this.updateButton(p);
     else this.updateText(p);
     if (this.node instanceof HTMLInputElement || this.node instanceof HTMLTextAreaElement || this.node instanceof HTMLSelectElement) this.node.required = p.required;
-    this.node.style.lineHeight = String(LINE_SPACING);
+    this.updateSpacing(p);
     this.updateRotation(p);
+  }
+
+  /** Spaces a canvas-painted text entry's text as the canvas paints its value, so it stays
+   * in place while edited: inset by twice the border width, at least one unit, with lines
+   * the field font's line height apart. Other controls keep the default spacing.
+   * @param {import('./annotation_contract').WidgetControl} p */
+  updateSpacing(p) {
+    const style = this.node.style;
+    if (!FormControl.isPaintedTextEntry(p)) {
+      style.lineHeight = String(LINE_SPACING);
+      style.padding = '';
+      return;
+    }
+    style.lineHeight = String(this.layer.fieldFont(this.entry)?.lineHeight ?? LINE_SPACING);
+    style.padding = `${2 * Math.max(this.entry.style.border_width, 1)}px`;
   }
 
   /** Rotates the control by its `/MK /R` angle; quarter turns swap its sides so the rotated box still covers the widget rectangle.

@@ -18,7 +18,8 @@ impl FontSystem {
     /// glyph the page draws for its code, advancing by the code's PDF width.
     ///
     /// Characters take the codes of [`PdfTextEncoder`], so a host editing text in this
-    /// program shows the glyphs drawn text shows. Returns `None` for Type 0 and Type 3
+    /// program shows the glyphs drawn text shows, and lines take the font's line metrics,
+    /// so its lines are spaced as drawn lines are. Returns `None` for Type 0 and Type 3
     /// fonts and for a program the host program cannot be built from.
     ///
     /// # Errors
@@ -58,6 +59,11 @@ impl FontSystem {
                 });
             }
         }
-        Ok(HostFontProgram::new(handle.source(), family, &glyphs)?)
+        Ok(HostFontProgram::new(
+            handle.source(),
+            family,
+            &glyphs,
+            handle.line_metrics(),
+        )?)
     }
 }

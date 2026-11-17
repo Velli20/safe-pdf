@@ -232,7 +232,7 @@ class PdfViewer {
         loadFont: entry => {
           const font = this.pdf.field_font(entry.page, String(entry.id));
           if (!font) return undefined;
-          const result = { family: font.family, data: font.data };
+          const result = { family: font.family, data: font.data, lineHeight: font.line_height };
           font.free();
           return result;
         },

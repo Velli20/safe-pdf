@@ -33,6 +33,8 @@ pub struct FieldFont {
     pub family: String,
     /// The program, mapped by Unicode onto the glyphs the canvas paints the value with.
     pub data: Vec<u8>,
+    /// The distance between baselines, in ems, the canvas paints a multiline value with.
+    pub line_height: f32,
 }
 
 /// Thin orchestration around PdfRenderer; no new content-stream or font rendering engine.
@@ -130,12 +132,14 @@ impl WebPageRenderer {
         let Some(program) = self.renderer.field_font_program(index, &appearance)? else {
             return Ok(None);
         };
+        let line_height = program.line_height();
         let data = program.into_data();
         let mut hasher = DefaultHasher::new();
         data.hash(&mut hasher);
         Ok(Some(FieldFont {
             family: format!("pdf-field-{:016x}", hasher.finish()),
             data,
+            line_height,
         }))
     }
 

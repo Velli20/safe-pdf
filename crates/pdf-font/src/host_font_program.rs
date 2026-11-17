@@ -26,6 +26,7 @@ use write_fonts::{
 
 use crate::error::FontError;
 use crate::font::{FontProgramFormat, FontSource, GlyphId};
+use crate::pdf_font_handle::LineMetrics;
 
 /// Tables the host program rebuilds rather than copies from the drawing program.
 const REBUILT_TABLES: [Tag; 7] = [
@@ -63,10 +64,17 @@ pub struct HostGlyph {
 
 /// A font program a host lays Unicode text out with: each mapped character shows the
 /// glyph the PDF draws for it and advances by the PDF width.
-pub struct HostFontProgram(Vec<u8>);
+pub struct HostFontProgram {
+    /// The program bytes.
+    data: Vec<u8>,
+    /// The distance between baselines the program's line metrics give, in ems.
+    line_height: f32,
+}
 
 impl HostFontProgram {
-    /// Builds the host program named `family` from `source`, mapping `glyphs`.
+    /// Builds the host program named `family` from `source`, mapping `glyphs`, with the
+    /// ascender and descender of `line` and no line gap, so a host lays lines out as the
+    /// PDF text drawn in the font is.
     ///
     /// Returns `None` for a source this cannot rebuild: a Type 1, CID-keyed CFF, Type 3 or
     /// external program, or one whose tables are unreadable.
@@ -77,6 +85,7 @@ impl HostFontProgram {
         source: &FontSource,
         family: &str,
         glyphs: &[HostGlyph],
+        line: LineMetrics,
     ) -> Result<Option<Self>, FontError> {
         let FontSource::Memory {
             data,
@@ -90,21 +99,32 @@ impl HostFontProgram {
             return Ok(None);
         };
         program
-            .build(family, glyphs)
-            .map(|data| Some(Self(data)))
+            .build(family, glyphs, line)
+            .map(|data| {
+                Some(Self {
+                    data,
+                    line_height: line.line_height(),
+                })
+            })
             .map_err(|error| FontError::FontBuildError(error.to_string()))
     }
 
     /// Borrows the program bytes.
     #[must_use]
     pub fn data(&self) -> &[u8] {
-        &self.0
+        &self.data
+    }
+
+    /// The distance between baselines, in ems, of lines laid out in the program.
+    #[must_use]
+    pub fn line_height(&self) -> f32 {
+        self.line_height
     }
 
     /// Takes the program bytes.
     #[must_use]
     pub fn into_data(self) -> Vec<u8> {
-        self.0
+        self.data
     }
 }
 
@@ -195,7 +215,12 @@ impl<'a> DrawingProgram<'a> {
     }
 
     /// Builds the host program.
-    fn build(&self, family: &str, glyphs: &[HostGlyph]) -> Result<Vec<u8>, HostBuildError> {
+    fn build(
+        &self,
+        family: &str,
+        glyphs: &[HostGlyph],
+        line: LineMetrics,
+    ) -> Result<Vec<u8>, HostBuildError> {
         let units_per_em = self.units_per_em().ok_or(HostBuildError::Unreadable)?;
         let num_glyphs = self.num_glyphs().ok_or(HostBuildError::Unreadable)?;
         let scale = f32::from(units_per_em) / PDF_GLYPH_SPACE_UNITS;
@@ -209,7 +234,7 @@ impl<'a> DrawingProgram<'a> {
             }
         }
         let [x_min, y_min, x_max, y_max] = self.bounds();
-        let vertical = VerticalMetrics::new(self, y_min, y_max);
+        let vertical = VerticalMetrics::new(line, units_per_em);
         let mut builder = FontBuilder::new();
         builder
             .add_table(&host_cmap(glyphs, num_glyphs)?)?
@@ -261,6 +286,7 @@ impl<'a> DrawingProgram<'a> {
         Hhea {
             ascender: FWord::new(vertical.ascender),
             descender: FWord::new(vertical.descender),
+            line_gap: FWord::new(0),
             advance_width_max: UfWord::new(advance_width_max.unwrap_or_default()),
             number_of_h_metrics: u16::try_from(metrics.len()).unwrap_or(u16::MAX),
             ..base.unwrap_or_else(|| Hhea {
@@ -281,20 +307,12 @@ struct VerticalMetrics {
 }
 
 impl VerticalMetrics {
-    /// The program's own `hhea` ascender and descender, or its font bounds.
-    fn new(program: &DrawingProgram<'_>, y_min: i16, y_max: i16) -> Self {
-        let hhea = match program {
-            DrawingProgram::Sfnt(font) => font
-                .hhea()
-                .ok()
-                .map(|hhea| (hhea.ascender().to_i16(), hhea.descender().to_i16()))
-                .filter(|(ascender, descender)| ascender > descender),
-            DrawingProgram::Cff { .. } => None,
-        };
-        let (ascender, descender) = hhea.unwrap_or((y_max, y_min));
+    /// `line` in the design units of a program with `units_per_em`.
+    fn new(line: LineMetrics, units_per_em: u16) -> Self {
+        let units = f32::from(units_per_em);
         Self {
-            ascender,
-            descender,
+            ascender: saturating_i16(line.ascent * units),
+            descender: saturating_i16(line.descent * units),
         }
     }
 }
@@ -399,5 +417,42 @@ enum HostBuildError {
 impl From<BuilderError> for HostBuildError {
     fn from(error: BuilderError) -> Self {
         Self::Table(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HostFontProgram;
+    use crate::{
+        font::{FontProgramFormat, FontSource},
+        pdf_font_handle::LineMetrics,
+    };
+    use bytes::Bytes;
+    use read_fonts::{FontRef, TableProvider};
+
+    #[test]
+    fn host_program_lays_lines_out_with_the_given_line_metrics() {
+        let source = FontSource::Memory {
+            data: Bytes::from_static(include_bytes!("../assets/FoxitSans.cff")),
+            format: FontProgramFormat::Cff,
+            face_index: 0,
+        };
+        let line = LineMetrics {
+            ascent: 0.75,
+            descent: -0.25,
+        };
+        let program = HostFontProgram::new(&source, "pdf-field", &[], line)
+            .unwrap()
+            .unwrap();
+        assert_eq!(program.line_height(), 1.0);
+        let font = FontRef::new(program.data()).unwrap();
+        let units = f32::from(font.head().unwrap().units_per_em());
+        let hhea = font.hhea().unwrap();
+        assert_eq!(f32::from(hhea.ascender().to_i16()), 0.75 * units);
+        assert_eq!(f32::from(hhea.descender().to_i16()), -0.25 * units);
+        assert_eq!(hhea.line_gap().to_i16(), 0);
+        let os2 = font.os2().unwrap();
+        assert_eq!(os2.s_typo_ascender(), hhea.ascender().to_i16());
+        assert_eq!(os2.s_typo_descender(), hhea.descender().to_i16());
     }
 }

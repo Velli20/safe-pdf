@@ -8,7 +8,10 @@ use pdf_canvas::{
 };
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::{PdfTextItem, variants::PdfOperatorVariant as Op};
-use pdf_font::{host_font_program::HostFontProgram, pdf_font_handle::PdfFontHandle};
+use pdf_font::{
+    host_font_program::HostFontProgram,
+    pdf_font_handle::{LineMetrics, PdfFontHandle},
+};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_resources::resources::Resources;
@@ -17,10 +20,6 @@ use std::ops::Range;
 
 /// The marked-content tag enclosing a widget's variable text.
 const VARIABLE_TEXT_TAG: &[u8] = b"Tx";
-/// Ascender, as a fraction of the font size, of a font without usable metrics.
-const FALLBACK_ASCENT: f32 = 0.8;
-/// Descender, as a fraction of the font size, of a font without usable metrics.
-const FALLBACK_DESCENT: f32 = -0.2;
 
 impl PdfRenderer {
     /// `content`, an appearance stream drawn in `bbox` with `resources` on `canvas`, with
@@ -125,19 +124,6 @@ impl<'a> ValueLayout<'a> {
         }
     }
 
-    /// The font's ascender and descender as fractions of the font size.
-    fn vertical_metrics(&self) -> (f32, f32) {
-        self.font
-            .primary()
-            .metrics()
-            .and_then(|metrics| {
-                let units = f32::from(metrics.units_per_em);
-                (units > 0.0 && metrics.ascender > metrics.descender)
-                    .then(|| (metrics.ascender / units, metrics.descender / units))
-            })
-            .unwrap_or((FALLBACK_ASCENT, FALLBACK_DESCENT))
-    }
-
     /// The advance of `codes` at the value's font size.
     fn width(&self, codes: &[u8]) -> f32 {
         let items = [PdfTextItem::Text(codes.into())];
@@ -221,7 +207,7 @@ impl<'a> ValueLayout<'a> {
     /// The baselines of `count` lines: one line centered vertically in the text box, or
     /// lines stepping down from its top by the font's line height.
     fn baselines(&self, count: usize) -> impl Iterator<Item = f32> {
-        let (ascent, descent) = self.vertical_metrics();
+        let LineMetrics { ascent, descent } = self.font.line_metrics();
         let size = self.text.font_size;
         let text_box = self.text_box();
         let (first, step) = if self.text.multiline {
