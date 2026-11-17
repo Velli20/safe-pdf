@@ -183,8 +183,8 @@ export class FormControl extends AnnotationComponent {
   }
 
   /** Spaces a canvas-painted text entry's text as the canvas paints its value, so it stays
-   * in place while edited: inset by twice the border width, at least one unit, with lines
-   * the field font's line height apart. Other controls keep the default spacing.
+   * in place while edited: inset by the control's `text_inset`, with lines the field font's
+   * line height apart. Other controls keep the default spacing.
    * @param {import('./annotation_contract').WidgetControl} p */
   updateSpacing(p) {
     const style = this.node.style;
@@ -194,7 +194,7 @@ export class FormControl extends AnnotationComponent {
       return;
     }
     style.lineHeight = String(this.layer.fieldFont(this.entry)?.lineHeight ?? LINE_SPACING);
-    style.padding = `${2 * Math.max(this.entry.style.border_width, 1)}px`;
+    style.padding = `${p.text_inset}px`;
   }
 
   /** Rotates the control by its `/MK /R` angle; quarter turns swap its sides so the rotated box still covers the widget rectangle.

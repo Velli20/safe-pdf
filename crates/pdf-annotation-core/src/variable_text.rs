@@ -3,6 +3,7 @@
 use crate::{
     fields::{ComboValue, Field, FieldKind, TextMode},
     models::Annotation,
+    pdf_data::BorderStyleName,
     style::{Alignment, DefaultAppearance},
 };
 use pdf_graphics::color::Color;
@@ -21,8 +22,9 @@ pub struct VariableText {
     pub color: Color,
     /// Horizontal alignment from `/Q`.
     pub alignment: Alignment,
-    /// Nonnegative border width in page units, which insets the value.
-    pub border_width: f32,
+    /// Inset, in page units, of the box the value is laid out in from each side of the
+    /// appearance box.
+    pub inset: f32,
     /// Whether the value wraps onto several lines.
     pub multiline: bool,
 }
@@ -67,8 +69,37 @@ impl Annotation {
             font_size: style.font_size,
             color: style.color,
             alignment: style.alignment,
-            border_width: style.border_width,
+            inset: self.text_inset(style.border_width),
             multiline,
         })
+    }
+
+    /// Inset, in page units, of the box a text entry with a `border_width` border lays its
+    /// value out in, as viewers lay form text out: the border width, doubled for a beveled
+    /// or inset border.
+    pub(crate) fn text_inset(&self, border_width: f32) -> f32 {
+        let doubled = self
+            .source_widget()
+            .and_then(|widget| widget.border_style.as_ref())
+            .and_then(|border| border.style.as_ref())
+            .is_some_and(|style| {
+                matches!(style, BorderStyleName::Beveled | BorderStyleName::Inset)
+            });
+        if doubled {
+            border_width * 2.0
+        } else {
+            border_width
+        }
+    }
+
+    /// Whether `field`, this widget's bound text field, still holds the source `/V`, which
+    /// the widget's source appearance shows.
+    pub(crate) fn shows_source_value(&self, field: &Field) -> bool {
+        let FieldKind::Text(text) = &field.definition.content else {
+            return false;
+        };
+        self.source_widget()
+            .and_then(|widget| widget.text_value().ok())
+            .is_some_and(|value| value == text.value)
     }
 }

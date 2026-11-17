@@ -92,6 +92,10 @@ pub struct WidgetControl {
     /// widget's live value, leaving the control a transparent hit and input target until a
     /// text entry is focused for editing.
     pub painted: bool,
+    /// Inset, in page units, of the box a canvas-painted text entry's value is laid out in
+    /// from each side of the widget: the border width, doubled for a beveled or inset
+    /// border. Zero for other controls.
+    pub text_inset: f32,
 }
 
 /// One Core annotation projected into logical device coordinates for a host to present.

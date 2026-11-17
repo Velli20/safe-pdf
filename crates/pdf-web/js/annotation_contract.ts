@@ -2122,7 +2122,13 @@ rotation: number,
  * widget's live value, leaving the control a transparent hit and input target until a
  * text entry is focused for editing.
  */
-painted: boolean, };
+painted: boolean,
+/**
+ * Inset, in page units, of the box a canvas-painted text entry's value is laid out in
+ * from each side of the widget: the border width, doubled for a beveled or inset
+ * border. Zero for other controls.
+ */
+text_inset: number, };
 
 /**
  * Owned WidgetFieldValue data retained from the source PDF.

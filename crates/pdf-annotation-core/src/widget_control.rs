@@ -65,9 +65,13 @@ impl Annotation {
                 .and_then(|w| w.appearance_characteristics.as_ref())
                 .and_then(|mk| mk.rotation)
                 .unwrap_or(0),
-            painted: (painted_state.is_some() && self.has_normal_appearance())
-                || self.variable_text(field).is_some(),
+            painted: painted_state.is_some() && self.has_normal_appearance(),
+            text_inset: 0.0,
         };
+        if let Some(text) = self.variable_text(field) {
+            model.painted = true;
+            model.text_inset = text.inset;
+        }
         match &definition.content {
             FieldKind::Text(text) => {
                 model.tag = if text.mode == TextMode::Multiline {

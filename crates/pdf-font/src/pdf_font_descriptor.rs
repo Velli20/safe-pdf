@@ -2,6 +2,7 @@
 
 use crate::{
     pdf::{CidSystemInfo, PdfFontDescriptor},
+    pdf_font_handle::LineMetrics,
     type0_font_spec::CidToUnicode,
 };
 use pdf_cmap::predefined::PredefinedCMap;
@@ -20,11 +21,26 @@ impl FromPdfObject for PdfFontDescriptor {
             missing_width: context.lenient(b"MissingWidth"),
             italic_angle: context.lenient(b"ItalicAngle"),
             stem_v: context.lenient(b"StemV"),
+            ascent: context.lenient(b"Ascent"),
+            descent: context.lenient(b"Descent"),
         })
     }
 }
 
 impl PdfFontDescriptor {
+    /// The declared `/Ascent` and `/Descent` as fractions of an em, as viewers lay out
+    /// form text: a positive descent is read as its negation, and a descriptor declaring
+    /// neither, or both as zero, gives `None`.
+    pub(crate) fn line_metrics(&self) -> Option<LineMetrics> {
+        let ascent = self.ascent.unwrap_or_default();
+        let descent = self.descent.unwrap_or_default();
+        let descent = if descent > 10.0 { -descent } else { descent };
+        (ascent != 0.0 || descent != 0.0).then(|| LineMetrics {
+            ascent: ascent / 1000.0,
+            descent: descent / 1000.0,
+        })
+    }
+
     /// Derives family metadata from the enclosing font's BaseFont.
     pub(crate) fn named(mut self, base_font: Option<&[u8]>) -> Self {
         let family = base_font.map(|name| Arc::<str>::from(String::from_utf8_lossy(name)));

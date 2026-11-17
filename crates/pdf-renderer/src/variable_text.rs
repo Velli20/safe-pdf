@@ -108,14 +108,10 @@ impl<'a> ValueLayout<'a> {
         })
     }
 
-    /// The border inset that clips the value: the border width, at least one unit.
-    fn clip_inset(&self) -> f32 {
-        self.text.border_width.max(1.0)
-    }
-
-    /// The box the value is laid out in, inside the border and an equal padding.
-    fn text_box(&self) -> Rect {
-        let inset = self.clip_inset() * 2.0;
+    /// The box the value is laid out in and clipped to: the appearance box less the
+    /// text inset on each side.
+    fn plate(&self) -> Rect {
+        let inset = self.text.inset;
         Rect {
             left: self.bbox.left + inset,
             top: self.bbox.top + inset,
@@ -142,8 +138,8 @@ impl<'a> ValueLayout<'a> {
     }
 
     /// The encoded lines of the value with their widths: the whole value on one line, or
-    /// each paragraph of a multiline value wrapped at spaces to the text box width. `None`
-    /// when the font has no code for a character of the value.
+    /// each paragraph of a multiline value wrapped to the plate width. `None` when the font
+    /// has no code for a character of the value.
     fn lines(&self) -> Option<Vec<(Vec<u8>, f32)>> {
         if !self.text.multiline {
             let codes = self.encoder.encode(&self.text.value)?;
@@ -157,64 +153,77 @@ impl<'a> ValueLayout<'a> {
         Some(lines)
     }
 
-    /// Appends the lines of `paragraph` to `lines`, broken at spaces so each fits the text
-    /// box width where it can; a word wider than that gets a line of its own. Each word is
-    /// encoded and measured once.
+    /// Appends the lines of `paragraph` to `lines`, as viewers wrap form text: a word moves
+    /// to the next line with the spaces after it when they overflow the plate width, and
+    /// those spaces count in the width of the line they end. A word wider than the plate
+    /// is broken between characters. Each word is encoded and measured once.
     fn wrap(&self, paragraph: &str, lines: &mut Vec<(Vec<u8>, f32)>) -> Option<()> {
-        let max_width = self.text_box().width();
-        let mut space = None;
-        let mut line: Vec<u8> = Vec::new();
+        let max_width = self.plate().width();
+        let mut line = Vec::new();
         let mut width = 0.0;
-        for word in paragraph.split(' ') {
+        for word in Words(paragraph) {
             let codes = self.encoder.encode(word)?;
             let word_width = self.width(&codes);
-            if line.is_empty() {
-                line = codes;
-                width = word_width;
-                continue;
-            }
-            let (space_codes, space_width) = match &space {
-                Some(space) => space,
-                None => {
-                    let codes = self.encoder.encode(" ")?;
-                    let width = self.width(&codes);
-                    space.insert((codes, width))
-                }
-            };
-            if width + space_width + word_width > max_width {
+            if width + word_width <= max_width {
+                line.extend(codes);
+                width += word_width;
+            } else if !line.is_empty() && word_width <= max_width {
                 lines.push((std::mem::replace(&mut line, codes), width));
                 width = word_width;
             } else {
-                line.extend_from_slice(space_codes);
-                line.extend(codes);
-                width += space_width + word_width;
+                self.break_word(word, max_width, lines, &mut line, &mut width)?;
             }
         }
         lines.push((line, width));
         Some(())
     }
 
+    /// Appends `word`, wider than the space left on `line`, character by character,
+    /// starting a new line before each character that overflows `max_width`; a line's
+    /// first character always stays on it.
+    fn break_word(
+        &self,
+        word: &str,
+        max_width: f32,
+        lines: &mut Vec<(Vec<u8>, f32)>,
+        line: &mut Vec<u8>,
+        width: &mut f32,
+    ) -> Option<()> {
+        let mut buffer = [0; 4];
+        for character in word.chars() {
+            let codes = self.encoder.encode(character.encode_utf8(&mut buffer))?;
+            let character_width = self.width(&codes);
+            if !line.is_empty() && *width + character_width > max_width {
+                lines.push((std::mem::take(line), *width));
+                *width = 0.0;
+            }
+            line.extend(codes);
+            *width += character_width;
+        }
+        Some(())
+    }
+
     /// The left end of a line `width` wide under the value's alignment.
     fn line_start(&self, width: f32) -> f32 {
-        let text_box = self.text_box();
+        let plate = self.plate();
         match self.text.alignment {
-            Alignment::Left => text_box.left,
-            Alignment::Center => (text_box.left + text_box.right - width) / 2.0,
-            Alignment::Right => text_box.right - width,
+            Alignment::Left => plate.left,
+            Alignment::Center => (plate.left + plate.right - width) / 2.0,
+            Alignment::Right => plate.right - width,
         }
     }
 
-    /// The baselines of `count` lines: one line centered vertically in the text box, or
-    /// lines stepping down from its top by the font's line height.
+    /// The baselines of `count` lines: one line centered vertically in the plate, or lines
+    /// stepping down from its top by the font's line height.
     fn baselines(&self, count: usize) -> impl Iterator<Item = f32> {
         let LineMetrics { ascent, descent } = self.font.line_metrics();
         let size = self.text.font_size;
-        let text_box = self.text_box();
+        let plate = self.plate();
         let (first, step) = if self.text.multiline {
-            (text_box.bottom - ascent * size, (ascent - descent) * size)
+            (plate.bottom - ascent * size, (ascent - descent) * size)
         } else {
             (
-                (text_box.top + text_box.bottom - (ascent + descent) * size) / 2.0,
+                (plate.top + plate.bottom - (ascent + descent) * size) / 2.0,
                 0.0,
             )
         };
@@ -225,19 +234,19 @@ impl<'a> ValueLayout<'a> {
         })
     }
 
-    /// The operators showing the value, clipped inside the border; `None` when the font
-    /// has no code for a character of the value.
+    /// The operators showing the value, clipped to the plate; `None` when the font has no
+    /// code for a character of the value.
     fn operators(&self) -> Option<Vec<Op>> {
         let lines = self.lines()?;
-        let inset = self.clip_inset();
+        let plate = self.plate();
         let color = self.text.color;
         let mut operators = vec![
             Op::SaveGraphicsState,
             Op::Rectangle {
-                x: self.bbox.left + inset,
-                y: self.bbox.top + inset,
-                width: self.bbox.width() - inset * 2.0,
-                height: self.bbox.height() - inset * 2.0,
+                x: plate.left,
+                y: plate.top,
+                width: plate.width(),
+                height: plate.height(),
             },
             Op::ClipNonZero,
             Op::EndPath,
@@ -265,6 +274,28 @@ impl<'a> ValueLayout<'a> {
         }
         operators.extend([Op::EndText, Op::RestoreGraphicsState]);
         Some(operators)
+    }
+}
+
+/// The words of a paragraph, each with the spaces that follow it, which wrap together.
+struct Words<'a>(&'a str);
+
+impl<'a> Iterator for Words<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let spaces = self.0.find(' ').unwrap_or(self.0.len());
+        let end = self
+            .0
+            .get(spaces..)
+            .and_then(|tail| tail.find(|character| character != ' '))
+            .map_or(self.0.len(), |offset| spaces + offset);
+        let (word, rest) = self.0.split_at_checked(end)?;
+        self.0 = rest;
+        Some(word)
     }
 }
 

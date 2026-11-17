@@ -100,10 +100,14 @@ impl PdfFontHandle {
         &self.source
     }
 
-    /// The line extent text set in this font is laid out with: the primary face's ascender
-    /// and descender, or a default extent when the face has no usable metrics.
+    /// The line extent form text set in this font is laid out with: the descriptor's
+    /// `/Ascent` and `/Descent`, else the primary face's ascender and descender, else a
+    /// default extent.
     #[must_use]
     pub fn line_metrics(&self) -> LineMetrics {
+        if let Some(declared) = self.spec.declared_line_metrics() {
+            return declared;
+        }
         self.primary
             .metrics()
             .and_then(|metrics| {
