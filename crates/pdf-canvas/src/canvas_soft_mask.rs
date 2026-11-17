@@ -1,7 +1,9 @@
 //! Soft-mask recording for an `ExtGState` `/SMask`.
 use std::sync::Arc;
 
-use pdf_graphics::{MaskMode, color::Color, rect::Rect, size::Size, transform::Transform};
+use pdf_graphics::{
+    MaskMode, PaintMode, PathFillType, color::Color, rect::Rect, size::Size, transform::Transform,
+};
 use pdf_resources::soft_mask::SoftMask;
 
 use crate::{
@@ -110,7 +112,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         self.save()?;
         self.current_state_mut()?.paint.set_fill_color(color);
         self.rectangle(0.0, 0.0, size.width, size.height)?;
-        self.fill_path_nonzero_winding()?;
+        self.end_path(Some((PaintMode::Fill, PathFillType::Winding)))?;
         self.restore()
     }
 }

@@ -28,19 +28,6 @@ fn apply_content_stream_color(
 }
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
-    /// Handles `CS`: selects the stroking color space.
-    pub(crate) fn set_stroking_color_space(&mut self, name: &[u8]) -> Result<(), PdfCanvasError> {
-        self.set_color_space(name, true)
-    }
-
-    /// Handles `cs`: selects the non-stroking color space.
-    pub(crate) fn set_non_stroking_color_space(
-        &mut self,
-        name: &[u8],
-    ) -> Result<(), PdfCanvasError> {
-        self.set_color_space(name, false)
-    }
-
     /// Handles `SC`/`SCN` without a pattern: sets the stroking color.
     pub(crate) fn set_stroking_color(&mut self, components: &[f32]) -> Result<(), PdfCanvasError> {
         let state = self.current_state_mut()?;

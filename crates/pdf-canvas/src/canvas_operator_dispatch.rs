@@ -1,5 +1,6 @@
 //! Dispatch of parsed content-stream operators to their canvas handlers.
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
+use pdf_graphics::{PaintMode, PathFillType};
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
@@ -29,23 +30,42 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 width,
                 height,
             } => self.rectangle(*x, *y, *width, *height),
-            PdfOperatorVariant::StrokePath => self.stroke_path(),
-            PdfOperatorVariant::CloseStrokePath => self.close_and_stroke_path(),
-            PdfOperatorVariant::FillPathNonZero => self.fill_path_nonzero_winding(),
-            PdfOperatorVariant::FillPathEvenOdd => self.fill_path_even_odd(),
-            PdfOperatorVariant::FillAndStrokePathNonZero => {
-                self.fill_and_stroke_path_nonzero_winding()
+            PdfOperatorVariant::StrokePath => {
+                self.end_path(Some((PaintMode::Stroke, PathFillType::default())))
             }
-            PdfOperatorVariant::FillAndStrokePathEvenOdd => self.fill_and_stroke_path_even_odd(),
+            PdfOperatorVariant::CloseStrokePath => {
+                self.close_path()?;
+                self.end_path(Some((PaintMode::Stroke, PathFillType::default())))
+            }
+            PdfOperatorVariant::FillPathNonZero => {
+                self.end_path(Some((PaintMode::Fill, PathFillType::Winding)))
+            }
+            PdfOperatorVariant::FillPathEvenOdd => {
+                self.end_path(Some((PaintMode::Fill, PathFillType::EvenOdd)))
+            }
+            PdfOperatorVariant::FillAndStrokePathNonZero => {
+                self.end_path(Some((PaintMode::FillAndStroke, PathFillType::Winding)))
+            }
+            PdfOperatorVariant::FillAndStrokePathEvenOdd => {
+                self.end_path(Some((PaintMode::FillAndStroke, PathFillType::EvenOdd)))
+            }
             PdfOperatorVariant::CloseFillAndStrokePathNonZero => {
-                self.close_fill_and_stroke_path_nonzero_winding()
+                self.close_path()?;
+                self.end_path(Some((PaintMode::FillAndStroke, PathFillType::Winding)))
             }
             PdfOperatorVariant::CloseFillAndStrokePathEvenOdd => {
-                self.close_fill_and_stroke_path_even_odd()
+                self.close_path()?;
+                self.end_path(Some((PaintMode::FillAndStroke, PathFillType::EvenOdd)))
             }
-            PdfOperatorVariant::EndPath => self.end_path_no_op(),
-            PdfOperatorVariant::ClipNonZero => self.clip_path_nonzero_winding(),
-            PdfOperatorVariant::ClipEvenOdd => self.clip_path_even_odd(),
+            PdfOperatorVariant::EndPath => self.end_path(None),
+            PdfOperatorVariant::ClipNonZero => {
+                self.pending_clip = Some(PathFillType::Winding);
+                Ok(())
+            }
+            PdfOperatorVariant::ClipEvenOdd => {
+                self.pending_clip = Some(PathFillType::EvenOdd);
+                Ok(())
+            }
             PdfOperatorVariant::SetGrayFill { gray } => self.set_non_stroking_gray(*gray),
             PdfOperatorVariant::SetGrayStroke { gray } => self.set_stroking_gray(*gray),
             PdfOperatorVariant::SetRGBFill { r, g, b } => self.set_non_stroking_rgb(*r, *g, *b),
@@ -82,18 +102,24 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             }
             PdfOperatorVariant::SetTextMatrix { matrix } => self.set_text_matrix(matrix),
             PdfOperatorVariant::MoveToNextLine => self.move_to_start_of_next_line(),
-            PdfOperatorVariant::ShowText { text } => self.show_text(text),
+            PdfOperatorVariant::ShowText { text } => {
+                self.render_text_items(std::slice::from_ref(text))
+            }
             PdfOperatorVariant::MoveNextLineShowText { text } => {
-                self.move_to_next_line_and_show_text(text)
+                self.move_to_start_of_next_line()?;
+                self.render_text_items(std::slice::from_ref(text))
             }
             PdfOperatorVariant::SetSpacingMoveShowText {
                 word_spacing,
                 char_spacing,
                 text,
-            } => self.set_spacing_and_show_text(*word_spacing, *char_spacing, text),
-            PdfOperatorVariant::ShowTextArray { elements } => {
-                self.show_text_with_glyph_positioning(elements)
+            } => {
+                self.set_word_spacing(*word_spacing)?;
+                self.set_character_spacing(*char_spacing)?;
+                self.move_to_start_of_next_line()?;
+                self.render_text_items(std::slice::from_ref(text))
             }
+            PdfOperatorVariant::ShowTextArray { elements } => self.render_text_items(elements),
             PdfOperatorVariant::SetCharacterSpacing { spacing } => {
                 self.set_character_spacing(*spacing)
             }
@@ -108,9 +134,9 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             PdfOperatorVariant::InvokeXObject { name } => self.invoke_xobject(name),
             PdfOperatorVariant::InlineImage(image) => self.paint_inline_image(image),
             PdfOperatorVariant::PaintShading { name } => self.paint_shading(name),
-            PdfOperatorVariant::SetStrokeColorSpace { name } => self.set_stroking_color_space(name),
+            PdfOperatorVariant::SetStrokeColorSpace { name } => self.set_color_space(name, true),
             PdfOperatorVariant::SetNonStrokingColorSpace { name } => {
-                self.set_non_stroking_color_space(name)
+                self.set_color_space(name, false)
             }
             PdfOperatorVariant::SetStrokingColor(color) => match &color.pattern {
                 Some(pattern) => self.set_stroking_color_extended(&color.components, pattern),
