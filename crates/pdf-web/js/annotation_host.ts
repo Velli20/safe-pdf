@@ -22,7 +22,7 @@ export interface AnnotationLayerCallbacks {
   /** Returns the font a canvas-painted text entry paints its value in, or nothing when no
    * browser font can be built for it. Called once per entry; the layer registers each
    * family once as a `FontFace` and edits the value in it. */
-  loadFont?(entry: WebAnnotationEntry): { family: string, data: Uint8Array } | undefined;
+  loadFont?(entry: WebAnnotationEntry): { family: string, data: Uint8Array<ArrayBuffer> } | undefined;
   /** Draws the source artwork of an entry with `artwork` into `canvas`, sizing it to the
    * entry's local box at the page's pixel density. */
   renderArtwork?(entry: WebAnnotationEntry, canvas: HTMLCanvasElement): void;
