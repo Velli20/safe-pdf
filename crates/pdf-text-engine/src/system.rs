@@ -126,8 +126,10 @@ impl FontSystem {
     /// fallback policy. The returned handle records whether its primary face is a substitute so
     /// later glyph selection can prefer Unicode over incompatible PDF glyph identifiers.
     #[allow(clippy::arc_with_non_send_sync)]
-    pub fn load_pdf_font(&self, spec: PdfFontSpec) -> Result<PdfFontHandle, pdf_font::FontError> {
-        let spec = Arc::new(spec);
+    pub fn load_pdf_font(
+        &self,
+        spec: Arc<PdfFontSpec>,
+    ) -> Result<PdfFontHandle, pdf_font::FontError> {
         let source = match spec.as_ref() {
             PdfFontSpec::Type3(font) => Some(type3_source(font)),
             other => other.source().cloned(),

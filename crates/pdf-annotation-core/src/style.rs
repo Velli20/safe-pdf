@@ -98,79 +98,90 @@ pub(crate) fn generic_font_family(name: &[u8]) -> &'static str {
     }
 }
 
-/// Interpret only `/DA` font and device-color tokens into `style`.
+/// The font and color a `/DA` default appearance string selects.
 ///
-/// Unknown operators clear pending operands. Invalid operands leave the previous
-/// style value intact. Standard 14 aliases resolve to generic families; unknown
-/// resources use sans-serif. This function performs no resource access and does
-/// not panic. It does not validate unrelated preexisting style fields.
-///
-/// Returns whether the last `Tf` requested automatic sizing with a zero font size;
-/// the caller decides the size because it depends on the annotation's geometry.
-pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) -> bool {
-    let text = String::from_utf8_lossy(bytes);
-    let mut operands: Vec<&str> = Vec::new();
-    let mut auto_size = false;
-    for token in default_appearance_tokens(&text) {
-        match token {
-            "Tf" => {
-                if let [name, size] = operands.as_slice() {
-                    let size = size.parse::<f32>().ok().filter(|size| size.is_finite());
-                    auto_size = size == Some(0.0);
-                    if let Some(size) = size.filter(|size| *size > 0.0) {
-                        style.font_size = size;
-                    }
-                    style.font_family =
-                        generic_font_family(name.strip_prefix('/').unwrap_or(name).as_bytes())
-                            .into();
-                }
-                operands.clear();
-            }
-            "g" | "rg" | "k" => {
-                if let Some(components) = operands
-                    .iter()
-                    .map(|v| v.parse::<f32>().ok().filter(|v| v.is_finite()))
-                    .collect::<Option<Vec<_>>>()
-                    && let Some(color) = Color::from_device_components(&components)
-                {
-                    style.color = color;
-                }
-                operands.clear();
-            }
-            value if value.starts_with('/') || value.parse::<f32>().is_ok() => {
-                if operands.len() < 4 {
-                    operands.push(value);
-                } else {
-                    operands.clear();
-                }
-            }
-            _ => operands.clear(),
-        }
-    }
-    auto_size
+/// Only `Tf` and the device-color operators `g`, `rg` and `k` are read; unknown
+/// operators clear pending operands, and invalid operands are ignored. The last valid
+/// occurrence of each wins. Parsing performs no resource access and does not panic.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DefaultAppearance {
+    /// The font resource name the last `Tf` selects, without its leading slash.
+    pub font: Option<Arc<[u8]>>,
+    /// The finite font size of the last `Tf`; zero requests automatic sizing.
+    pub font_size: Option<f32>,
+    /// The fill color of the last valid color operator.
+    pub color: Option<Color>,
 }
 
-/// The whitespace-separated tokens of a `/DA` string, without `%` comments.
-fn default_appearance_tokens(text: &str) -> impl Iterator<Item = &str> {
-    text.lines().flat_map(|line| {
-        line.split('%')
-            .next()
-            .unwrap_or_default()
-            .split_ascii_whitespace()
-    })
+impl DefaultAppearance {
+    /// Parses the `/DA` string `bytes`.
+    #[must_use]
+    pub fn parse(bytes: &[u8]) -> Self {
+        let text = String::from_utf8_lossy(bytes);
+        let mut appearance = Self::default();
+        let mut operands: Vec<&str> = Vec::new();
+        let tokens = text.lines().flat_map(|line| {
+            line.split('%')
+                .next()
+                .unwrap_or_default()
+                .split_ascii_whitespace()
+        });
+        for token in tokens {
+            match token {
+                "Tf" => {
+                    if let [name, size] = operands.as_slice() {
+                        let name = name.strip_prefix('/').unwrap_or(name);
+                        appearance.font = Some(name.as_bytes().into());
+                        appearance.font_size =
+                            size.parse::<f32>().ok().filter(|size| size.is_finite());
+                    }
+                    operands.clear();
+                }
+                "g" | "rg" | "k" => {
+                    if let Some(components) = operands
+                        .iter()
+                        .map(|v| v.parse::<f32>().ok().filter(|v| v.is_finite()))
+                        .collect::<Option<Vec<_>>>()
+                        && let Some(color) = Color::from_device_components(&components)
+                    {
+                        appearance.color = Some(color);
+                    }
+                    operands.clear();
+                }
+                value if value.starts_with('/') || value.parse::<f32>().is_ok() => {
+                    if operands.len() < 4 {
+                        operands.push(value);
+                    } else {
+                        operands.clear();
+                    }
+                }
+                _ => operands.clear(),
+            }
+        }
+        appearance
+    }
+
+    /// Applies the font and color to `style`: a positive size, the generic family of the
+    /// font, and the color. Standard 14 aliases resolve to generic families; unknown
+    /// resources use sans-serif.
+    ///
+    /// Returns whether `Tf` requested automatic sizing with a zero font size; the caller
+    /// decides the size because it depends on the annotation's geometry.
+    pub fn apply(&self, style: &mut ResolvedStyle) -> bool {
+        if let Some(size) = self.font_size.filter(|size| *size > 0.0) {
+            style.font_size = size;
+        }
+        if let Some(font) = &self.font {
+            style.font_family = generic_font_family(font).into();
+        }
+        if let Some(color) = self.color {
+            style.color = color;
+        }
+        self.font_size == Some(0.0)
+    }
 }
 
 impl WidgetAnnotation {
-    /// The font resource name the last `Tf` of `/DA` selects, without its leading slash.
-    pub(crate) fn default_font_name(&self) -> Option<Arc<[u8]>> {
-        let text = String::from_utf8_lossy(self.default_appearance.as_deref()?);
-        let tokens: Vec<&str> = default_appearance_tokens(&text).collect();
-        tokens.windows(3).rev().find_map(|window| match window {
-            [name, _, "Tf"] => name.strip_prefix('/').map(|name| name.as_bytes().into()),
-            _ => None,
-        })
-    }
-
     /// Font size for a `/DA` auto size (`0 Tf`) that fits the text inside `rect` less
     /// `border_width` on each side, or `None` to keep the default size.
     ///
@@ -262,7 +273,8 @@ pub fn resolve_source_style(
         NativeAnnotation::FreeText(v) => (v.default_appearance.as_deref(), v.quadding),
         _ => (None, None),
     };
-    let auto_size = appearance.is_some_and(|bytes| apply_default_style(bytes, &mut style));
+    let auto_size =
+        appearance.is_some_and(|bytes| DefaultAppearance::parse(bytes).apply(&mut style));
     if auto_size
         && let Some(widget) = widget
         && let Ok(rect) = annotation.bounds()

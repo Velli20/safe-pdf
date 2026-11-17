@@ -1,4 +1,4 @@
-import { AnnotationKind, ControlKind } from './annotation_models.js';
+import { AnnotationKind } from './annotation_models.js';
 import { AnnotationDrag } from './annotation_drag.js';
 import { FormControl } from './annotation_controls.js';
 import { EditPhase, FreeTextComponent } from './annotation_sessions.js';
@@ -122,8 +122,8 @@ export class NativeAnnotationLayer {
    * paints its value in, registered once per family, ahead of the generic family.
    * @param {import('./annotation_contract').WebAnnotationEntry} entry */
   fontFamily(entry) {
-    const generic = entry.style.font_family, control = entry.control;
-    if (!control?.painted || (control.kind !== ControlKind.Text && control.kind !== ControlKind.ComboBox)) return generic;
+    const generic = entry.style.font_family;
+    if (!FormControl.isPaintedTextEntry(entry.control)) return generic;
     let family = this.fieldFonts.get(entry.id);
     if (family === undefined) {
       family = null;

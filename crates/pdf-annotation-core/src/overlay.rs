@@ -1,7 +1,7 @@
 //! Document-owned Core editing and disposable per-viewport annotation entries.
 use crate::{
     actions::ActionTrigger,
-    appearance_paint::PaintedAppearance,
+    appearance_paint::{PaintedAppearance, PresentationState},
     commands::{AnnotationCommand, Operation},
     engine::DocumentView,
     entry::AnnotationEntry,
@@ -154,29 +154,23 @@ impl AnnotationOverlay {
 
     /// Returns the source appearances of `page`'s displayed button and read-only text
     /// widgets, selected by live field state, and of annotations drawn from their appearance,
-    /// in presentation order, for painting on the page canvas. The `pressed` widget draws its
-    /// down appearance, and the text entry being `editing` draws without its value.
+    /// in presentation order, for painting on the page canvas. The widget `presentation`
+    /// marks pressed draws its down appearance, and the text entry it marks editing draws
+    /// without its value.
     ///
     /// # Errors
     /// Rejects absent pages and widgets whose bound field is missing.
     pub fn painted_appearances(
         &self,
         page: u32,
-        pressed: Option<AnnotationId>,
-        editing: Option<AnnotationId>,
+        presentation: PresentationState,
     ) -> AnnotationLayerResult<Vec<PaintedAppearance>> {
         let view = self.page_view(page)?;
         self.page_annotations(&view, page)
             .into_iter()
             .filter_map(|annotation| {
-                PaintedAppearance::new(
-                    annotation,
-                    &view,
-                    &self.optional_content,
-                    pressed == Some(annotation.id),
-                    editing == Some(annotation.id),
-                )
-                .transpose()
+                PaintedAppearance::new(annotation, &view, &self.optional_content, presentation)
+                    .transpose()
             })
             .collect()
     }
@@ -196,10 +190,10 @@ impl AnnotationOverlay {
         let Some(annotation) = self.annotation(id) else {
             return Ok(None);
         };
-        let view = self.document.engine.view();
-        Ok(
-            PaintedAppearance::new(annotation, &view, &self.optional_content, false, false)?
-                .filter(|appearance| appearance.text.is_some()),
+        PaintedAppearance::text_entry(
+            annotation,
+            &self.document.engine.view(),
+            &self.optional_content,
         )
     }
 

@@ -3,7 +3,7 @@
 use crate::{
     fields::{ComboValue, Field, FieldKind, TextMode},
     models::Annotation,
-    style::Alignment,
+    style::{Alignment, DefaultAppearance},
 };
 use pdf_graphics::color::Color;
 use std::sync::Arc;
@@ -58,7 +58,8 @@ impl Annotation {
         if !self.has_normal_appearance() {
             return None;
         }
-        let font = self.source_widget()?.default_font_name()?;
+        let font =
+            DefaultAppearance::parse(self.source_widget()?.default_appearance.as_deref()?).font?;
         let style = self.style().ok()?;
         Some(VariableText {
             value,

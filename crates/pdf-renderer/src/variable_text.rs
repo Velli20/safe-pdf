@@ -1,17 +1,19 @@
-//! Draws a text-entry widget's live value into its appearance: the operators inside the
+//! Draws a text-entry widget's live value into its appearance: the text objects inside the
 //! appearance's `/Tx` marked content, which show the value the document was saved with,
 //! are replaced by operators showing the live value in the widget's `/DA` font.
 use crate::{PdfRenderer, PdfRendererError};
 use pdf_annotation_core::{PaintedAppearance, VariableText, style::Alignment};
+use pdf_canvas::{
+    canvas_backend::CanvasBackend, font_selection::FontSelection, pdf_canvas::PdfCanvas,
+};
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::{PdfTextItem, variants::PdfOperatorVariant as Op};
-use pdf_font::{
-    PdfFontSpec, Standard14Font, host_font_program::HostFontProgram, pdf_font_handle::PdfFontHandle,
-};
+use pdf_font::{host_font_program::HostFontProgram, pdf_font_handle::PdfFontHandle};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_resources::resources::Resources;
 use pdf_text_engine::{FontSystem, PdfTextEncoder, text::PdfTextRun, text_style::TextStyle};
+use std::ops::Range;
 
 /// The marked-content tag enclosing a widget's variable text.
 const VARIABLE_TEXT_TAG: &[u8] = b"Tx";
@@ -21,22 +23,25 @@ const FALLBACK_ASCENT: f32 = 0.8;
 const FALLBACK_DESCENT: f32 = -0.2;
 
 impl PdfRenderer {
-    /// `content`, an appearance stream drawn in `bbox` with `resources`, with its `/Tx`
-    /// marked content showing `text` instead. An appearance without `/Tx` marked content
-    /// loses its text objects, and the value is drawn after the rest of the appearance.
+    /// `content`, an appearance stream drawn in `bbox` with `resources` on `canvas`, with
+    /// its `/Tx` marked content showing `text` instead of the saved value. An appearance
+    /// without `/Tx` marked content keeps all of its operators and draws the value after
+    /// them.
     ///
-    /// `None` when the `/DA` font cannot be loaded, so the appearance is drawn as it is.
-    pub(crate) fn variable_text_stream(
+    /// `None` when the `/DA` font cannot be loaded or has no code for a character of the
+    /// value, so the appearance is drawn as it is.
+    pub(crate) fn variable_text_stream<B: CanvasBackend>(
         &self,
+        canvas: &mut PdfCanvas<'_, B>,
         content: &ContentStream,
         bbox: Rect,
         resources: Option<&Resources>,
         text: &VariableText,
     ) -> Option<ContentStream> {
-        let spec = self.field_font_spec(resources, &text.font);
-        let layout = ValueLayout::new(&self.font_system, &spec, bbox, text)?;
+        let (font, _) = canvas.load_named_font(&text.font, resources).ok()?;
+        let layout = ValueLayout::new(&self.font_system, font, bbox, text).ok()?;
         Some(ContentStream {
-            operators: replace_variable_text(&content.operators, layout.operators()),
+            operators: AppearanceOperators(&content.operators).with_value(layout.operators()?),
             id: content.id,
         })
     }
@@ -61,22 +66,15 @@ impl PdfRenderer {
             return Ok(None);
         };
         let resources = self.appearance_resources(&form, self.page(page_index)?)?;
-        let spec = self.field_font_spec(resources.as_deref(), &text.font);
+        let selection = FontSelection::new(
+            &text.font,
+            resources.as_deref(),
+            self.form_resources().map(AsRef::as_ref),
+        );
         let family = String::from_utf8_lossy(&text.font);
-        Ok(self.font_system.host_font_program(&spec, &family)?)
-    }
-
-    /// The font resource `name` a widget's value is drawn with: from the appearance's
-    /// `resources`, then the interactive form's `/DR`, else the Standard 14 font the
-    /// canvas substitutes for a name no resources define.
-    fn field_font_spec(&self, resources: Option<&Resources>, name: &[u8]) -> PdfFontSpec {
-        resources
-            .and_then(|resources| resources.font(name))
-            .or_else(|| self.form_resources()?.font(name))
-            .map_or_else(
-                || PdfFontSpec::from(Standard14Font::for_missing_resource(name)),
-                |(spec, _)| spec.as_ref().clone(),
-            )
+        Ok(self
+            .font_system
+            .host_font_program(selection.spec(), &family)?)
     }
 }
 
@@ -95,19 +93,17 @@ struct ValueLayout<'a> {
 }
 
 impl<'a> ValueLayout<'a> {
-    /// Loads `spec`, the `/DA` font of `text`; `None` when it cannot be loaded.
+    /// Lays `text` out in `font`, its loaded `/DA` font.
     fn new(
         font_system: &'a FontSystem,
-        spec: &PdfFontSpec,
+        font: PdfFontHandle,
         bbox: Rect,
         text: &'a VariableText,
-    ) -> Option<Self> {
-        let encoder = PdfTextEncoder::new(spec).ok()?;
-        let font = font_system.load_pdf_font(spec.clone()).ok()?;
-        Some(Self {
+    ) -> Result<Self, PdfRendererError> {
+        Ok(Self {
             text,
+            encoder: PdfTextEncoder::new(font.spec())?,
             font,
-            encoder,
             font_system,
             bbox: bbox.normalized(),
         })
@@ -159,40 +155,57 @@ impl<'a> ValueLayout<'a> {
             .unwrap_or_default()
     }
 
-    /// The encoded lines of the value: the whole value on one line, or each paragraph
-    /// of a multiline value wrapped at spaces to the text box width.
-    fn lines(&self) -> Vec<Vec<u8>> {
+    /// The encoded lines of the value with their widths: the whole value on one line, or
+    /// each paragraph of a multiline value wrapped at spaces to the text box width. `None`
+    /// when the font has no code for a character of the value.
+    fn lines(&self) -> Option<Vec<(Vec<u8>, f32)>> {
         if !self.text.multiline {
-            return vec![self.encoder.encode(&self.text.value)];
+            let codes = self.encoder.encode(&self.text.value)?;
+            let width = self.width(&codes);
+            return Some(vec![(codes, width)]);
         }
-        let width = self.text_box().width();
-        self.text
-            .value
-            .split(['\r', '\n'])
-            .flat_map(|paragraph| self.wrap(paragraph, width))
-            .collect()
+        let mut lines = Vec::new();
+        for paragraph in self.text.value.split(['\r', '\n']) {
+            self.wrap(paragraph, &mut lines)?;
+        }
+        Some(lines)
     }
 
-    /// The lines of `paragraph` broken at spaces so each fits `width` where it can; a
-    /// word wider than `width` gets a line of its own.
-    fn wrap(&self, paragraph: &str, width: f32) -> Vec<Vec<u8>> {
-        let mut lines = Vec::new();
-        let mut line = String::new();
+    /// Appends the lines of `paragraph` to `lines`, broken at spaces so each fits the text
+    /// box width where it can; a word wider than that gets a line of its own. Each word is
+    /// encoded and measured once.
+    fn wrap(&self, paragraph: &str, lines: &mut Vec<(Vec<u8>, f32)>) -> Option<()> {
+        let max_width = self.text_box().width();
+        let mut space = None;
+        let mut line: Vec<u8> = Vec::new();
+        let mut width = 0.0;
         for word in paragraph.split(' ') {
-            let candidate = if line.is_empty() {
-                word.to_owned()
-            } else {
-                format!("{line} {word}")
+            let codes = self.encoder.encode(word)?;
+            let word_width = self.width(&codes);
+            if line.is_empty() {
+                line = codes;
+                width = word_width;
+                continue;
+            }
+            let (space_codes, space_width) = match &space {
+                Some(space) => space,
+                None => {
+                    let codes = self.encoder.encode(" ")?;
+                    let width = self.width(&codes);
+                    space.insert((codes, width))
+                }
             };
-            if !line.is_empty() && self.width(&self.encoder.encode(&candidate)) > width {
-                lines.push(self.encoder.encode(&line));
-                line = word.to_owned();
+            if width + space_width + word_width > max_width {
+                lines.push((std::mem::replace(&mut line, codes), width));
+                width = word_width;
             } else {
-                line = candidate;
+                line.extend_from_slice(space_codes);
+                line.extend(codes);
+                width += space_width + word_width;
             }
         }
-        lines.push(self.encoder.encode(&line));
-        lines
+        lines.push((line, width));
+        Some(())
     }
 
     /// The left end of a line `width` wide under the value's alignment.
@@ -226,9 +239,10 @@ impl<'a> ValueLayout<'a> {
         })
     }
 
-    /// The operators showing the value, clipped inside the border.
-    fn operators(&self) -> Vec<Op> {
-        let lines = self.lines();
+    /// The operators showing the value, clipped inside the border; `None` when the font
+    /// has no code for a character of the value.
+    fn operators(&self) -> Option<Vec<Op>> {
+        let lines = self.lines()?;
         let inset = self.clip_inset();
         let color = self.text.color;
         let mut operators = vec![
@@ -252,81 +266,90 @@ impl<'a> ValueLayout<'a> {
                 b: color.b,
             },
         ];
-        for (codes, baseline) in lines.iter().zip(self.baselines(lines.len())) {
+        for ((codes, width), baseline) in lines.iter().zip(self.baselines(lines.len())) {
             if codes.is_empty() {
                 continue;
             }
             operators.push(Op::SetTextMatrix {
-                matrix: Transform::from_translate(self.line_start(self.width(codes)), baseline),
+                matrix: Transform::from_translate(self.line_start(*width), baseline),
             });
             operators.push(Op::ShowText {
                 text: PdfTextItem::Text(codes.as_slice().into()),
             });
         }
         operators.extend([Op::EndText, Op::RestoreGraphicsState]);
-        operators
+        Some(operators)
     }
 }
 
-/// `operators` with the text objects of the first `/Tx` marked content removed and
-/// `value` drawn at its end, so the backgrounds and borders some appearances draw inside
-/// it remain. Without `/Tx` marked content, every text object is removed and `value` is
-/// appended in marked content of its own.
-fn replace_variable_text(operators: &[Op], value: Vec<Op>) -> Vec<Op> {
-    let Some(start) = operators.iter().position(|operator| match operator {
-        Op::BeginMarkedContent { tag } => tag.as_bytes() == VARIABLE_TEXT_TAG,
-        Op::BeginMarkedContentWithProps(begin) => begin.tag() == VARIABLE_TEXT_TAG,
-        _ => false,
-    }) else {
-        return without_text_objects(operators)
-            .chain([&Op::BeginMarkedContent {
-                tag: PdfName::from(VARIABLE_TEXT_TAG),
-            }])
+/// The operators of a widget's appearance stream.
+struct AppearanceOperators<'a>(&'a [Op]);
+
+impl AppearanceOperators<'_> {
+    /// The operators with the text objects of the first `/Tx` marked content removed and
+    /// `value` drawn at its end, so the backgrounds and borders some appearances draw
+    /// inside it remain. Without `/Tx` marked content, every operator is kept and `value`
+    /// is appended in marked content of its own.
+    fn with_value(&self, value: Vec<Op>) -> Vec<Op> {
+        let Some(span) = self.variable_text_span() else {
+            return self
+                .0
+                .iter()
+                .cloned()
+                .chain([Op::BeginMarkedContent {
+                    tag: PdfName::from(VARIABLE_TEXT_TAG),
+                }])
+                .chain(value)
+                .chain([Op::EndMarkedContent])
+                .collect();
+        };
+        let before = self.0.get(..span.start).unwrap_or_default();
+        let inside = self.0.get(span.clone()).unwrap_or_default();
+        let after = self.0.get(span.end..).unwrap_or_default();
+        before
+            .iter()
+            .chain(AppearanceOperators(inside).without_text_objects())
             .cloned()
             .chain(value)
-            .chain([Op::EndMarkedContent])
-            .collect();
-    };
-    let end = start.saturating_add(marked_content_len(
-        operators.get(start..).unwrap_or_default(),
-    ));
-    let before = operators.get(..start).unwrap_or_default();
-    let span = operators.get(start..end).unwrap_or_default();
-    let after = operators.get(end..).unwrap_or_default();
-    before
-        .iter()
-        .chain(without_text_objects(span))
-        .cloned()
-        .chain(value)
-        .chain(after.iter().cloned())
-        .collect()
-}
+            .chain(after.iter().cloned())
+            .collect()
+    }
 
-/// The number of operators from the marked-content begin opening `operators` up to,
-/// not including, the end that closes it; all of them when it is not closed.
-fn marked_content_len(operators: &[Op]) -> usize {
-    let mut depth = 0_usize;
-    operators
-        .iter()
-        .position(|operator| {
-            match operator {
-                Op::BeginMarkedContent { .. } | Op::BeginMarkedContentWithProps(_) => {
-                    depth = depth.saturating_add(1);
+    /// The range from the first `/Tx` marked-content begin up to, not including, the end
+    /// that closes it; up to the last operator when it is not closed.
+    fn variable_text_span(&self) -> Option<Range<usize>> {
+        let start = self.0.iter().position(|operator| match operator {
+            Op::BeginMarkedContent { tag } => tag.as_bytes() == VARIABLE_TEXT_TAG,
+            Op::BeginMarkedContentWithProps(begin) => begin.tag() == VARIABLE_TEXT_TAG,
+            _ => false,
+        })?;
+        let mut depth = 0_usize;
+        let len = self
+            .0
+            .get(start..)
+            .unwrap_or_default()
+            .iter()
+            .position(|operator| {
+                match operator {
+                    Op::BeginMarkedContent { .. } | Op::BeginMarkedContentWithProps(_) => {
+                        depth = depth.saturating_add(1);
+                    }
+                    Op::EndMarkedContent => depth = depth.saturating_sub(1),
+                    _ => {}
                 }
-                Op::EndMarkedContent => depth = depth.saturating_sub(1),
-                _ => {}
-            }
-            depth == 0
-        })
-        .unwrap_or(operators.len())
-}
+                depth == 0
+            })
+            .unwrap_or(self.0.len().saturating_sub(start));
+        Some(start..start.saturating_add(len))
+    }
 
-/// `operators` without the operators from each `BT` through its `ET`.
-fn without_text_objects(operators: &[Op]) -> impl Iterator<Item = &Op> {
-    let mut in_text = false;
-    operators.iter().filter(move |operator| {
-        let inside = in_text || matches!(operator, Op::BeginText);
-        in_text = inside && !matches!(operator, Op::EndText);
-        !inside
-    })
+    /// The operators without those from each `BT` through its `ET`.
+    fn without_text_objects(&self) -> impl Iterator<Item = &Op> {
+        let mut in_text = false;
+        self.0.iter().filter(move |operator| {
+            let inside = in_text || matches!(operator, Op::BeginText);
+            in_text = inside && !matches!(operator, Op::EndText);
+            !inside
+        })
+    }
 }

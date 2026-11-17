@@ -3,9 +3,10 @@
 //! annotation's own presentation.
 use crate::{
     engine::DocumentView,
+    fields::Field,
     kind::AnnotationKind as Kind,
     layer_error::AnnotationLayerResult,
-    models::Annotation,
+    models::{Annotation, AnnotationId},
     pdf_data::{AppearanceStreams, SourceAnnotation},
     variable_text::VariableText,
     widget_control::PaintedState,
@@ -16,6 +17,16 @@ use pdf_optional_content::OptionalContentState;
 
 /// The `/Off` appearance state of an unselected button.
 const OFF_STATE: &[u8] = b"Off";
+
+/// Host presentation state that selects which appearance a widget paints. It never
+/// advances the document revision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PresentationState {
+    /// The widget the pointer holds down, painted with its down appearance.
+    pub pressed: Option<AnnotationId>,
+    /// The text entry being edited, painted without its value, which its control shows.
+    pub editing: Option<AnnotationId>,
+}
 
 /// One annotation's appearance stream, selected by its live state and placed at its rectangle.
 #[derive(Clone, Debug)]
@@ -35,9 +46,9 @@ impl PaintedAppearance {
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
     /// buttons and read-only text fields their source `/AS`, and editable text fields and
-    /// editable combo boxes their normal appearance with the live value. A `pressed` widget
-    /// draws its down appearance when it has one for that state. A text entry being
-    /// `editing` draws without its value, which its control shows instead. Ink without
+    /// editable combo boxes their normal appearance with the live value. The widget
+    /// `presentation` marks pressed draws its down appearance when it has one for that
+    /// state, and the text entry it marks editing draws without its value. Ink without
     /// strokes draws its source `/AS` state.
     ///
     /// # Errors
@@ -46,8 +57,7 @@ impl PaintedAppearance {
         annotation: &Annotation,
         view: &DocumentView<'_>,
         optional_content: &OptionalContentState,
-        pressed: bool,
-        editing: bool,
+        presentation: PresentationState,
     ) -> AnnotationLayerResult<Option<Self>> {
         if !annotation.is_displayed(optional_content) {
             return Ok(None);
@@ -60,21 +70,18 @@ impl PaintedAppearance {
         let Some(field) = annotation.widget_field(view)? else {
             return Ok(None);
         };
+        if let Some(mut appearance) = annotation.text_entry_appearance(field) {
+            if presentation.editing == Some(annotation.id)
+                && let Some(text) = &mut appearance.text
+            {
+                text.value.clear();
+            }
+            return Ok(Some(appearance));
+        }
         let Some(source) = annotation.source() else {
             return Ok(None);
         };
-        if let Some(mut text) = annotation.variable_text(field) {
-            if editing {
-                text.value.clear();
-            }
-            return Ok(source
-                .rect
-                .and_then(|rect| source.normal_appearance(rect))
-                .map(|appearance| Self {
-                    text: Some(text),
-                    ..appearance
-                }));
-        }
+        let pressed = presentation.pressed == Some(annotation.id);
         let state = match annotation.painted_state(field) {
             Some(PaintedState::Source) => source.appearance_state.as_deref(),
             Some(PaintedState::Checked(true)) => source.button_on_state().ok(),
@@ -84,6 +91,24 @@ impl PaintedAppearance {
         Ok(source
             .rect
             .and_then(|rect| source.widget_appearance(state, pressed, rect)))
+    }
+
+    /// The appearance of the displayed text entry `annotation` with its live value; `None`
+    /// for other annotations.
+    ///
+    /// # Errors
+    /// Returns an error when the widget's bound field is missing.
+    pub(crate) fn text_entry(
+        annotation: &Annotation,
+        view: &DocumentView<'_>,
+        optional_content: &OptionalContentState,
+    ) -> AnnotationLayerResult<Option<Self>> {
+        if !annotation.is_displayed(optional_content) {
+            return Ok(None);
+        }
+        Ok(annotation
+            .widget_field(view)?
+            .and_then(|field| annotation.text_entry_appearance(field)))
     }
 
     /// The source artwork of a displayed stamp at its live bounds, of a displayed note
@@ -110,6 +135,19 @@ impl PaintedAppearance {
             return None;
         }
         source.normal_appearance(rect)
+    }
+}
+
+impl Annotation {
+    /// The normal appearance of this text entry, bound to `field`, with its live value;
+    /// `None` for other widgets and annotations.
+    fn text_entry_appearance(&self, field: &Field) -> Option<PaintedAppearance> {
+        let text = self.variable_text(field)?;
+        let source = self.source()?;
+        Some(PaintedAppearance {
+            text: Some(text),
+            ..source.normal_appearance(source.rect?)?
+        })
     }
 }
 
@@ -169,7 +207,7 @@ impl AppearanceStreams {
 #[cfg(test)]
 mod tests {
     use crate::{
-        AnnotationOverlay,
+        AnnotationOverlay, PresentationState,
         pdf_data::{
             AppearanceDictionary, AppearanceStreams, NativeAnnotation, SourceAnnotation,
             TextAnnotation,
@@ -203,7 +241,9 @@ mod tests {
             ]));
             let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
             let overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
-            let appearances = overlay.painted_appearances(0, None, None).unwrap();
+            let appearances = overlay
+                .painted_appearances(0, PresentationState::default())
+                .unwrap();
             assert_eq!(appearances.len(), usize::from(painted), "/Ff {flags}");
             if let Some(painted) = appearances.first() {
                 assert_eq!(Some(painted.rect), source.rect);
@@ -249,7 +289,9 @@ mod tests {
         let entry = prepared.entries().first().unwrap();
         assert_eq!(entry.unsupported, None);
         assert!(entry.control.is_none());
-        let appearances = overlay.painted_appearances(0, None, None).unwrap();
+        let appearances = overlay
+            .painted_appearances(0, PresentationState::default())
+            .unwrap();
         let painted = appearances.first().unwrap();
         assert_eq!(appearances.len(), 1);
         assert_eq!(Some(painted.rect), source.rect);

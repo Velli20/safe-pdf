@@ -66,6 +66,12 @@ impl PdfFontHandle {
         &self.primary
     }
 
+    /// Returns the shared PDF font specification.
+    #[must_use]
+    pub fn shared_spec(&self) -> &Arc<PdfFontSpec> {
+        &self.spec
+    }
+
     /// Returns the program the primary face was loaded from.
     #[must_use]
     pub fn source(&self) -> &FontSource {

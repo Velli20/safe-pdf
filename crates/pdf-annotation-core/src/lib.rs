@@ -83,7 +83,7 @@ pub mod variable_text;
 mod widget_control;
 
 pub use actions::ActionTrigger;
-pub use appearance_paint::PaintedAppearance;
+pub use appearance_paint::{PaintedAppearance, PresentationState};
 pub use entry::{AnnotationEntry, ControlKind, ControlTag, WidgetControl};
 pub use layer_error::{AnnotationLayerError, AnnotationLayerResult};
 pub use overlay::{AnnotationOverlay, PreparedAnnotations};

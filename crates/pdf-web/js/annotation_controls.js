@@ -60,9 +60,9 @@ export class FormControl extends AnnotationComponent {
       this.layer.onPress(this.entry, false);
     };
     this.listen(this.node, 'pointerdown', event => {
-      const { painted, kind } = this.control();
+      const control = this.control();
       // Text entries have no down appearance; only buttons are pressed.
-      if (event.button !== 0 || !painted || kind === ControlKind.Text || kind === ControlKind.ComboBox || !this.entry.editable && kind !== ControlKind.Button) return;
+      if (event.button !== 0 || !control.painted || FormControl.isTextEntry(control) || !this.entry.editable && control.kind !== ControlKind.Button) return;
       pressed = true;
       this.layer.onPress(this.entry, true);
     });
@@ -72,13 +72,18 @@ export class FormControl extends AnnotationComponent {
   /** Reports focus on a canvas-painted text entry so the host paints it without its value
    * while the control shows the value being edited. `change` commits before `blur`. */
   bindEditEvents() {
-    const edits = () => {
-      const { painted, kind } = this.control();
-      return painted && (kind === ControlKind.Text || kind === ControlKind.ComboBox);
-    };
+    const edits = () => FormControl.isPaintedTextEntry(this.control());
     this.listen(this.node, 'focus', () => { if (edits()) this.layer.onEdit(this.entry, true); });
     this.listen(this.node, 'blur', () => { if (edits()) this.layer.onEdit(this.entry, false); });
   }
+
+  /** Whether `control` takes typed text: a text field or a combo box.
+   * @param {import('./annotation_contract').WidgetControl} control */
+  static isTextEntry(control) { return control.kind === ControlKind.Text || control.kind === ControlKind.ComboBox; }
+
+  /** Whether the canvas paints `control`'s value, which the control shows only while edited.
+   * @param {import('./annotation_contract').WidgetControl | null | undefined} control */
+  static isPaintedTextEntry(control) { return !!control?.painted && FormControl.isTextEntry(control); }
 
   /** @returns {import('./annotation_contract').WidgetControl} */
   control() {

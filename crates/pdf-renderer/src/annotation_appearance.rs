@@ -54,6 +54,7 @@ impl PdfRenderer {
                 .zip(form.bbox)
                 .and_then(|(text, bbox)| {
                     self.variable_text_stream(
+                        &mut canvas,
                         &form.content_stream,
                         bbox,
                         resources.as_deref(),

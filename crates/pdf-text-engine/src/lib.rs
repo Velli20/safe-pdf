@@ -40,7 +40,7 @@ pub fn measure_encoded_text_width(
     font_size: f32,
 ) -> f32 {
     let system = bundled_font_system();
-    let Ok(font) = system.load_pdf_font(spec.clone()) else {
+    let Ok(font) = system.load_pdf_font(std::sync::Arc::new(spec.clone())) else {
         return 0.0;
     };
     let items = [pdf_content_stream_operators::PdfTextItem::Text(text.into())];

@@ -47,6 +47,12 @@ impl PdfCode {
     pub const fn byte_len(self) -> u8 {
         self.byte_len
     }
+
+    /// Returns the big-endian source bytes, the inverse of packing them.
+    pub fn bytes(self) -> impl Iterator<Item = u8> {
+        let skipped = 4_usize.saturating_sub(usize::from(self.byte_len));
+        self.value.to_be_bytes().into_iter().skip(skipped)
+    }
 }
 
 impl TryFrom<&[u8]> for PdfCode {

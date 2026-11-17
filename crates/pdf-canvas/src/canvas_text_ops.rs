@@ -7,6 +7,7 @@ use pdf_graphics::pdf_path::PdfPath;
 use pdf_graphics::transform::Transform;
 use pdf_graphics::{PaintMode, PathFillType, TextRenderingMode};
 use pdf_text_engine::text::{PdfTextItem, PdfTextRun};
+use std::sync::Arc;
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Handles `Td`: offsets the start of the next line.
@@ -107,20 +108,11 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         font_name: &[u8],
         size: f32,
     ) -> Result<(), PdfCanvasError> {
-        let found = self
-            .current_state()?
-            .resources
-            .as_ref()
-            .and_then(|resources| resources.font(font_name))
-            .or_else(|| self.fallback_fonts.as_ref()?.font(font_name));
-        // A name no resources define selects the Standard 14 font it names, or Helvetica,
-        // rather than abandoning the rest of the stream.
-        let (font, nested_resources) =
-            found.unwrap_or_else(|| (self.missing_font(font_name), None));
-        let handle = self.load_pdf_font(&font)?;
+        let resources = self.current_state()?.resources.clone();
+        let (handle, nested_resources) = self.load_named_font(font_name, resources.as_deref())?;
         let text_state = &mut self.current_state_mut()?.text_state;
+        text_state.font_spec = Some(Arc::clone(handle.shared_spec()));
         text_state.font = Some(handle);
-        text_state.font_spec = Some(font);
         text_state.resources = nested_resources;
         text_state.style.font_size = size;
         Ok(())

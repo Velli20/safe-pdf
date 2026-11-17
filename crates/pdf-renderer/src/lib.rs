@@ -64,7 +64,7 @@ pub enum PdfRendererError {
     PdfCanvasError(#[source] pdf_utils::TracedError<pdf_canvas::error::PdfCanvasError>),
     #[error("Failed to read page content stream: {0}")]
     ContentStream(#[from] ObjectReadError),
-    #[error("Failed to build a field font program: {0}")]
+    #[error("Failed to encode or lay out text: {0}")]
     Text(#[from] pdf_text_engine::TextError),
 }
 
