@@ -25,6 +25,7 @@ use crate::font::{
     FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
     FontProgramFormat, FontSource, GlyphGeometry, GlyphId, GlyphName,
 };
+use crate::glyph_name_to_unicode::glyph_name_to_unicode;
 use crate::pdf_path_pen::PdfPathPen;
 use crate::query_cache::QueryCache;
 
@@ -77,6 +78,52 @@ impl<'a> TrueTypeProgramRef<'a> {
             .ok()?
             .map_codepoint(code)?;
         (glyph.to_u32() != 0).then(|| GlyphId(glyph.to_u32()))
+    }
+
+    /// Looks a one-byte simple-font code up in the code-keyed cmap subtables.
+    ///
+    /// Tries a (3,0) Microsoft Symbol subtable, directly and in the `0xF000` private-use
+    /// range, then a (1,0) Macintosh Roman subtable. If neither has the code, it falls back
+    /// to the Unicode charmaps PDFium uses by default: a Unicode-platform subtable, then a
+    /// (3,1) Windows Unicode subtable.
+    ///
+    /// skrifa's charmap skips format 0 subtables, so this method resolves the codes of a font
+    /// whose only cmap is a byte-keyed Unicode-platform table.
+    fn glyph_for_code(&self, code: u8) -> Option<GlyphId> {
+        let code = u32::from(code);
+        self.code_glyph(PlatformId::Windows, Some(0), code)
+            .or_else(|| self.code_glyph(PlatformId::Windows, Some(0), 0xF000 | code))
+            .or_else(|| self.code_glyph(PlatformId::Macintosh, Some(0), code))
+            .or_else(|| self.code_glyph(PlatformId::Unicode, None, code))
+            .or_else(|| self.code_glyph(PlatformId::Windows, Some(1), code))
+    }
+
+    /// Resolves a PDF encoding glyph name.
+    ///
+    /// A TrueType font addresses its glyphs by Unicode when it has a (3,1) Windows Unicode cmap,
+    /// so the name's Unicode value is looked up there first. A subset may reuse the slot of a
+    /// glyph whose `post` name differs from the encoding name, so the `post` names are only a
+    /// fallback for names the cmap does not resolve.
+    fn glyph_for_name(&self, name: &GlyphName) -> Option<GlyphId> {
+        glyph_name_to_unicode(name.0.as_ref())
+            .and_then(|character| {
+                self.code_glyph(PlatformId::Windows, Some(1), u32::from(character))
+            })
+            .or_else(|| self.glyph_for_post_name(name))
+    }
+
+    /// Scans the `post` glyph names without reparsing the font container.
+    fn glyph_for_post_name(&self, name: &GlyphName) -> Option<GlyphId> {
+        self.glyph_names
+            .as_ref()?
+            .iter()
+            .find_map(|(glyph, candidate)| {
+                // `skrifa` invents `gidNNN` names for fonts without real
+                // PostScript names. Synthetic names are not valid PDF name
+                // mappings and must remain lookup misses.
+                (!candidate.is_synthesized() && candidate.as_str().as_bytes() == name.0.as_ref())
+                    .then_some(GlyphId(glyph.to_u32()))
+            })
     }
 }
 
@@ -207,27 +254,11 @@ impl TrueTypeFontFace {
             return glyph;
         }
 
-        let glyph = self.find_glyph_name(name);
+        let glyph = self.program.borrow_dependent().glyph_for_name(name);
         // Cache misses as well as hits because malformed PDFs often repeat the
         // same unavailable encoding name across multiple text operators.
         self.glyphs_by_name.insert(name.clone(), glyph);
         glyph
-    }
-
-    /// Scans the retained name provider without reparsing the font container.
-    fn find_glyph_name(&self, name: &GlyphName) -> Option<GlyphId> {
-        self.program
-            .borrow_dependent()
-            .glyph_names
-            .as_ref()?
-            .iter()
-            .find_map(|(glyph, candidate)| {
-                // `skrifa` invents `gidNNN` names for fonts without real
-                // PostScript names. Synthetic names are not valid PDF name
-                // mappings and must remain lookup misses.
-                (!candidate.is_synthesized() && candidate.as_str().as_bytes() == name.0.as_ref())
-                    .then_some(GlyphId(glyph.to_u32()))
-            })
     }
 }
 
@@ -257,20 +288,8 @@ impl FontFace for TrueTypeFontFace {
         self.resolve_glyph_name(name)
     }
 
-    /// Looks the code up in a (3,0) Microsoft Symbol subtable, directly and in the `0xF000`
-    /// private-use range, then in a (1,0) Macintosh Roman subtable, and finally in a
-    /// Unicode-platform subtable, the default charmap of fonts that carry neither.
-    ///
-    /// skrifa's charmap skips format 0 subtables, so a font whose only cmap is a byte-keyed
-    /// Unicode-platform table resolves its codes here.
     fn glyph_for_code(&self, code: u8) -> Option<GlyphId> {
-        let program = self.program.borrow_dependent();
-        let code = u32::from(code);
-        program
-            .code_glyph(PlatformId::Windows, Some(0), code)
-            .or_else(|| program.code_glyph(PlatformId::Windows, Some(0), 0xF000 | code))
-            .or_else(|| program.code_glyph(PlatformId::Macintosh, Some(0), code))
-            .or_else(|| program.code_glyph(PlatformId::Unicode, None, code))
+        self.program.borrow_dependent().glyph_for_code(code)
     }
 
     fn horizontal_advance(&self, glyph: GlyphId) -> Result<Option<f32>, FontError> {
@@ -392,4 +411,78 @@ fn parse_font(
             FontError::MissingFace { face_index }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds an sfnt whose only table is a `cmap` with one (3,1) format 6 subtable mapping
+    /// each code in `1..=69` to the glyph with the same identifier.
+    fn windows_unicode_only_font() -> Vec<u8> {
+        let mut subtable = Vec::new();
+        // Format, length (10 header bytes and 69 two-byte entries), language, first code,
+        // entry count.
+        for field in [6_u16, 148, 0, 1, 69] {
+            subtable.extend_from_slice(&field.to_be_bytes());
+        }
+        for glyph in 1_u16..=69 {
+            subtable.extend_from_slice(&glyph.to_be_bytes());
+        }
+
+        let mut cmap = Vec::new();
+        for field in [0_u16, 1, 3, 1] {
+            cmap.extend_from_slice(&field.to_be_bytes());
+        }
+        cmap.extend_from_slice(&12_u32.to_be_bytes());
+        cmap.extend_from_slice(&subtable);
+
+        let mut font = Vec::new();
+        font.extend_from_slice(&0x0001_0000_u32.to_be_bytes());
+        for field in [1_u16, 16, 0, 0] {
+            font.extend_from_slice(&field.to_be_bytes());
+        }
+        font.extend_from_slice(b"cmap");
+        font.extend_from_slice(&0_u32.to_be_bytes());
+        font.extend_from_slice(&28_u32.to_be_bytes());
+        font.extend_from_slice(&u32::try_from(cmap.len()).unwrap().to_be_bytes());
+        font.extend_from_slice(&cmap);
+        font
+    }
+
+    #[test]
+    fn symbolic_code_resolves_through_windows_unicode_cmap() {
+        let data = windows_unicode_only_font();
+        let font = FontRef::new(&data).unwrap();
+        let program = TrueTypeProgramRef {
+            outlines: font.outline_glyphs(),
+            glyph_names: None,
+            font,
+        };
+
+        assert_eq!(program.glyph_for_code(0x18), Some(GlyphId(0x18)));
+        assert_eq!(program.glyph_for_code(0x46), None);
+    }
+
+    #[test]
+    fn encoding_name_resolves_through_windows_unicode_cmap() {
+        let data = windows_unicode_only_font();
+        let font = FontRef::new(&data).unwrap();
+        let program = TrueTypeProgramRef {
+            outlines: font.outline_glyphs(),
+            glyph_names: None,
+            font,
+        };
+
+        let name = |name: &[u8]| {
+            GlyphName(pdf_object_reader::inline_bytes::InlineBytes::from_bytes(
+                name,
+            ))
+        };
+        assert_eq!(
+            program.glyph_for_name(&name(b"hyphen")),
+            Some(GlyphId(0x2D))
+        );
+        assert_eq!(program.glyph_for_name(&name(b"g99")), None);
+    }
 }

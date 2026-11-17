@@ -4,7 +4,7 @@ use pdf_graphics::{CanvasPaint, pdf_path::PdfPath, transform::Transform};
 use pdf_resources::{color_transfer::ColorTransferTables, pattern::Pattern, resources::Resources};
 use std::sync::Arc;
 
-use crate::{mask_layer::MaskLayer, text_state::TextState};
+use crate::{CanvasPath, mask_layer::MaskLayer, text_state::TextState};
 
 /// Represents the complete graphics state for a PDF canvas, including
 /// transformation, color, stroke, text, and pattern information.
@@ -23,7 +23,7 @@ pub(crate) struct CanvasState {
     /// The current text state, encapsulating font, size, and text matrix.
     pub text_state: TextState,
     /// The current clipping path, if any, restricting drawing to a region.
-    pub clip_path: Option<PdfPath>,
+    pub clip_path: Option<CanvasPath<'static>>,
     /// The current resource dictionary, overriding the page's resources if set.
     pub resources: Option<Arc<Resources>>,
     /// The current pattern used for filling.

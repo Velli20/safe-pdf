@@ -471,7 +471,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     pub(crate) fn pattern_bbox_clip(
         &self,
         for_stroke: bool,
-    ) -> Result<Option<PdfPath>, PdfCanvasError> {
+    ) -> Result<Option<CanvasPath<'static>>, PdfCanvasError> {
         let state = self.current_state()?;
         let pattern = if for_stroke {
             &state.stroke_pattern
@@ -480,7 +480,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         };
         Ok(match pattern.as_deref() {
             Some(pattern @ Pattern::Shading { shading, .. }) => {
-                shading_bbox_clip(shading, &Self::pattern_transform(state, pattern))
+                shading_bbox_clip(shading, &Self::pattern_transform(state, pattern))?
             }
             _ => None,
         })
@@ -751,25 +751,22 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         path: PdfPath,
         mode: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let path =
-            CanvasPath::transformed(&path, self.current_state()?.transform)?.to_pdf_path()?;
-
-        self.canvas
-            .set_clip_region(&CanvasPath::device(&path), mode)?;
+        let path = CanvasPath::shared(Arc::new(path), self.current_state()?.transform)?;
+        self.canvas.set_clip_region(&path, mode)?;
         self.current_state_mut()?.clip_path = Some(path);
         Ok(())
     }
 
-    /// Appends a glyph outline (already in device space) to the pending text clip accumulator.
+    /// Appends a glyph outline, mapped into device space, to the pending text clip accumulator.
     ///
     /// Call this for every glyph rendered with a clip mode (4–7). The accumulated path
     /// is applied as a clip region when the text object ends via `end_text_object`.
-    pub(crate) fn add_to_text_clip(&mut self, path: &PdfPath) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
-        match &mut state.pending_text_clip {
-            Some(clip) => clip.extend(path),
-            slot => *slot = Some(path.clone()),
-        }
+    pub(crate) fn add_to_text_clip(&mut self, path: &CanvasPath<'_>) -> Result<(), PdfCanvasError> {
+        let clip = self
+            .current_state_mut()?
+            .pending_text_clip
+            .get_or_insert_with(PdfPath::default);
+        path.extend_into(clip)?;
         Ok(())
     }
 

@@ -1,7 +1,6 @@
 use pdf_graphics::{
     CanvasPaint, DashPattern, LineCap, LineJoin,
     dash_pattern::DashPatternError,
-    pdf_path::PdfPath,
     transform::{Transform, TransformError},
 };
 
@@ -70,18 +69,16 @@ impl StrokeStyle {
     ///
     /// A backend strokes the returned geometry with the line width and dash lengths, under
     /// [`StrokeStyle::transform`], so that the outline matches a stroke in user space.
-    pub fn stroke_space_path(
+    pub fn stroke_space_path<'p>(
         &self,
-        path: &CanvasPath<'_>,
+        path: &'p CanvasPath<'_>,
         line_width: f32,
-    ) -> Result<Option<PdfPath>, TransformError> {
+    ) -> Result<Option<CanvasPath<'p>>, TransformError> {
         if line_width <= 0.0 || self.transform.is_similarity() {
             return Ok(None);
         }
         let inverse = self.transform.try_inverse()?;
-        let mut stroke_space = path.to_pdf_path()?;
-        stroke_space.transform(&inverse);
-        Ok(Some(stroke_space))
+        path.remapped(&inverse).map(Some)
     }
 
     /// Returns a stroke style scaled into the same coordinate space as the stroked path.

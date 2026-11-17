@@ -235,82 +235,6 @@ impl PdfPath {
     pub fn close(&mut self) {
         self.verbs.push(PathVerb::Close);
     }
-
-    /// Appends all verbs from `other` into this path.
-    ///
-    /// Useful for accumulating multiple glyph outlines (already transformed to device space)
-    /// into a single path, e.g. when building a text clip region.
-    pub fn extend(&mut self, other: &PdfPath) {
-        self.verbs.extend_from_slice(&other.verbs);
-        // Update current point from the last verb of the other path.
-        for verb in other.verbs.iter().rev() {
-            match *verb {
-                PathVerb::MoveTo { x, y } | PathVerb::LineTo { x, y } => {
-                    self.current_x = x;
-                    self.current_y = y;
-                    break;
-                }
-                PathVerb::CubicTo { x3, y3, .. } => {
-                    self.current_x = x3;
-                    self.current_y = y3;
-                    break;
-                }
-                PathVerb::QuadTo { x2, y2, .. } => {
-                    self.current_x = x2;
-                    self.current_y = y2;
-                    break;
-                }
-                PathVerb::Close => {}
-            }
-        }
-    }
-
-    pub fn transform(&mut self, transform: &Transform) {
-        for verb in &mut self.verbs {
-            match verb {
-                PathVerb::MoveTo { x, y } => {
-                    let (xt, yt) = transform.transform_point(*x, *y);
-                    *x = xt;
-                    *y = yt;
-                }
-                PathVerb::LineTo { x, y } => {
-                    let (xt, yt) = transform.transform_point(*x, *y);
-                    *x = xt;
-                    *y = yt;
-                }
-                PathVerb::CubicTo {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    x3,
-                    y3,
-                } => {
-                    let (x1t, y1t) = transform.transform_point(*x1, *y1);
-                    let (x2t, y2t) = transform.transform_point(*x2, *y2);
-                    let (x3t, y3t) = transform.transform_point(*x3, *y3);
-                    *x1 = x1t;
-                    *y1 = y1t;
-                    *x2 = x2t;
-                    *y2 = y2t;
-                    *x3 = x3t;
-                    *y3 = y3t;
-                }
-                PathVerb::QuadTo { x1, y1, x2, y2 } => {
-                    let (x1t, y1t) = transform.transform_point(*x1, *y1);
-                    let (x2t, y2t) = transform.transform_point(*x2, *y2);
-                    *x1 = x1t;
-                    *y1 = y1t;
-                    *x2 = x2t;
-                    *y2 = y2t;
-                }
-                PathVerb::Close => {}
-            }
-        }
-        let (current_x, current_y) = transform.transform_point(self.current_x, self.current_y);
-        self.current_x = current_x;
-        self.current_y = current_y;
-    }
 }
 
 #[cfg(test)]
@@ -456,24 +380,6 @@ mod tests {
             delta <= f32::EPSILON * 16.0,
             "expected {expected}, got {actual}"
         );
-    }
-
-    #[test]
-    fn transform_updates_verbs_and_current_point() {
-        let mut path = PdfPath::default();
-        path.move_to(1.0, 2.0);
-        path.line_to(3.0, 4.0);
-
-        path.transform(&crate::transform::Transform::from_translate(10.0, 20.0));
-
-        assert_eq!(
-            path.verbs,
-            vec![
-                PathVerb::MoveTo { x: 11.0, y: 22.0 },
-                PathVerb::LineTo { x: 13.0, y: 24.0 },
-            ]
-        );
-        assert_eq!(path.current_point(), Some((13.0, 24.0)));
     }
 
     #[test]

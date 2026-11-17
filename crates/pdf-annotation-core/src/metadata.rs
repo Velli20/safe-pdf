@@ -71,11 +71,13 @@ impl AnnotationMetadata {
         }
     }
 
-    /// Whether live flags permit screen display. Does not mutate state or panic.
+    /// Whether live flags permit screen display: neither hidden nor no-view. The invisible
+    /// flag only applies to unsupported subtypes without an appearance, so it is checked
+    /// with the annotation's content. Does not mutate state or panic.
     pub fn is_visible(&self) -> bool {
-        !self.flags.intersects(
-            AnnotationFlags::INVISIBLE | AnnotationFlags::HIDDEN | AnnotationFlags::NO_VIEW,
-        )
+        !self
+            .flags
+            .intersects(AnnotationFlags::HIDDEN | AnnotationFlags::NO_VIEW)
     }
 
     /// Whether flags permit interactive geometry changes for a visible annotation.
