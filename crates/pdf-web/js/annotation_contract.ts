@@ -2128,7 +2128,12 @@ painted: boolean,
  * from each side of the widget: the border width, doubled for a beveled or inset
  * border. Zero for other controls.
  */
-text_inset: number, };
+text_inset: number,
+/**
+ * The number of equally wide cells a comb text field spaces its characters into, one
+ * each; `None` for other controls.
+ */
+comb: number | null, };
 
 /**
  * Owned WidgetFieldValue data retained from the source PDF.

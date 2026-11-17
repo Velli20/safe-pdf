@@ -68,6 +68,7 @@ impl Annotation {
                 .unwrap_or(0),
             painted: painted_state.is_some() && self.has_normal_appearance(),
             text_inset: 0.0,
+            comb: self.comb_cells(field),
         };
         if let Some(text) = self.variable_text(field) {
             model.painted = true;

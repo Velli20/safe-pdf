@@ -6,6 +6,7 @@ use crate::{
     pdf_data::BorderStyleName,
     style::{Alignment, DefaultAppearance},
 };
+use num_traits::ToPrimitive;
 use pdf_graphics::color::Color;
 use std::sync::Arc;
 
@@ -27,6 +28,20 @@ pub struct VariableText {
     pub inset: f32,
     /// Whether the value wraps onto several lines.
     pub multiline: bool,
+    /// The number of equally wide cells a comb field spaces its characters into, one each;
+    /// `None` for other fields.
+    pub comb: Option<u32>,
+}
+
+impl VariableText {
+    /// The width of each cell of a comb field whose appearance box is `width` wide: the
+    /// box less the text inset on each side, divided evenly between the cells. `None` for
+    /// other fields.
+    #[must_use]
+    pub fn comb_cell_width(&self, width: f32) -> Option<f32> {
+        let cells = self.comb?.to_f32()?;
+        Some((width - self.inset * 2.0) / cells)
+    }
 }
 
 impl Annotation {
@@ -35,6 +50,7 @@ impl Annotation {
     /// font. `None` for other widgets and annotations.
     pub(crate) fn variable_text(&self, field: &Field) -> Option<VariableText> {
         let definition = &field.definition;
+        let comb = self.comb_cells(field);
         let (value, multiline) = match &definition.content {
             FieldKind::Text(_) if definition.read_only => return None,
             FieldKind::Text(text) => match text.mode {
@@ -71,6 +87,7 @@ impl Annotation {
             alignment: style.alignment,
             inset: self.text_inset(style.border_width),
             multiline,
+            comb,
         })
     }
 
@@ -90,6 +107,17 @@ impl Annotation {
         } else {
             border_width
         }
+    }
+
+    /// The cells of this widget, bound to `field`, when it is a comb field: a single-line
+    /// text field with the comb flag and a positive `/MaxLen`, which is its cell count.
+    pub(crate) fn comb_cells(&self, field: &Field) -> Option<u32> {
+        let FieldKind::Text(text) = &field.definition.content else {
+            return None;
+        };
+        (text.mode == TextMode::SingleLine && self.source_widget()?.is_comb())
+            .then_some(text.max_length?)
+            .filter(|cells| *cells > 0)
     }
 
     /// Whether `field`, this widget's bound text field, still holds the source `/V`, which

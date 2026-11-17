@@ -104,6 +104,7 @@ export class FormControl extends AnnotationComponent {
       this.revision ??= this.layer.snapshot?.annotationRevision;
       this.viewportRevision ??= this.layer.snapshot?.viewportRevision;
       if (this.phase !== EditPhase.Composing) this.phase = EditPhase.Draft;
+      this.updateCombStart(this.control());
     });
     this.listen(node, 'compositionstart', () => { this.phase = EditPhase.Composing; });
     this.listen(node, 'compositionend', () => {
@@ -195,6 +196,22 @@ export class FormControl extends AnnotationComponent {
     }
     style.lineHeight = String(this.layer.fieldFont(this.entry)?.lineHeight ?? LINE_SPACING);
     style.padding = `${p.text_inset}px`;
+    style.fontKerning = p.comb == null ? '' : 'normal';
+    this.updateCombStart(p);
+  }
+
+  /** Starts a comb field's characters in the cell the canvas paints the first one in: the
+   * first cell, the cell that leaves the remaining cells after the value, or the middle of
+   * those, by the field's alignment. The field font spaces the characters one per cell.
+   * @param {import('./annotation_contract').WidgetControl} p */
+  updateCombStart(p) {
+    const node = this.node, cells = p.comb;
+    if (cells == null || !(node instanceof HTMLInputElement)) return;
+    const cell = (this.entry.size.width - 2 * p.text_inset) / cells;
+    const free = Math.max(cells - [...node.value].length, 0);
+    const start = { left: 0, center: Math.floor(free / 2), right: free }[this.entry.style.alignment];
+    node.style.textAlign = 'left';
+    node.style.paddingLeft = `${p.text_inset + start * cell}px`;
   }
 
   /** Rotates the control by its `/MK /R` angle; quarter turns swap its sides so the rotated box still covers the widget rectangle.

@@ -8,28 +8,36 @@
 //! the PDF widths, and the naming and metrics tables browsers require.
 
 use read_fonts::{FontRef, TableProvider, ps::cff::CffFontRef};
+use std::collections::BTreeMap;
 use write_fonts::{
     BuilderError, FontBuilder, OffsetMarker,
     from_obj::ToOwnedTable,
     tables::{
         cmap::Cmap,
+        gpos::{Gpos, PositionLookup, PositionLookupList, SinglePos, ValueRecord},
         head::Head,
         hhea::Hhea,
         hmtx::{Hmtx, LongMetric},
+        layout::{
+            CoverageTable, Feature, FeatureList, FeatureRecord, LangSys, Lookup, LookupFlag,
+            Script, ScriptList, ScriptRecord,
+        },
         maxp::Maxp,
         name::{Name, NameRecord},
         os2::Os2,
         post::Post,
     },
-    types::{FWord, NameId, Tag, UfWord, Version16Dot16},
+    types::{FWord, GlyphId16, NameId, Tag, UfWord, Version16Dot16},
 };
 
 use crate::error::FontError;
 use crate::font::{FontProgramFormat, FontSource, GlyphId};
 use crate::pdf_font_handle::LineMetrics;
 
-/// Tables the host program rebuilds rather than copies from the drawing program.
-const REBUILT_TABLES: [Tag; 7] = [
+/// Tables the host program rebuilds, or leaves out, rather than copies from the drawing
+/// program. PDF text is drawn without the program's kerning and glyph substitutions, so
+/// a host must not apply them either.
+const REBUILT_TABLES: [Tag; 10] = [
     Tag::new(b"cmap"),
     Tag::new(b"hhea"),
     Tag::new(b"hmtx"),
@@ -37,7 +45,14 @@ const REBUILT_TABLES: [Tag; 7] = [
     Tag::new(b"OS/2"),
     Tag::new(b"post"),
     Tag::new(b"DSIG"),
+    Tag::new(b"GPOS"),
+    Tag::new(b"GSUB"),
+    Tag::new(b"kern"),
 ];
+/// The feature a host applies by default that centres comb glyphs in their cells.
+const KERN: Tag = Tag::new(b"kern");
+/// Scripts the comb centring feature is registered for, in tag order.
+const COMB_SCRIPTS: [Tag; 2] = [Tag::new(b"DFLT"), Tag::new(b"latn")];
 /// Tag of a bare CFF program's table in an OpenType container.
 const CFF: Tag = Tag::new(b"CFF ");
 /// Units per em of PDF glyph-space widths.
@@ -76,6 +91,10 @@ impl HostFontProgram {
     /// ascender and descender of `line` and no line gap, so a host lays lines out as the
     /// PDF text drawn in the font is.
     ///
+    /// With a `comb_cell` width, in thousandths of an em, every mapped glyph advances by
+    /// the cell and is positioned in the middle of it, as a comb field's characters are
+    /// drawn one per cell.
+    ///
     /// Returns `None` for a source this cannot rebuild: a Type 1, CID-keyed CFF, Type 3 or
     /// external program, or one whose tables are unreadable.
     ///
@@ -86,6 +105,7 @@ impl HostFontProgram {
         family: &str,
         glyphs: &[HostGlyph],
         line: LineMetrics,
+        comb_cell: Option<f32>,
     ) -> Result<Option<Self>, FontError> {
         let FontSource::Memory {
             data,
@@ -99,7 +119,7 @@ impl HostFontProgram {
             return Ok(None);
         };
         program
-            .build(family, glyphs, line)
+            .build(family, glyphs, line, comb_cell)
             .map(|data| {
                 Some(Self {
                     data,
@@ -220,6 +240,7 @@ impl<'a> DrawingProgram<'a> {
         family: &str,
         glyphs: &[HostGlyph],
         line: LineMetrics,
+        comb_cell: Option<f32>,
     ) -> Result<Vec<u8>, HostBuildError> {
         let units_per_em = self.units_per_em().ok_or(HostBuildError::Unreadable)?;
         let num_glyphs = self.num_glyphs().ok_or(HostBuildError::Unreadable)?;
@@ -230,7 +251,7 @@ impl<'a> DrawingProgram<'a> {
                 .ok()
                 .and_then(|index| metrics.get_mut(index))
             {
-                metric.advance = saturating_u16(glyph.advance * scale);
+                metric.advance = saturating_u16(comb_cell.unwrap_or(glyph.advance) * scale);
             }
         }
         let [x_min, y_min, x_max, y_max] = self.bounds();
@@ -246,6 +267,9 @@ impl<'a> DrawingProgram<'a> {
                 version: Version16Dot16::VERSION_3_0,
                 ..Post::default()
             })?;
+        if let Some(cell) = comb_cell {
+            builder.add_table(&comb_gpos(glyphs, cell, scale, num_glyphs))?;
+        }
         match self {
             Self::Sfnt(font) => {
                 // Outline, hinting and header tables are kept as they are; the digital
@@ -315,6 +339,38 @@ impl VerticalMetrics {
             descender: saturating_i16(line.descent * units),
         }
     }
+}
+
+/// The `GPOS` table centring each mapped glyph in a comb cell `cell` thousandths of an em
+/// wide, by the half of the cell its PDF advance leaves free, under the `kern` feature.
+fn comb_gpos(glyphs: &[HostGlyph], cell: f32, scale: f32, num_glyphs: u16) -> Gpos {
+    let placements: BTreeMap<u16, i16> = glyphs
+        .iter()
+        .filter_map(|glyph| {
+            let id = u16::try_from(glyph.glyph.0)
+                .ok()
+                .filter(|id| *id < num_glyphs)?;
+            Some((id, saturating_i16((cell - glyph.advance) * scale / 2.0)))
+        })
+        .collect();
+    let coverage: CoverageTable = placements.keys().copied().map(GlyphId16::new).collect();
+    let records = placements
+        .values()
+        .map(|placement| ValueRecord::new().with_x_placement(*placement))
+        .collect();
+    let lookup = PositionLookup::Single(Lookup::new(
+        LookupFlag::empty(),
+        vec![SinglePos::format_2(coverage, records)],
+    ));
+    let scripts = COMB_SCRIPTS
+        .into_iter()
+        .map(|tag| ScriptRecord::new(tag, Script::new(Some(LangSys::new(vec![0])), Vec::new())))
+        .collect();
+    Gpos::new(
+        ScriptList::new(scripts),
+        FeatureList::new(vec![FeatureRecord::new(KERN, Feature::new(None, vec![0]))]),
+        PositionLookupList::new(vec![lookup]),
+    )
 }
 
 /// The `cmap` mapping each character onto its glyph, leaving out glyphs the program lacks.
@@ -422,16 +478,20 @@ impl From<BuilderError> for HostBuildError {
 
 #[cfg(test)]
 mod tests {
-    use super::HostFontProgram;
+    use super::{HostFontProgram, HostGlyph};
     use crate::{
-        font::{FontProgramFormat, FontSource},
+        font::{FontProgramFormat, FontSource, GlyphId},
         pdf_font_handle::LineMetrics,
     };
     use bytes::Bytes;
-    use read_fonts::{FontRef, TableProvider};
+    use read_fonts::{
+        FontRef, TableProvider,
+        tables::gpos::{PositionLookup, SinglePos},
+        types::GlyphId as ReadGlyphId,
+    };
 
     #[test]
-    fn host_program_lays_lines_out_with_the_given_line_metrics() {
+    fn host_program_lays_lines_and_comb_cells_out_as_the_canvas_does() {
         let source = FontSource::Memory {
             data: Bytes::from_static(include_bytes!("../assets/FoxitSans.cff")),
             format: FontProgramFormat::Cff,
@@ -441,7 +501,7 @@ mod tests {
             ascent: 0.75,
             descent: -0.25,
         };
-        let program = HostFontProgram::new(&source, "pdf-field", &[], line)
+        let program = HostFontProgram::new(&source, "pdf-field", &[], line, None)
             .unwrap()
             .unwrap();
         assert_eq!(program.line_height(), 1.0);
@@ -454,5 +514,42 @@ mod tests {
         let os2 = font.os2().unwrap();
         assert_eq!(os2.s_typo_ascender(), hhea.ascender().to_i16());
         assert_eq!(os2.s_typo_descender(), hhea.descender().to_i16());
+
+        // A comb program advances a 250-unit glyph by the 1000-unit cell and places it
+        // in the middle of the cell.
+        let glyph = HostGlyph {
+            character: 'i',
+            glyph: GlyphId(1),
+            advance: 250.0,
+        };
+        let comb = HostFontProgram::new(&source, "pdf-comb", &[glyph], line, Some(1000.0))
+            .unwrap()
+            .unwrap();
+        let font = FontRef::new(comb.data()).unwrap();
+        let advance = font.hmtx().unwrap().advance(ReadGlyphId::new(1)).unwrap();
+        assert_eq!(f32::from(advance), units);
+        let lookup = font
+            .gpos()
+            .unwrap()
+            .lookup_list()
+            .unwrap()
+            .lookups()
+            .get(0)
+            .unwrap();
+        let single = match lookup {
+            PositionLookup::Single(lookup) => match lookup.subtables().get(0) {
+                Ok(SinglePos::Format2(single)) => Some(single),
+                _ => None,
+            },
+            _ => None,
+        }
+        .unwrap();
+        let placement = single
+            .value_records()
+            .get(0)
+            .unwrap()
+            .x_placement()
+            .unwrap();
+        assert_eq!(f32::from(placement), 375.0 * units / 1000.0);
     }
 }

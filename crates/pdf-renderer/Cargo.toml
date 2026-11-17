@@ -21,5 +21,6 @@ pdf-font = { path = "../pdf-font" }
 pdf-text-engine = { path = "../pdf-text-engine" }
 pdf-cmap = { path = "../pdf-cmap" }
 thiserror = "2.0.12"
+num-traits = "0.2.19"
 
 [dev-dependencies]

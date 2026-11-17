@@ -2,6 +2,7 @@
 //! appearance's `/Tx` marked content, which show the value the document was saved with,
 //! are replaced by operators showing the live value in the widget's `/DA` font.
 use crate::{PdfRenderer, PdfRendererError};
+use num_traits::ToPrimitive;
 use pdf_annotation_core::{PaintedAppearance, VariableText, style::Alignment};
 use pdf_canvas::{
     canvas_backend::CanvasBackend, font_selection::FontSelection, pdf_canvas::PdfCanvas,
@@ -47,8 +48,9 @@ impl PdfRenderer {
 
     /// The program of `appearance`'s `/DA` font on page `page_index`, mapped by Unicode
     /// onto the glyphs the value is painted with, for a host that shows the value being
-    /// edited in that font. `None` for an appearance without a live value and for a font
-    /// a host program cannot be built from.
+    /// edited in that font. A comb field's program spaces its glyphs one per cell, as the
+    /// value is painted. `None` for an appearance without a live value and for a font a
+    /// host program cannot be built from.
     ///
     /// # Errors
     /// Returns an error if the page is missing, the appearance's resources cannot be read,
@@ -71,9 +73,14 @@ impl PdfRenderer {
             self.form_resources().map(AsRef::as_ref),
         );
         let family = String::from_utf8_lossy(&text.font);
+        // The cell in thousandths of an em, the unit of PDF glyph widths.
+        let comb_cell = form
+            .bbox
+            .and_then(|bbox| text.comb_cell_width(bbox.normalized().width()))
+            .map(|cell| cell / text.font_size * 1000.0);
         Ok(self
             .font_system
-            .host_font_program(selection.spec(), &family)?)
+            .host_font_program(selection.spec(), &family, comb_cell)?)
     }
 }
 
@@ -203,6 +210,54 @@ impl<'a> ValueLayout<'a> {
         Some(())
     }
 
+    /// The encoded runs of the value with the point each starts at: one per line, or one
+    /// per character of a comb field. `None` when the font has no code for a character of
+    /// the value.
+    fn runs(&self) -> Option<Vec<(Vec<u8>, f32, f32)>> {
+        if let Some(cells) = self.text.comb {
+            return self.comb_runs(cells);
+        }
+        let lines = self.lines()?;
+        let baselines = self.baselines(lines.len());
+        Some(
+            lines
+                .into_iter()
+                .zip(baselines)
+                .map(|((codes, width), baseline)| {
+                    let x = self.line_start(width);
+                    (codes, x, baseline)
+                })
+                .collect(),
+        )
+    }
+
+    /// One run per character of a comb field's value, each centred in its own of `cells`
+    /// equal cells across the plate as viewers space comb text: the characters fill the
+    /// first cells, the last cells, or the cells nearest the middle under the value's
+    /// alignment. Characters beyond the last cell are left out.
+    fn comb_runs(&self, cells: u32) -> Option<Vec<(Vec<u8>, f32, f32)>> {
+        let characters = self.text.value.chars().take(usize::try_from(cells).ok()?);
+        let count = u32::try_from(characters.clone().count()).ok()?;
+        let free = cells.checked_sub(count)?;
+        let start = match self.text.alignment {
+            Alignment::Left => 0,
+            Alignment::Center => free / 2,
+            Alignment::Right => free,
+        };
+        let plate = self.plate();
+        let cell = self.text.comb_cell_width(self.bbox.width())?;
+        let baseline = self.baselines(1).next()?;
+        let mut buffer = [0; 4];
+        let mut runs = Vec::new();
+        for (index, character) in (start..).zip(characters) {
+            let codes = self.encoder.encode(character.encode_utf8(&mut buffer))?;
+            let center = plate.left + cell * (index.to_f32()? + 0.5);
+            let x = center - self.width(&codes) / 2.0;
+            runs.push((codes, x, baseline));
+        }
+        Some(runs)
+    }
+
     /// The left end of a line `width` wide under the value's alignment.
     fn line_start(&self, width: f32) -> f32 {
         let plate = self.plate();
@@ -237,7 +292,7 @@ impl<'a> ValueLayout<'a> {
     /// The operators showing the value, clipped to the plate; `None` when the font has no
     /// code for a character of the value.
     fn operators(&self) -> Option<Vec<Op>> {
-        let lines = self.lines()?;
+        let runs = self.runs()?;
         let plate = self.plate();
         let color = self.text.color;
         let mut operators = vec![
@@ -261,12 +316,12 @@ impl<'a> ValueLayout<'a> {
                 b: color.b,
             },
         ];
-        for ((codes, width), baseline) in lines.iter().zip(self.baselines(lines.len())) {
+        for (codes, x, baseline) in runs {
             if codes.is_empty() {
                 continue;
             }
             operators.push(Op::SetTextMatrix {
-                matrix: Transform::from_translate(self.line_start(*width), baseline),
+                matrix: Transform::from_translate(x, baseline),
             });
             operators.push(Op::ShowText {
                 text: PdfTextItem::Text(codes.as_slice().into()),

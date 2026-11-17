@@ -96,6 +96,9 @@ pub struct WidgetControl {
     /// from each side of the widget: the border width, doubled for a beveled or inset
     /// border. Zero for other controls.
     pub text_inset: f32,
+    /// The number of equally wide cells a comb text field spaces its characters into, one
+    /// each; `None` for other controls.
+    pub comb: Option<u32>,
 }
 
 /// One Core annotation projected into logical device coordinates for a host to present.
