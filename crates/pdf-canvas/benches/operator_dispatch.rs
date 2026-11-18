@@ -39,6 +39,17 @@ fn save_restore_stream(count: usize) -> ContentStream {
     parse(data)
 }
 
+/// Builds a stream that selects a dash, then strokes `count` lines with it.
+fn dashed_stroke_stream(count: usize) -> ContentStream {
+    let mut data = String::from("[3 1] 0 d\n");
+    for index in 0..count {
+        let x = index % 100;
+        let y = index / 100;
+        writeln!(data, "{x} {y} m 9 {y} l S").expect("writing to a string should succeed");
+    }
+    parse(data)
+}
+
 fn parse(data: String) -> ContentStream {
     let stream = StreamObject::new(1, 0, Dictionary::default(), data.into_bytes());
     pdf_object_reader::ObjectReader::new(EmptySource)
@@ -55,6 +66,7 @@ fn benchmark(c: &mut Criterion) {
             "dispatch/save_restore_5000_with_font_and_dash",
             save_restore_stream(5_000),
         ),
+        ("dispatch/dashed_strokes_5000", dashed_stroke_stream(5_000)),
     ] {
         c.bench_function(name, |bencher| {
             bencher.iter(|| {

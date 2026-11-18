@@ -16,10 +16,10 @@ fn replay_preserves_stroke_style() {
     path.move_to(0.0, 0.0);
     path.line_to(10.0, 0.0);
     let stroke_style = StrokeStyle {
-        dash_pattern: Some(DashPattern {
+        dash_pattern: Some(std::sync::Arc::new(DashPattern {
             intervals: vec![4.0, 2.0],
             phase: 1.0,
-        }),
+        })),
         line_cap: pdf_graphics::LineCap::Round,
         line_join: pdf_graphics::LineJoin::Bevel,
         miter_limit: 8.0,

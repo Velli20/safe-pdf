@@ -22,8 +22,8 @@ use pdf_document::page::PdfPage;
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec, Standard14Font};
 use pdf_graphics::{
-    AlphaConstant, BlendMode, Image, PaintMode, PathFillType, color::Color, pdf_path::PdfPath,
-    rect::Rect, size::Size, transform::Transform,
+    AlphaConstant, BlendMode, DashPattern, Image, PaintMode, PathFillType, color::Color,
+    pdf_path::PdfPath, rect::Rect, size::Size, transform::Transform,
 };
 use pdf_optional_content::OptionalContentState;
 
@@ -91,6 +91,11 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The last shading-pattern shader, reused while the same pattern fills at the same
     /// transform, such as across the glyphs of one text run.
     pattern_shading_cache: Option<(Arc<Pattern>, Transform, Shader)>,
+    /// The last dash pattern scaled into stroke space: the paint's pattern, the scale, and
+    /// the scaled result, reused while strokes keep the same dash at the same scale.
+    ///
+    /// Holding the source pattern keeps its address unique, so pointer equality identifies it.
+    scaled_dash_cache: Option<(Arc<DashPattern>, f32, Arc<DashPattern>)>,
     /// The current graphics state.
     pub(crate) state: CanvasState,
     /// Graphics states saved by `save`, innermost last.
@@ -170,6 +175,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             image_cache: Arc::default(),
             glyph_cache: HashMap::new(),
             pattern_shading_cache: None,
+            scaled_dash_cache: None,
             state,
             saved_states: Vec::new(),
             restore_floor: 0,
@@ -332,6 +338,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             image_cache: Arc::clone(&self.image_cache),
             glyph_cache: std::mem::take(&mut self.glyph_cache),
             pattern_shading_cache: None,
+            scaled_dash_cache: None,
             state: initial_state,
             saved_states: Vec::new(),
             restore_floor: 0,
@@ -621,12 +628,14 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             match self.compute_shader(true)? {
                 PatternPaint::Nothing => None,
                 pattern_paint => {
+                    let scale = self.state.transform.area_scale();
+                    let dash_pattern = self.scaled_dash_pattern(scale)?;
                     let state = &self.state;
                     Some((
                         state.paint.stroke_color,
                         state.paint.blend_mode,
-                        state.paint.line_width * state.transform.area_scale(),
-                        StrokeStyle::from_paint(&state.paint, &state.transform)?,
+                        state.paint.line_width * scale,
+                        StrokeStyle::new(&state.paint, &state.transform, dash_pattern),
                         pattern_paint.into_shader(),
                         self.pattern_bbox_clip(true)?,
                     ))
@@ -648,6 +657,31 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             }
             Ok(())
         })
+    }
+
+    /// Returns the current dash pattern scaled by `scale` into stroke space, or `None` for
+    /// a solid stroke.
+    ///
+    /// The last result is reused while the paint keeps the same pattern at the same scale.
+    ///
+    /// # Errors
+    /// Returns an error if the scaled intervals are invalid.
+    fn scaled_dash_pattern(
+        &mut self,
+        scale: f32,
+    ) -> Result<Option<Arc<DashPattern>>, PdfCanvasError> {
+        let Some(source) = &self.state.paint.dash_pattern else {
+            return Ok(None);
+        };
+        if let Some((cached_source, cached_scale, scaled)) = &self.scaled_dash_cache
+            && Arc::ptr_eq(cached_source, source)
+            && cached_scale.to_bits() == scale.to_bits()
+        {
+            return Ok(Some(Arc::clone(scaled)));
+        }
+        let scaled = Arc::new(source.scaled(scale)?);
+        self.scaled_dash_cache = Some((Arc::clone(source), scale, Arc::clone(&scaled)));
+        Ok(Some(scaled))
     }
 
     /// Borrows the backend for one painting operation with the currently selected mask.
