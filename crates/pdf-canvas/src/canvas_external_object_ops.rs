@@ -61,7 +61,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// the form's content stream with the form's transformation matrix.
     pub(crate) fn invoke_xobject(&mut self, xobject_name: &[u8]) -> Result<(), PdfCanvasError> {
         let resources = self
-            .current_state()?
+            .state
             .resources
             .clone()
             .ok_or(PdfCanvasError::PageResourcesMissing)?;
@@ -122,7 +122,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         form: &FormXObject,
         isolated: bool,
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state()?;
+        let state = &self.state;
         let alpha = state.paint.fill_color.a;
         let blend_mode = state
             .paint
@@ -139,7 +139,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         if self.content_hidden() {
             return Ok(());
         }
-        let mut initial_state = self.current_state()?.clone();
+        let mut initial_state = self.state.clone();
         initial_state.soft_mask = None;
         initial_state.paint.fill_color.a = 1.0;
         initial_state.paint.stroke_color.a = 1.0;
@@ -161,7 +161,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// image whose data cannot be decoded paints nothing, like an image XObject, as does
     /// one that names a color space missing from the current resources.
     pub(crate) fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), PdfCanvasError> {
-        let resources = self.current_state()?.resources.as_deref();
+        let resources = self.state.resources.as_deref();
         let image = match image.resolve(|name| resources?.color_space(name)) {
             Ok(Some(image)) => image,
             // Entries that do not fit the named color space leave nothing to draw, as they
@@ -199,9 +199,9 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         &mut self,
         paint: impl FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
     ) -> Result<(), PdfCanvasError> {
-        let mask = self.current_state_mut()?.soft_mask.take();
+        let mask = self.state.soft_mask.take();
         let result = paint(self);
-        self.current_state_mut()?.soft_mask = mask;
+        self.state.soft_mask = mask;
         result
     }
 
@@ -222,11 +222,11 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 PatternPaint::Nothing => return Ok(()),
                 PatternPaint::Color => {}
             }
-            let [r, g, b, _] = self.current_state()?.paint.fill_color.to_rgba8();
+            let [r, g, b, _] = self.state.paint.fill_color.to_rgba8();
             let stencil = stencil_image(image, [r, g, b])?;
             return self.render_decoded_image(&stencil, inline_image);
         }
-        if let Some(tables) = self.current_state()?.transfer.as_deref() {
+        if let Some(tables) = self.state.transfer.as_deref() {
             let transferred = transfer_colors(image, tables)?;
             return self.draw_decoded_image(&transferred, inline_image);
         }
@@ -240,7 +240,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         inline_image: bool,
     ) -> Result<(), PdfCanvasError> {
         let transform = self.image_transform()?;
-        let paint = &self.current_state()?.paint;
+        let paint = &self.state.paint;
         let blend_mode = paint.blend_mode.clone();
         // Images paint with the non-stroking alpha constant (`ca`).
         let alpha = paint.fill_color.a;
@@ -255,10 +255,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 
     /// Returns the matrix that places the current image's samples in device space.
     fn image_transform(&self) -> Result<Transform, PdfCanvasError> {
-        Ok(self
-            .current_state()?
-            .transform
-            .post_concatenated(&IMAGE_SPACE_Y_FLIP))
+        Ok(self.state.transform.post_concatenated(&IMAGE_SPACE_Y_FLIP))
     }
 
     /// Paints the fill pattern's `shader` where the image mask's coverage paints.
@@ -273,7 +270,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     ) -> Result<(), PdfCanvasError> {
         let clip = self.pattern_bbox_clip(false)?;
         let stencil = self.image_mask_layer(image, inline_image)?;
-        let state = self.current_state()?;
+        let state = &self.state;
         let area = CanvasPath::transformed(&PdfPath::from(&Rect::new(1.0, 1.0)), state.transform)?
             .into_owned();
         let (color, blend_mode) = (state.paint.fill_color, state.paint.blend_mode.clone());

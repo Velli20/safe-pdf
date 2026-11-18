@@ -82,9 +82,11 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The last shading-pattern shader, reused while the same pattern fills at the same
     /// transform, such as across the glyphs of one text run.
     pattern_shading_cache: Option<(Arc<Pattern>, Transform, Shader)>,
-    /// The stack of graphics states, supporting save/restore semantics.
-    pub(crate) canvas_stack: Vec<CanvasState>,
-    /// Stack depth that a restore in the current content stream may not pop below.
+    /// The current graphics state.
+    pub(crate) state: CanvasState,
+    /// Graphics states saved by `save`, innermost last.
+    saved_states: Vec<CanvasState>,
+    /// Number of saved states that a restore in the current content stream may not pop below.
     restore_floor: usize,
     /// Content streams being drawn, used to bound nesting and refuse cycles.
     content_stream_render_state: ContentStreamRenderState,
@@ -141,12 +143,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
         let transform = *viewport.page_to_device();
 
-        let canvas_stack = vec![CanvasState {
+        let state = CanvasState {
             transform,
             pattern_parent_transform: transform,
             text_state: TextState::default(),
             ..Default::default()
-        }];
+        };
 
         Ok(Self {
             current_path: None,
@@ -158,8 +160,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             image_cache: Arc::default(),
             glyph_cache: HashMap::new(),
             pattern_shading_cache: None,
-            canvas_stack,
-            restore_floor: 1,
+            state,
+            saved_states: Vec::new(),
+            restore_floor: 0,
             content_stream_render_state: ContentStreamRenderState::default(),
             text_glyphs: None,
             optional_content: None,
@@ -318,8 +321,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             image_cache: Arc::clone(&self.image_cache),
             glyph_cache: std::mem::take(&mut self.glyph_cache),
             pattern_shading_cache: None,
-            canvas_stack: vec![initial_state],
-            restore_floor: 1,
+            state: initial_state,
+            saved_states: Vec::new(),
+            restore_floor: 0,
             content_stream_render_state: std::mem::take(&mut self.content_stream_render_state),
             text_glyphs,
             optional_content: self
@@ -335,17 +339,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         self.content_stream_render_state = other.content_stream_render_state;
         self.text_glyphs = other.text_glyphs.or_else(|| self.text_glyphs.take());
         result.map(|()| recording_canvas)
-    }
-
-    /// Returns a reference to the current graphics state on the stack.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the graphics state stack is empty.
-    pub(crate) fn current_state(&self) -> Result<&CanvasState, PdfCanvasError> {
-        self.canvas_stack
-            .last()
-            .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
     /// Loads the font `name` selects for a content stream drawn with `resources`, as `Tf`
@@ -424,17 +417,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(outline)
     }
 
-    /// Returns a mutable reference to the current graphics state on the stack.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the graphics state stack is empty.
-    pub(crate) fn current_state_mut(&mut self) -> Result<&mut CanvasState, PdfCanvasError> {
-        self.canvas_stack
-            .last_mut()
-            .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
-    }
-
     /// Builds a shader from a parsed shading definition.
     ///
     /// # Parameters
@@ -475,7 +457,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         &self,
         for_stroke: bool,
     ) -> Result<Option<CanvasPath<'static>>, PdfCanvasError> {
-        let state = self.current_state()?;
+        let state = &self.state;
         let pattern = if for_stroke {
             &state.stroke_pattern
         } else {
@@ -498,7 +480,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         &mut self,
         for_stroke: bool,
     ) -> Result<PatternPaint, PdfCanvasError> {
-        let state: &CanvasState = self.current_state()?;
+        let state = &self.state;
         let pattern = if for_stroke {
             state.stroke_pattern.clone()
         } else {
@@ -553,7 +535,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
                 // The cell of an uncolored pattern is painted in the color selected
                 // together with the pattern.
-                let paint = &self.current_state()?.paint;
+                let paint = &self.state.paint;
                 let cell_color = match paint_type {
                     PaintType::Colored => None,
                     PaintType::Uncolored if for_stroke => Some(paint.stroke_color),
@@ -612,7 +594,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             match self.compute_shader(false)? {
                 PatternPaint::Nothing => None,
                 pattern_paint => {
-                    let paint = &self.current_state()?.paint;
+                    let paint = &self.state.paint;
                     Some((
                         paint.fill_color,
                         paint.blend_mode.clone(),
@@ -628,7 +610,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             match self.compute_shader(true)? {
                 PatternPaint::Nothing => None,
                 pattern_paint => {
-                    let state = self.current_state()?;
+                    let state = &self.state;
                     Some((
                         state.paint.stroke_color,
                         state.paint.blend_mode.clone(),
@@ -668,17 +650,17 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         if self.content_hidden() {
             return Ok(());
         }
-        let Some(mask) = self.current_state()?.soft_mask.clone() else {
-            return paint(self.canvas);
-        };
-        self.canvas.with_mask_layer(&mask, paint)
+        match &self.state.soft_mask {
+            Some(mask) => self.canvas.with_mask_layer(mask, paint),
+            None => paint(self.canvas),
+        }
     }
 
     /// Sets the alpha value for subsequent non-stroking paint operations.
     ///
     /// This updates only the fill alpha component in the current graphics state.
     pub fn set_non_stroking_alpha(&mut self, alpha: AlphaConstant) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.fill_color.a = alpha.value();
+        self.state.paint.fill_color.a = alpha.value();
         Ok(())
     }
 
@@ -686,13 +668,13 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ///
     /// This updates only the stroke alpha component in the current graphics state.
     pub fn set_stroking_alpha(&mut self, alpha: AlphaConstant) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.stroke_color.a = alpha.value();
+        self.state.paint.stroke_color.a = alpha.value();
         Ok(())
     }
 
     /// Sets the blend mode for subsequent paint operations.
     pub fn set_blend_mode(&mut self, blend_mode: Option<BlendMode>) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.blend_mode = blend_mode;
+        self.state.paint.blend_mode = blend_mode;
         Ok(())
     }
 
@@ -718,7 +700,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             return Ok(());
         };
         if let Some((mode, fill_type)) = paint {
-            let device_path = CanvasPath::transformed(&path, self.current_state()?.transform)?;
+            let device_path = CanvasPath::transformed(&path, self.state.transform)?;
             self.draw_path(&device_path, mode, fill_type)?;
         }
         match pending_clip {
@@ -742,9 +724,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         path: PdfPath,
         mode: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let path = CanvasPath::shared(Arc::new(path), self.current_state()?.transform)?;
+        let path = CanvasPath::shared(Arc::new(path), self.state.transform)?;
         self.canvas.set_clip_region(&path, mode)?;
-        self.current_state_mut()?.clip_path = Some(path);
+        self.state.clip_path = Some(path);
         Ok(())
     }
 
@@ -754,7 +736,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// is applied as a clip region when the text object ends via `end_text_object`.
     pub(crate) fn add_to_text_clip(&mut self, path: &CanvasPath<'_>) -> Result<(), PdfCanvasError> {
         let clip = self
-            .current_state_mut()?
+            .state
             .pending_text_clip
             .get_or_insert_with(PdfPath::default);
         path.extend_into(clip)?;
@@ -772,7 +754,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Returns an error if the pattern is not found in the resources.
     pub(crate) fn set_fill_pattern(&mut self, pattern_name: &[u8]) -> Result<(), PdfCanvasError> {
         let Some(pattern) = self
-            .current_state()?
+            .state
             .resources
             .as_ref()
             .and_then(|r| r.pattern(pattern_name))
@@ -781,7 +763,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 String::from_utf8_lossy(pattern_name).into_owned(),
             ));
         };
-        self.current_state_mut()?.fill_pattern = Some(pattern);
+        self.state.fill_pattern = Some(pattern);
         Ok(())
     }
 
@@ -796,7 +778,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Returns an error if the pattern is not found in the resources.
     pub(crate) fn set_stroke_pattern(&mut self, pattern_name: &[u8]) -> Result<(), PdfCanvasError> {
         let Some(pattern) = self
-            .current_state()?
+            .state
             .resources
             .as_ref()
             .and_then(|r| r.pattern(pattern_name))
@@ -805,7 +787,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 String::from_utf8_lossy(pattern_name).into_owned(),
             ));
         };
-        self.current_state_mut()?.stroke_pattern = Some(pattern);
+        self.state.stroke_pattern = Some(pattern);
         Ok(())
     }
 
@@ -858,13 +840,13 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         resources: Option<Arc<Resources>>,
         mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
-        let depth = self.canvas_stack.len();
+        let depth = self.saved_states.len();
         let marked_content_depth = self
             .optional_content
             .as_ref()
             .map(OptionalContentFilter::depth);
         self.save()?;
-        let outer_floor = std::mem::replace(&mut self.restore_floor, self.canvas_stack.len());
+        let outer_floor = std::mem::replace(&mut self.restore_floor, self.saved_states.len());
 
         let result = (|| {
             if let Some(mat) = mat {
@@ -872,10 +854,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 // PDF spec: invoking a form XObject with its /Matrix entry performs a
                 // concatenation like the 'cm' operator does. The operation is:
                 //   CTM' = CTM * FormMatrix
-                self.current_state_mut()?.transform.post_concat(&mat);
+                self.state.transform.post_concat(&mat);
             }
 
-            let state = self.current_state_mut()?;
+            let state = &mut self.state;
             state.pattern_parent_transform = state.transform;
 
             if let Some(bbox) = bbox {
@@ -884,7 +866,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             }
 
             if let Some(resources) = resources {
-                self.current_state_mut()?.resources = Some(resources);
+                self.state.resources = Some(resources);
             }
 
             for op in &content_stream.operators {
@@ -906,11 +888,11 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         result.and(restore_result)
     }
 
-    /// Restores saved graphics states until the stack is `depth` states deep.
+    /// Restores saved graphics states until `depth` states remain saved.
     ///
     /// Stops at the first failed restore, which leaves the stack unchanged.
     fn restore_to(&mut self, depth: usize) -> Result<(), PdfCanvasError> {
-        while self.canvas_stack.len() > depth.max(self.restore_floor) {
+        while self.saved_states.len() > depth.max(self.restore_floor) {
             self.restore()?;
         }
         Ok(())
@@ -921,9 +903,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// This includes the current transformation matrix, colors, line styles, and clipping path.
     /// A corresponding call to `restore` is required to pop the state from the stack.
     pub(crate) fn save(&mut self) -> Result<(), PdfCanvasError> {
-        let state = self.current_state()?.clone();
         self.canvas.save()?;
-        self.canvas_stack.push(state);
+        self.saved_states.push(self.state.clone());
         Ok(())
     }
 
@@ -934,14 +915,16 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         // Ignore unmatched restores: they may not pop the initial state, which has
         // no backend `save()`, nor states saved by the caller of the current
         // content stream. This keeps the canvas and backend stacks in sync.
-        if self.canvas_stack.len() <= self.restore_floor {
+        if self.saved_states.len() <= self.restore_floor {
             return Ok(());
         }
 
         // At this point the top state was saved within the current stream,
         // so popping is safe and has a matching backend `save()`.
         self.canvas.restore()?;
-        self.canvas_stack.pop();
+        if let Some(state) = self.saved_states.pop() {
+            self.state = state;
+        }
         Ok(())
     }
 
@@ -956,7 +939,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         name: &[u8],
         is_stroking: bool,
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         if is_stroking {
             state.stroke_pattern = None;
         } else {
@@ -1054,8 +1037,7 @@ mod tests {
             .expect("dash pattern should be valid");
 
         let dash_pattern = canvas
-            .current_state()
-            .expect("state should exist")
+            .state
             .paint
             .dash_pattern
             .as_ref()
@@ -1079,14 +1061,7 @@ mod tests {
             .set_dash_pattern(&[], 3.0)
             .expect("empty dash pattern should be valid");
 
-        assert!(
-            canvas
-                .current_state()
-                .expect("state should exist")
-                .paint
-                .dash_pattern
-                .is_none()
-        );
+        assert!(canvas.state.paint.dash_pattern.is_none());
     }
 
     #[test]
@@ -1104,8 +1079,7 @@ mod tests {
 
         assert!(result.is_err());
         let dash_pattern = canvas
-            .current_state()
-            .expect("state should exist")
+            .state
             .paint
             .dash_pattern
             .as_ref()
@@ -1139,13 +1113,7 @@ mod tests {
                 .expect("operator should apply");
         }
 
-        assert!(
-            canvas
-                .current_state()
-                .expect("state should exist")
-                .clip_path
-                .is_some()
-        );
+        assert!(canvas.state.clip_path.is_some());
     }
 
     #[test]
@@ -1221,10 +1189,7 @@ mod tests {
         let mut backend = RecordingCanvas::new(100.0, 100.0);
         let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
             .expect("canvas should build");
-        canvas
-            .current_state_mut()
-            .expect("state should exist")
-            .fill_pattern = Some(std::sync::Arc::new(pattern));
+        canvas.state.fill_pattern = Some(std::sync::Arc::new(pattern));
 
         let operators = [
             PdfOperatorVariant::Rectangle {

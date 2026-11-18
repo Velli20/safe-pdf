@@ -12,9 +12,7 @@ use std::sync::Arc;
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Handles `Td`: offsets the start of the next line.
     pub(crate) fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?
-            .text_state
-            .move_line_position(tx, ty);
+        self.state.text_state.move_line_position(tx, ty);
         Ok(())
     }
 
@@ -26,22 +24,20 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     ) -> Result<(), PdfCanvasError> {
         // TD: Set leading to -ty, then perform Td(tx, ty)
         let neg_ty = -ty;
-        self.current_state_mut()?.text_state.leading = neg_ty;
+        self.state.text_state.leading = neg_ty;
         self.move_text_position(tx, ty)
     }
 
     /// Handles `Tm`: sets the text and text line matrices.
     pub(crate) fn set_text_matrix(&mut self, transform: &Transform) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?
-            .text_state
-            .set_matrices(*transform);
+        self.state.text_state.set_matrices(*transform);
         Ok(())
     }
 
     /// Handles `T*`: moves to the start of the next line.
     pub(crate) fn move_to_start_of_next_line(&mut self) -> Result<(), PdfCanvasError> {
         // T*: Move to start of next line using current leading: Tlm = Tlm * T(0, -Tl); Tm = Tlm.
-        self.current_state_mut()?.text_state.move_to_next_line();
+        self.state.text_state.move_to_next_line();
         Ok(())
     }
 }
@@ -49,7 +45,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Handles `BT`: resets the text matrices.
     pub(crate) fn begin_text_object(&mut self) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.text_state.matrix = Transform::identity();
         state.text_state.line_matrix = Transform::identity();
         // Clear any stale clip accumulator (guards against a missing ET from a prior object).
@@ -61,12 +57,12 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     pub(crate) fn end_text_object(&mut self) -> Result<(), PdfCanvasError> {
         // Apply any glyph outlines accumulated for clip-mode text rendering (modes 4–7).
         // Per ISO 32000 §9.3.6, the clip path is set at the end of the text object.
-        if let Some(clip_path) = self.current_state_mut()?.pending_text_clip.take() {
+        if let Some(clip_path) = self.state.pending_text_clip.take() {
             let clip_path =
                 CanvasPath::shared(std::sync::Arc::new(clip_path), Transform::identity())?;
             self.canvas
                 .set_clip_region(&clip_path, pdf_graphics::PathFillType::Winding)?;
-            self.current_state_mut()?.clip_path = Some(clip_path);
+            self.state.clip_path = Some(clip_path);
         }
         Ok(())
     }
@@ -75,13 +71,13 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Handles `Tc`: sets the character spacing.
     pub(crate) fn set_character_spacing(&mut self, spacing: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.text_state.style.character_spacing = spacing;
+        self.state.text_state.style.character_spacing = spacing;
         Ok(())
     }
 
     /// Handles `Tw`: sets the word spacing.
     pub(crate) fn set_word_spacing(&mut self, spacing: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.text_state.style.word_spacing = spacing;
+        self.state.text_state.style.word_spacing = spacing;
         Ok(())
     }
 
@@ -90,14 +86,14 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         &mut self,
         scale_percent: f32,
     ) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.text_state.style.horizontal_scale = scale_percent / 100.0;
+        self.state.text_state.style.horizontal_scale = scale_percent / 100.0;
         Ok(())
     }
 
     /// Handles `TL`: sets the text leading.
     pub(crate) fn set_text_leading(&mut self, leading: f32) -> Result<(), PdfCanvasError> {
         // TL sets the text leading parameter
-        self.current_state_mut()?.text_state.leading = leading;
+        self.state.text_state.leading = leading;
         Ok(())
     }
 
@@ -108,9 +104,9 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         font_name: &[u8],
         size: f32,
     ) -> Result<(), PdfCanvasError> {
-        let resources = self.current_state()?.resources.clone();
+        let resources = self.state.resources.clone();
         let (handle, nested_resources) = self.load_named_font(font_name, resources.as_deref())?;
-        let text_state = &mut self.current_state_mut()?.text_state;
+        let text_state = &mut self.state.text_state;
         text_state.font_spec = Some(Arc::clone(handle.shared_spec()));
         text_state.font = Some(handle);
         text_state.resources = nested_resources;
@@ -123,13 +119,13 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         &mut self,
         mode: TextRenderingMode,
     ) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.rendering_mode = mode;
+        self.state.paint.rendering_mode = mode;
         Ok(())
     }
 
     /// Handles `Ts`: sets the text rise.
     pub(crate) fn set_text_rise(&mut self, rise: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.text_state.style.rise = rise;
+        self.state.text_state.style.rise = rise;
         Ok(())
     }
 }
@@ -151,7 +147,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         path: &std::sync::Arc<PdfPath>,
         transform: &Transform,
     ) -> Result<(), PdfCanvasError> {
-        let mode = self.current_state()?.paint.rendering_mode;
+        let mode = self.state.paint.rendering_mode;
         if matches!(mode, TextRenderingMode::Invisible) {
             return Ok(());
         }
@@ -202,7 +198,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         glyph: pdf_font::GlyphId,
         transform: &Transform,
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state()?;
+        let state = &self.state;
         let font = state
             .text_state
             .font_spec
@@ -235,7 +231,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         // current CTM. Temporarily use identity as that base so the page CTM
         // already present in `transform` is not applied a second time.
         self.save()?;
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.transform = Transform::identity();
         let result = self.render_content_stream(
             procedure,
@@ -253,7 +249,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         &mut self,
         items: &[PdfTextItem],
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state()?;
+        let state = &self.state;
         let font = state
             .text_state
             .font
@@ -303,9 +299,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 Ok::<(), PdfCanvasError>(())
             },
         )?;
-        self.current_state_mut()?
-            .text_state
-            .advance(advance.x, advance.y);
+        self.state.text_state.advance(advance.x, advance.y);
         Ok(())
     }
 }

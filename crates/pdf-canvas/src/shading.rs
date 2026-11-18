@@ -15,7 +15,7 @@ use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::Pd
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Prepares a shading paint and fills the current clip through the selected soft mask.
     pub(crate) fn paint_shading(&mut self, shading_name: &[u8]) -> Result<(), PdfCanvasError> {
-        let state = self.current_state()?;
+        let state = &self.state;
 
         let Some(shading) = state
             .resources

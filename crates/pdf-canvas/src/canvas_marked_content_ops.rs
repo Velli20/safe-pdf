@@ -19,10 +19,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             return Ok(());
         };
         // Optional content the resources do not declare stays visible.
-        let resources = self
-            .canvas_stack
-            .last()
-            .and_then(|state| state.resources.as_deref());
+        let resources = self.state.resources.as_deref();
         filter.begin(tag, || resources?.optional_content(properties?));
         Ok(())
     }

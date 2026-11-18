@@ -17,31 +17,31 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         //
         // With our `Transform` convention, `post_concat` performs a post-multiply:
         //   CTM_new = CTM_old × M_incoming
-        self.current_state_mut()?.transform.post_concat(transform);
+        self.state.transform.post_concat(transform);
         Ok(())
     }
 
     /// Updates the width used for subsequent path strokes.
     pub(crate) fn set_line_width(&mut self, width: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.line_width = width;
+        self.state.paint.line_width = width;
         Ok(())
     }
 
     /// Updates the end-cap style used for subsequent path strokes.
     pub(crate) fn set_line_cap(&mut self, cap_style: LineCap) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.line_cap = cap_style;
+        self.state.paint.line_cap = cap_style;
         Ok(())
     }
 
     /// Updates the corner-join style used for subsequent path strokes.
     pub(crate) fn set_line_join(&mut self, line_join: LineJoin) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.line_join = line_join;
+        self.state.paint.line_join = line_join;
         Ok(())
     }
 
     /// Updates the maximum miter length relative to stroke width.
     pub(crate) fn set_miter_limit(&mut self, miter_limit: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.miter_limit = miter_limit;
+        self.state.paint.miter_limit = miter_limit;
         Ok(())
     }
 
@@ -51,8 +51,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         dash_array: &[f32],
         dash_phase: f32,
     ) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.paint.dash_pattern =
-            DashPattern::new(dash_array.to_vec(), dash_phase)?;
+        self.state.paint.dash_pattern = DashPattern::new(dash_array.to_vec(), dash_phase)?;
         Ok(())
     }
 
@@ -62,7 +61,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         dict_name: &[u8],
     ) -> Result<(), PdfCanvasError> {
         let resources = self
-            .current_state()?
+            .state
             .resources
             .clone()
             .ok_or(PdfCanvasError::PageResourcesMissing)?;
@@ -74,29 +73,27 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 
         for state in &states.params {
             match state {
-                ExternalGraphicsStateKey::LineWidth(width) => {
-                    self.current_state_mut()?.paint.line_width = *width
-                }
+                ExternalGraphicsStateKey::LineWidth(width) => self.state.paint.line_width = *width,
                 ExternalGraphicsStateKey::LineCap(cap) => {
-                    self.current_state_mut()?.paint.line_cap = *cap;
+                    self.state.paint.line_cap = *cap;
                 }
                 ExternalGraphicsStateKey::LineJoin(join) => {
-                    self.current_state_mut()?.paint.line_join = *join;
+                    self.state.paint.line_join = *join;
                 }
                 ExternalGraphicsStateKey::MiterLimit(miter) => {
-                    self.current_state_mut()?.paint.miter_limit = *miter;
+                    self.state.paint.miter_limit = *miter;
                 }
                 ExternalGraphicsStateKey::DashPattern(dash_pattern) => {
-                    self.current_state_mut()?.paint.dash_pattern = Some(dash_pattern.clone());
+                    self.state.paint.dash_pattern = Some(dash_pattern.clone());
                 }
                 ExternalGraphicsStateKey::Font(font, font_size) => {
                     let resource = font.get()?;
                     if let Resource::Font { font, resources } = resource.as_ref() {
                         let handle = self.load_pdf_font(font)?;
-                        self.current_state_mut()?.text_state.font = Some(handle);
-                        self.current_state_mut()?.text_state.font_spec = Some(Arc::clone(font));
+                        self.state.text_state.font = Some(handle);
+                        self.state.text_state.font_spec = Some(Arc::clone(font));
                         if let Some(resources) = resources {
-                            self.current_state_mut()?.text_state.resources = Some(resources.get()?);
+                            self.state.text_state.resources = Some(resources.get()?);
                         }
                     } else {
                         return Err(PdfCanvasError::UnsupportedFeature(
@@ -104,10 +101,10 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                         ));
                     }
 
-                    self.current_state_mut()?.text_state.style.font_size = *font_size;
+                    self.state.text_state.style.font_size = *font_size;
                 }
                 ExternalGraphicsStateKey::BlendMode(mode) => {
-                    self.current_state_mut()?.paint.blend_mode = Some(mode.clone());
+                    self.state.paint.blend_mode = Some(mode.clone());
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
                     // Handle the `/SMask` entry from an `ExtGState` dictionary.
@@ -115,10 +112,10 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                         let smask = smask.get()?;
                         // An unusable mask leaves the current one in effect.
                         if let Some(layer) = self.soft_mask_layer(&smask)? {
-                            self.current_state_mut()?.soft_mask = Some(layer);
+                            self.state.soft_mask = Some(layer);
                         }
                     } else {
-                        self.current_state_mut()?.soft_mask = None;
+                        self.state.soft_mask = None;
                     }
                 }
                 ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
@@ -128,7 +125,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                     self.set_non_stroking_alpha(*alpha)?;
                 }
                 ExternalGraphicsStateKey::Transfer(transfer) => {
-                    self.current_state_mut()?.transfer = match transfer {
+                    self.state.transfer = match transfer {
                         ColorTransfer::Identity => None,
                         ColorTransfer::Tables(tables) => Some(Arc::clone(tables)),
                     };

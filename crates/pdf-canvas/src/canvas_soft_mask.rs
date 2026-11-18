@@ -78,7 +78,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             )
         })?;
         let transform = self
-            .current_state()?
+            .state
             .transform
             .post_concatenated(&Transform::from_translate(region.left, region.top));
         Ok(Some(MaskLayer::new(
@@ -99,7 +99,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             bottom: self.canvas.height(),
         };
         Ok(self
-            .current_state()?
+            .state
             .transform
             .try_inverse()
             .ok()
@@ -110,7 +110,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// graphics state unchanged.
     fn paint_backdrop(&mut self, color: Color, size: Size<f32>) -> Result<(), PdfCanvasError> {
         self.save()?;
-        self.current_state_mut()?.paint.set_fill_color(color);
+        self.state.paint.set_fill_color(color);
         self.rectangle(0.0, 0.0, size.width, size.height)?;
         self.end_path(Some((PaintMode::Fill, PathFillType::Winding)))?;
         self.restore()
