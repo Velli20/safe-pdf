@@ -31,3 +31,7 @@ criterion = "0.8"
 [[bench]]
 name = "text_recording"
 harness = false
+
+[[bench]]
+name = "operator_dispatch"
+harness = false

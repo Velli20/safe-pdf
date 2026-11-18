@@ -111,7 +111,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     fn paint_backdrop(&mut self, color: Color, size: Size<f32>) -> Result<(), PdfCanvasError> {
         self.save()?;
         self.state.paint.set_fill_color(color);
-        self.rectangle(0.0, 0.0, size.width, size.height)?;
+        self.current_path.rect(0.0, 0.0, size.width, size.height);
         self.end_path(Some((PaintMode::Fill, PathFillType::Winding)))?;
         self.restore()
     }

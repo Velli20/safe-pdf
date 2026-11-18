@@ -68,9 +68,6 @@ pub enum PdfCanvasError {
     #[error("Invalid dash pattern: {0}")]
     /// Dash intervals or their phase are invalid.
     InvalidDashPattern(String),
-    #[error("The current operation requires a color space, but none is set")]
-    /// Color operands require a selected color space.
-    ColorSpaceNotSet,
     #[error("Unsupported PDF canvas feature: {0}")]
     /// The requested PDF feature is unsupported.
     UnsupportedFeature(String),
