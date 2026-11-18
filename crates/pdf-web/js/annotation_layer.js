@@ -94,12 +94,12 @@ export class NativeAnnotationLayer {
     const fontFamily = field ? `"${field.family}", ${style.font_family}` : style.font_family;
     const font = { fontSize: `${style.font_size}px`, fontFamily, textAlign: style.alignment };
     Object.assign(container.style, font);
-    // A canvas-painted widget, or a stamp, note or free text drawn from its artwork, shows its
+    // A painted widget, or a stamp, note or free text drawn from its artwork, shows its
     // PDF appearance through a transparent node.
     Object.assign(node.style, entry.control?.painted || entry.artwork
       ? { ...font, color: 'transparent', backgroundColor: 'transparent', border: 'none' }
       : { ...font, color: css.color, backgroundColor: css.background, border: css.border || 'none' });
-    // A canvas-painted text entry shows its own text only while it is edited.
+    // A painted text entry shows its own text only while it is edited.
     node.style.setProperty('--native-field-color', css.color);
     component.update();
   }
@@ -123,7 +123,7 @@ export class NativeAnnotationLayer {
       return false;
     }
   }
-  /** The font a canvas-painted text entry paints its value in, registered once per family,
+  /** The font a painted text entry paints its value in, registered once per family,
    * or `null` for other entries and when no browser font can be built.
    * @param {import('./annotation_contract').WebAnnotationEntry} entry
    * @returns {FieldFont | null} */

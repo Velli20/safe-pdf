@@ -32,6 +32,10 @@ export class FormControl extends AnnotationComponent {
     this.optionsRevision = '';
     this.initialScroll = false;
     this.commitAfterComposition = false;
+    /** Whether the host was told the widget is held down or edited. */
+    this.presented = false;
+    /** @type {HTMLCanvasElement | undefined} */
+    this.artwork = undefined;
     const node = this.node;
     if (node instanceof HTMLInputElement && model.input_type) node.type = model.input_type;
     if (node instanceof HTMLButtonElement) node.type = 'button';
@@ -51,37 +55,62 @@ export class FormControl extends AnnotationComponent {
     }
   }
 
-  /** Reports pointer presses on a canvas-painted widget so the host paints its down appearance. */
+  /** Reports pointer presses on a painted widget so the host selects its down appearance,
+   * then redraws its artwork. */
   bindPressEvents() {
     let pressed = false;
     const release = () => {
       if (!pressed) return;
       pressed = false;
-      this.layer.onPress(this.entry, false);
+      this.present(false, () => this.layer.onPress(this.entry, false));
     };
     this.listen(this.node, 'pointerdown', event => {
       const control = this.control();
       // Text entries have no down appearance; only buttons are pressed.
       if (event.button !== 0 || !control.painted || FormControl.isTextEntry(control) || !this.entry.editable && control.kind !== ControlKind.Button) return;
       pressed = true;
-      this.layer.onPress(this.entry, true);
+      this.present(true, () => this.layer.onPress(this.entry, true));
     });
     for (const name of /** @type {const} */ (['pointerup', 'pointercancel', 'pointerleave'])) this.listen(this.node, name, release);
   }
 
-  /** Reports focus on a canvas-painted text entry so the host paints it without its value
+  /** Reports focus on a painted text entry so the host draws its artwork without its value
    * while the control shows the value being edited. `change` commits before `blur`. */
   bindEditEvents() {
     const edits = () => FormControl.isPaintedTextEntry(this.control());
-    this.listen(this.node, 'focus', () => { if (edits()) this.layer.onEdit(this.entry, true); });
-    this.listen(this.node, 'blur', () => { if (edits()) this.layer.onEdit(this.entry, false); });
+    this.listen(this.node, 'focus', () => { if (edits()) this.present(true, () => this.layer.onEdit(this.entry, true)); });
+    this.listen(this.node, 'blur', () => { if (edits()) this.present(false, () => this.layer.onEdit(this.entry, false)); });
+  }
+
+  /** Reports a changed presentation through `report`, then redraws the artwork in it.
+   * @param {boolean} presented whether the widget is now held down or edited
+   * @param {() => void} report */
+  present(presented, report) {
+    this.presented = presented;
+    report();
+    this.drawWidgetArtwork();
+  }
+
+  /** Draws the widget's appearance under its transparent control, for the live field state
+   * of the current annotation revision and the presentation the host was told of. */
+  drawWidgetArtwork() {
+    if (this.entry.artwork) this.drawArtwork(`${this.layer.snapshot?.annotationRevision}:${this.presented}`);
+    else { this.artwork?.remove(); this.artwork = undefined; this.signature = ''; }
+  }
+
+  /** Shows the artwork behind the control, which keeps its own content.
+   * @param {HTMLCanvasElement} canvas */
+  placeArtwork(canvas) {
+    this.artwork?.remove();
+    this.container.prepend(canvas);
+    this.artwork = canvas;
   }
 
   /** Whether `control` takes typed text: a text field or a combo box.
    * @param {import('./annotation_contract').WidgetControl} control */
   static isTextEntry(control) { return control.kind === ControlKind.Text || control.kind === ControlKind.ComboBox; }
 
-  /** Whether the canvas paints `control`'s value, which the control shows only while edited.
+  /** Whether the artwork paints `control`'s value, which the control shows only while edited.
    * @param {import('./annotation_contract').WidgetControl | null | undefined} control */
   static isPaintedTextEntry(control) { return !!control?.painted && FormControl.isTextEntry(control); }
 
@@ -174,6 +203,7 @@ export class FormControl extends AnnotationComponent {
   update() {
     const p = this.control();
     this.node.classList.toggle('native-painted', p.painted);
+    this.drawWidgetArtwork();
     this.setPending(this.phase === EditPhase.Committing);
     if (p.options) this.updateChoice(p);
     else if (p.input_type === 'checkbox' || p.input_type === 'radio' || p.tag === 'button') this.updateButton(p);
@@ -183,7 +213,7 @@ export class FormControl extends AnnotationComponent {
     this.updateRotation(p);
   }
 
-  /** Spaces a canvas-painted text entry's text as the canvas paints its value, so it stays
+  /** Spaces a painted text entry's text as its artwork paints its value, so it stays
    * in place while edited: inset by the control's `text_inset`, with lines the field font's
    * line height apart. Other controls keep the default spacing.
    * @param {import('./annotation_contract').WidgetControl} p */
@@ -200,7 +230,7 @@ export class FormControl extends AnnotationComponent {
     this.updateCombStart(p);
   }
 
-  /** Starts a comb field's characters in the cell the canvas paints the first one in: the
+  /** Starts a comb field's characters in the cell the artwork paints the first one in: the
    * first cell, the cell that leaves the remaining cells after the value, or the middle of
    * those, by the field's alignment. The field font spaces the characters one per cell.
    * @param {import('./annotation_contract').WidgetControl} p */

@@ -23,6 +23,16 @@ pub struct WebViewport {
     revision: u32,
 }
 
+/// Where an annotation's artwork is drawn: the viewport its canvas is rendered through,
+/// and the box the canvas covers in the annotation's local units.
+pub struct ArtworkLayout {
+    /// The artwork's viewport, whose bitmap matches the page's pixel density.
+    pub viewport: WebViewport,
+    /// The canvas box in annotation-local units, from its top-left corner; it may extend
+    /// past the annotation's own box by under one pixel on each side.
+    pub bounds: Rect,
+}
+
 impl WebViewport {
     /// Validates positive dimensions and invertible finite mappings.
     /// Page rendering and annotation placement share the supplied page viewport.
@@ -77,25 +87,44 @@ impl WebViewport {
     /// unit with the origin at its top-left corner, sampled at this viewport's pixel
     /// density. This is the box an annotation entry's CSS transform places, so artwork
     /// drawn through it follows the entry's rotation and zoom.
-    pub fn for_artwork(&self, rect: &Rect) -> WebResult<Self> {
+    ///
+    /// The box grows to whole bitmap pixels of the page, so an unrotated entry's artwork
+    /// lands on the page canvas's pixel grid instead of being resampled onto it.
+    pub fn for_artwork(&self, rect: &Rect) -> WebResult<ArtworkLayout> {
         let page_to_backing = self
             .canvas
             .device_to_backing()
             .post_concatenated(self.page.page_to_device());
         let rect = rect.normalized();
-        let local = Size::new(rect.width(), rect.height());
-        let backing = |extent: f32, scale: f32| {
-            pixel_extent(extent * scale).ok_or(Error::InvalidInput("artwork bounds"))
+        let pixels = page_to_backing.map_rect(&rect);
+        let snapped = Rect {
+            left: pixels.left.floor(),
+            top: pixels.top.floor(),
+            right: pixels.right.ceil(),
+            bottom: pixels.bottom.ceil(),
         };
-        Self::new(
-            PageViewport::new(rect, 0, local)?,
+        let grown = page_to_backing.try_inverse()?.map_rect(&snapped);
+        let local = PageViewport::new(rect, 0, rect.size())?;
+        let bounds = local.page_to_device().map_rect(&grown);
+        let scales = page_to_backing.axis_scales();
+        // The grown box spans whole pixels, so its extents only round off float error.
+        let backing = |extent: f32, scale: f32| {
+            (extent * scale)
+                .round()
+                .to_u32()
+                .filter(|pixels| *pixels > 0)
+                .ok_or(Error::InvalidInput("artwork bounds"))
+        };
+        let viewport = Self::new(
+            PageViewport::new(grown, 0, bounds.size())?,
             Size::new(
-                backing(local.width, page_to_backing.sx.hypot(page_to_backing.ky))?,
-                backing(local.height, page_to_backing.kx.hypot(page_to_backing.sy))?,
+                backing(bounds.width(), scales.width)?,
+                backing(bounds.height(), scales.height)?,
             ),
             Transform::identity(),
             self.revision,
-        )
+        )?;
+        Ok(ArtworkLayout { viewport, bounds })
     }
 
     /// Returns the mapping shared by PDF rendering and annotation geometry.

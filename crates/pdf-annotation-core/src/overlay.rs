@@ -7,6 +7,7 @@ use crate::{
     entry::AnnotationEntry,
     events::{Change, Event},
     import::{self, ImportedDocument, LayoutHint},
+    kind::AnnotationKind,
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
     metadata::AnnotationFlags,
     models::{Annotation, AnnotationId, Point, Revision},
@@ -155,33 +156,43 @@ impl AnnotationOverlay {
         }
     }
 
-    /// Returns the source appearances of `page`'s displayed button and read-only text
-    /// widgets, selected by live field state, and of annotations drawn from their appearance,
-    /// in presentation order, for painting on the page canvas. The widget `presentation`
-    /// marks pressed draws its down appearance, and the text entry it marks editing draws
+    /// Returns the source appearances of `page`'s displayed annotations drawn from their
+    /// appearance, in presentation order, for painting on the page canvas. Widgets draw
+    /// their appearance into their own presentation instead; see [`Self::artwork`].
+    ///
+    /// # Errors
+    /// Rejects absent pages.
+    pub fn painted_appearances(&self, page: u32) -> AnnotationLayerResult<Vec<PaintedAppearance>> {
+        let view = self.page_view(page)?;
+        Ok(self
+            .page_annotations(&view, page)
+            .into_iter()
+            .filter_map(|annotation| PaintedAppearance::new(annotation, &self.optional_content))
+            .collect())
+    }
+
+    /// Returns the source artwork of the displayed stamp, note, free text or widget `id`,
+    /// for drawing into the annotation's own presentation; `None` for other annotations.
+    /// A widget's artwork is selected by live field state: the widget `presentation` marks
+    /// pressed draws its down appearance, and the text entry it marks editing draws
     /// without its value.
     ///
     /// # Errors
-    /// Rejects absent pages and widgets whose bound field is missing.
-    pub fn painted_appearances(
+    /// Rejects a widget whose bound field is missing.
+    pub fn artwork(
         &self,
-        page: u32,
+        id: AnnotationId,
         presentation: PresentationState,
-    ) -> AnnotationLayerResult<Vec<PaintedAppearance>> {
-        let view = self.page_view(page)?;
-        self.page_annotations(&view, page)
-            .into_iter()
-            .filter_map(|annotation| {
-                PaintedAppearance::new(annotation, &view, &self.optional_content, presentation)
-                    .transpose()
-            })
-            .collect()
-    }
-
-    /// Returns the source artwork of the displayed stamp, note or free text `id`, for
-    /// drawing into the annotation's own presentation; `None` for other annotations.
-    pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
-        PaintedAppearance::artwork(self.annotation(id)?, &self.optional_content)
+    ) -> AnnotationLayerResult<Option<PaintedAppearance>> {
+        let Some(annotation) = self.annotation(id) else {
+            return Ok(None);
+        };
+        PaintedAppearance::artwork(
+            annotation,
+            &self.document.engine.view(),
+            &self.optional_content,
+            presentation,
+        )
     }
 
     /// Returns the painted appearance of the displayed text entry `id` with its live value,
@@ -412,7 +423,8 @@ impl AnnotationOverlay {
         })
     }
 
-    /// A page's annotations in source traversal order, with host-created ones last.
+    /// A page's annotations in source traversal order, with host-created ones last, and
+    /// widgets after all other annotations, since form fields are drawn above them.
     fn page_annotations<'a>(&self, view: &DocumentView<'a>, page: u32) -> Vec<&'a Annotation> {
         let mut annotations = view
             .data()
@@ -426,7 +438,11 @@ impl AnnotationOverlay {
                 .hints
                 .get(&annotation.id.0)
                 .map_or(usize::MAX, |hint| hint.order);
-            (order, annotation.id.0)
+            (
+                matches!(annotation.content, AnnotationKind::Widget(_)),
+                order,
+                annotation.id.0,
+            )
         });
         annotations
     }
