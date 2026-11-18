@@ -1,6 +1,7 @@
+use std::sync::Arc;
+
 use pdf_graphics::{
     CanvasPaint, DashPattern, LineCap, LineJoin,
-    dash_pattern::DashPatternError,
     transform::{Transform, TransformError},
 };
 
@@ -9,8 +10,10 @@ use crate::CanvasPath;
 /// Stroke-specific rendering metadata passed to canvas backends.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StrokeStyle {
-    /// Optional dash pattern. `None` means a solid stroke.
-    pub dash_pattern: Option<DashPattern>,
+    /// Optional dash pattern in stroke space. `None` means a solid stroke.
+    ///
+    /// Shared so recording a stroke does not copy the intervals.
+    pub dash_pattern: Option<Arc<DashPattern>>,
     /// Shape of open stroke endpoints.
     pub line_cap: LineCap,
     /// Shape of stroke joins.
@@ -37,11 +40,16 @@ impl Default for StrokeStyle {
 }
 
 impl StrokeStyle {
-    /// Converts paint metadata to the stroke space of `ctm` without an intermediate dash clone.
+    /// Converts paint metadata to the stroke space of `ctm`.
     ///
-    /// Dash lengths are scaled by [`Transform::area_scale`]; the remaining linear part of
-    /// `ctm` becomes [`StrokeStyle::transform`]. A singular `ctm` keeps an identity transform.
-    pub fn from_paint(paint: &CanvasPaint, ctm: &Transform) -> Result<Self, DashPatternError> {
+    /// `dash_pattern` is the paint's dash already scaled by [`Transform::area_scale`], so
+    /// strokes sharing a dash and scale share one pattern. The remaining linear part of `ctm`
+    /// becomes [`StrokeStyle::transform`]. A singular `ctm` keeps an identity transform.
+    pub fn new(
+        paint: &CanvasPaint,
+        ctm: &Transform,
+        dash_pattern: Option<Arc<DashPattern>>,
+    ) -> Self {
         let scale = ctm.area_scale();
         let transform = if scale > 0.0 && scale.is_finite() {
             let mut linear = ctm.linear();
@@ -50,17 +58,13 @@ impl StrokeStyle {
         } else {
             Transform::identity()
         };
-        Ok(Self {
-            dash_pattern: paint
-                .dash_pattern
-                .as_ref()
-                .map(|pattern| pattern.scaled(scale))
-                .transpose()?,
+        Self {
+            dash_pattern,
             line_cap: paint.line_cap,
             line_join: paint.line_join,
             miter_limit: paint.miter_limit,
             transform,
-        })
+        }
     }
 
     /// Returns `path` mapped into stroke space when stroking its device geometry would
@@ -79,21 +83,6 @@ impl StrokeStyle {
         }
         let inverse = self.transform.try_inverse()?;
         path.remapped(&inverse).map(Some)
-    }
-
-    /// Returns a stroke style scaled into the same coordinate space as the stroked path.
-    pub fn scaled(&self, scale: f32) -> Result<Self, DashPatternError> {
-        Ok(Self {
-            dash_pattern: self
-                .dash_pattern
-                .as_ref()
-                .map(|dash_pattern| dash_pattern.scaled(scale))
-                .transpose()?,
-            line_cap: self.line_cap,
-            line_join: self.line_join,
-            miter_limit: self.miter_limit,
-            transform: self.transform,
-        })
     }
 }
 
