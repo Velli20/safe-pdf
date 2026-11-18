@@ -1,11 +1,13 @@
-//! Paints annotation appearance streams: widgets over rendered page content, and
-//! stamp, note and free-text artwork into a viewport cropped to the annotation.
+//! Paints annotation appearance streams: widgets over rendered page content, text-entry
+//! widgets with their live value, and stamp, note and free-text artwork into a viewport
+//! cropped to the annotation.
 use crate::{PdfRenderer, PdfRendererError};
 use pdf_annotation_core::PaintedAppearance;
 use pdf_canvas::{PageViewport, canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
+use pdf_document::page::PdfPage;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_optional_content::OptionalContentState;
-use pdf_resources::form::FormXObject;
+use pdf_resources::{form::FormXObject, resources::Resources};
 use std::sync::Arc;
 
 impl PdfRenderer {
@@ -36,7 +38,8 @@ impl PdfRenderer {
             Arc::clone(&self.font_system),
         )?
         .with_image_cache(Arc::clone(&self.image_cache))
-        .with_optional_content(optional_content);
+        .with_optional_content(optional_content)
+        .with_fallback_fonts(self.form_resources().cloned());
         for appearance in appearances {
             let Some(form) = self.appearance_form(appearance) else {
                 continue;
@@ -44,14 +47,11 @@ impl PdfRenderer {
             let Some(matrix) = appearance_matrix(&form, &appearance.rect) else {
                 continue;
             };
-            let resources = form
-                .resources
-                .as_ref()
-                .map(|resources| resources.get())
-                .transpose()?
-                .or_else(|| page.resources.clone());
+            let resources = self.appearance_resources(&form, page)?;
+            let live =
+                self.live_value_content(&mut canvas, &form, resources.as_deref(), appearance);
             canvas.render_content_stream(
-                &form.content_stream,
+                live.as_ref().unwrap_or(&form.content_stream),
                 Some(matrix),
                 form.bbox.as_ref(),
                 resources,
@@ -61,8 +61,32 @@ impl PdfRenderer {
         Ok(())
     }
 
+    /// The resources `form` is drawn with on `page`: its own, else the page's.
+    pub(crate) fn appearance_resources(
+        &self,
+        form: &FormXObject,
+        page: &PdfPage,
+    ) -> Result<Option<Arc<Resources>>, PdfRendererError> {
+        Ok(form
+            .resources
+            .as_ref()
+            .map(|resources| resources.get())
+            .transpose()?
+            .or_else(|| page.resources.clone()))
+    }
+
+    /// The interactive form's `/DR`, where widget appearances find fonts their own
+    /// resources lack.
+    pub(crate) fn form_resources(&self) -> Option<&Arc<Resources>> {
+        self.document
+            .interactive_form
+            .as_ref()?
+            .default_resources
+            .as_ref()
+    }
+
     /// Reads the form XObject of `appearance`'s stream.
-    fn appearance_form(&self, appearance: &PaintedAppearance) -> Option<FormXObject> {
+    pub(crate) fn appearance_form(&self, appearance: &PaintedAppearance) -> Option<FormXObject> {
         self.document
             .objects()
             .read::<FormXObject>(appearance.stream.value())

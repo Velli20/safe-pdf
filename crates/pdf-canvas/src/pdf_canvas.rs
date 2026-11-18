@@ -1,6 +1,7 @@
 //! PDF operator interpretation and painting orchestration.
 use std::{collections::HashMap, sync::Arc};
 
+use crate::font_selection::FontSelection;
 use crate::shading::{shading_bbox_clip, with_clip};
 use crate::{
     CanvasPath,
@@ -18,7 +19,7 @@ use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
 use pdf_font::pdf_font_handle::PdfFontHandle;
-use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec};
+use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec, Standard14Font};
 use pdf_graphics::{
     AlphaConstant, BlendMode, Image, PaintMode, PathFillType, color::Color, pdf_path::PdfPath,
     rect::Rect, size::Size, transform::Transform,
@@ -71,8 +72,8 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) page: &'a PdfPage,
     /// Shared text engine used to load and lay out font resources.
     pub(crate) font_system: Arc<FontSystem>,
-    /// Loaded font handles keyed by the stable address of a page resource specification.
-    font_cache: HashMap<*const PdfFontSpec, PdfFontHandle>,
+    /// Loaded font handles keyed by the font they were selected as.
+    font_cache: HashMap<FontKey, PdfFontHandle>,
     /// Decoded image XObjects, shared with nested canvases and, through
     /// [`Self::with_image_cache`], with other renders.
     image_cache: Arc<ImageCache>,
@@ -91,6 +92,18 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) text_glyphs: Option<Vec<TextGlyph>>,
     /// Hides content whose optional content is off; `None` when nothing can be hidden.
     pub(crate) optional_content: Option<OptionalContentFilter<'a>>,
+    /// Resources whose fonts `Tf` selects when the current resources lack the name.
+    pub(crate) fallback_fonts: Option<Arc<Resources>>,
+}
+
+/// Identifies a loaded font in the canvas font cache.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum FontKey {
+    /// A resource specification, by its address; the cached handle keeps it alive, so
+    /// the address stays unique while the entry exists.
+    Resource(*const PdfFontSpec),
+    /// A Standard 14 font substituted for a name no resources define.
+    Standard14(Standard14Font),
 }
 
 impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
@@ -150,6 +163,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             content_stream_render_state: ContentStreamRenderState::default(),
             text_glyphs: None,
             optional_content: None,
+            fallback_fonts: None,
         })
     }
 
@@ -173,6 +187,14 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     #[must_use]
     pub fn with_optional_content(mut self, state: &'a OptionalContentState) -> Self {
         self.optional_content = Some(OptionalContentFilter::new(state));
+        self
+    }
+
+    /// Resolves a `Tf` font name the current resources lack in `resources`, as widget
+    /// appearances resolve theirs in the interactive form's `/DR`.
+    #[must_use]
+    pub fn with_fallback_fonts(mut self, resources: Option<Arc<Resources>>) -> Self {
+        self.fallback_fonts = resources;
         self
     }
 
@@ -304,6 +326,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 .optional_content
                 .as_ref()
                 .map(OptionalContentFilter::restarted),
+            fallback_fonts: self.fallback_fonts.clone(),
         };
 
         let result = paint(&mut other);
@@ -325,16 +348,46 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
+    /// Loads the font `name` selects for a content stream drawn with `resources`, as `Tf`
+    /// does, with the nested resources of a Type 3 font.
+    ///
+    /// # Errors
+    /// Propagates font loading failures.
+    pub fn load_named_font(
+        &mut self,
+        name: &[u8],
+        resources: Option<&Resources>,
+    ) -> Result<(PdfFontHandle, Option<Arc<Resources>>), PdfCanvasError> {
+        match FontSelection::new(name, resources, self.fallback_fonts.as_deref()) {
+            FontSelection::Resource { font, resources } => {
+                Ok((self.load_pdf_font(&font)?, resources))
+            }
+            selection @ FontSelection::Standard14(font) => {
+                let key = FontKey::Standard14(font);
+                Ok((self.load_cached_font(key, || selection.spec())?, None))
+            }
+        }
+    }
+
     /// Loads a PDF font once for each resource specification used by this canvas.
     pub(crate) fn load_pdf_font(
         &mut self,
-        spec: &PdfFontSpec,
+        spec: &Arc<PdfFontSpec>,
     ) -> Result<PdfFontHandle, PdfCanvasError> {
-        let key = std::ptr::from_ref(spec);
+        let key = FontKey::Resource(Arc::as_ptr(spec));
+        self.load_cached_font(key, || Arc::clone(spec))
+    }
+
+    /// The cached handle of `key`, loading the specification `spec` returns on a miss.
+    fn load_cached_font(
+        &mut self,
+        key: FontKey,
+        spec: impl FnOnce() -> Arc<PdfFontSpec>,
+    ) -> Result<PdfFontHandle, PdfCanvasError> {
         if let Some(handle) = self.font_cache.get(&key) {
             return Ok(handle.clone());
         }
-        let handle = self.font_system.load_pdf_font(spec.clone())?;
+        let handle = self.font_system.load_pdf_font(spec())?;
         self.font_cache.insert(key, handle.clone());
         Ok(handle)
     }

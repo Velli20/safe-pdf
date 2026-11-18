@@ -13,6 +13,7 @@ use crate::fallback::{
 };
 use crate::flags::FontFlags;
 use crate::font::GlyphId;
+use crate::font::LineMetrics;
 use crate::font::{FontMetadata, FontProgramFormat, FontSource};
 use crate::pdf::{
     FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding, SimpleFontSpec,
@@ -97,6 +98,19 @@ impl PdfFontSpec {
                 &font.descriptor.metadata
             }
             Self::Type3(font) => &font.metadata,
+        }
+    }
+
+    /// The line extent the font descriptor declares; `None` for a Type 3 font, which has
+    /// no descriptor metrics, and for a descriptor that declares none.
+    #[must_use]
+    pub fn declared_line_metrics(&self) -> Option<LineMetrics> {
+        match self {
+            Self::Type0(font) => font.descendant.descriptor.line_metrics(),
+            Self::Type1(font) | Self::MultipleMasterType1(font) | Self::TrueType(font) => {
+                font.descriptor.line_metrics()
+            }
+            Self::Type3(_) => None,
         }
     }
 

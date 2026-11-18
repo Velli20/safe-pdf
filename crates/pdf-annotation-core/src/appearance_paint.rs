@@ -3,10 +3,12 @@
 //! annotation's own presentation.
 use crate::{
     engine::DocumentView,
+    fields::Field,
     kind::AnnotationKind as Kind,
     layer_error::AnnotationLayerResult,
-    models::Annotation,
+    models::{Annotation, AnnotationId},
     pdf_data::{AppearanceStreams, SourceAnnotation},
+    variable_text::VariableText,
     widget_control::PaintedState,
 };
 use pdf_graphics::rect::Rect;
@@ -16,6 +18,16 @@ use pdf_optional_content::OptionalContentState;
 /// The `/Off` appearance state of an unselected button.
 const OFF_STATE: &[u8] = b"Off";
 
+/// Host presentation state that selects which appearance a widget paints. It never
+/// advances the document revision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PresentationState {
+    /// The widget the pointer holds down, painted with its down appearance.
+    pub pressed: Option<AnnotationId>,
+    /// The text entry being edited, painted without its value, which its control shows.
+    pub editing: Option<AnnotationId>,
+}
+
 /// One annotation's appearance stream, selected by its live state and placed at its rectangle.
 #[derive(Clone, Debug)]
 pub struct PaintedAppearance {
@@ -23,6 +35,9 @@ pub struct PaintedAppearance {
     pub stream: PdfObject,
     /// The annotation rectangle in PDF page user space.
     pub rect: Rect,
+    /// The live value of a text-entry widget, drawn in place of the value inside the
+    /// stream's `/Tx` marked content; `None` draws the stream as it is.
+    pub text: Option<VariableText>,
 }
 
 impl PaintedAppearance {
@@ -30,9 +45,12 @@ impl PaintedAppearance {
     ///
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
-    /// buttons and read-only text fields their source `/AS`. A `pressed` widget draws its
-    /// down appearance when it has one for that state. Ink without strokes draws its source
-    /// `/AS` state.
+    /// buttons and read-only text fields their source `/AS`, and editable text fields and
+    /// editable combo boxes their normal appearance with the live value, drawn as it is
+    /// while a text field's value is still its source `/V`. The widget
+    /// `presentation` marks pressed draws its down appearance when it has one for that
+    /// state, and the text entry it marks editing draws without its value. Ink without
+    /// strokes draws its source `/AS` state.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
@@ -40,7 +58,7 @@ impl PaintedAppearance {
         annotation: &Annotation,
         view: &DocumentView<'_>,
         optional_content: &OptionalContentState,
-        pressed: bool,
+        presentation: PresentationState,
     ) -> AnnotationLayerResult<Option<Self>> {
         if !annotation.is_displayed(optional_content) {
             return Ok(None);
@@ -53,18 +71,49 @@ impl PaintedAppearance {
         let Some(field) = annotation.widget_field(view)? else {
             return Ok(None);
         };
-        let Some(source) = annotation.source() else {
+        let editing = presentation.is_editing(annotation.id);
+        Ok(match annotation.text_entry_appearance(field) {
+            Some(appearance) => Some(appearance.presented(annotation, field, editing)),
+            // A text field without a value layout cannot leave its value out, so while it
+            // is edited only its control shows it.
+            None if editing => None,
+            None => {
+                annotation.widget_state_appearance(field, presentation.is_pressed(annotation.id))
+            }
+        })
+    }
+
+    /// This text-entry appearance as `annotation`, bound to `field`, presents it: without
+    /// its value while `editing`, since the control shows it, and drawn as it is while the
+    /// value is still the source `/V`, which the source appearance shows as its author
+    /// laid it out.
+    fn presented(self, annotation: &Annotation, field: &Field, editing: bool) -> Self {
+        let text = if editing {
+            self.text.map(VariableText::without_value)
+        } else if annotation.shows_source_value(field) {
+            None
+        } else {
+            self.text
+        };
+        Self { text, ..self }
+    }
+
+    /// The appearance of the displayed text entry `annotation` with its live value; `None`
+    /// for other annotations.
+    ///
+    /// # Errors
+    /// Returns an error when the widget's bound field is missing.
+    pub(crate) fn text_entry(
+        annotation: &Annotation,
+        view: &DocumentView<'_>,
+        optional_content: &OptionalContentState,
+    ) -> AnnotationLayerResult<Option<Self>> {
+        if !annotation.is_displayed(optional_content) {
             return Ok(None);
-        };
-        let state = match annotation.painted_state(field) {
-            Some(PaintedState::Source) => source.appearance_state.as_deref(),
-            Some(PaintedState::Checked(true)) => source.button_on_state().ok(),
-            Some(PaintedState::Checked(false)) => Some(OFF_STATE),
-            None => return Ok(None),
-        };
-        Ok(source
-            .rect
-            .and_then(|rect| source.widget_appearance(state, pressed, rect)))
+        }
+        Ok(annotation
+            .widget_field(view)?
+            .and_then(|field| annotation.text_entry_appearance(field)))
     }
 
     /// The source artwork of a displayed stamp at its live bounds, of a displayed note
@@ -94,6 +143,46 @@ impl PaintedAppearance {
     }
 }
 
+impl PresentationState {
+    /// Whether the pointer holds the widget `id` down.
+    #[must_use]
+    pub fn is_pressed(&self, id: AnnotationId) -> bool {
+        self.pressed == Some(id)
+    }
+
+    /// Whether the text entry `id` is being edited.
+    #[must_use]
+    pub fn is_editing(&self, id: AnnotationId) -> bool {
+        self.editing == Some(id)
+    }
+}
+
+impl Annotation {
+    /// The appearance this widget, bound to `field`, selects by its live state, with its
+    /// down appearance while `pressed`; `None` for widgets whose control presents their
+    /// value.
+    fn widget_state_appearance(&self, field: &Field, pressed: bool) -> Option<PaintedAppearance> {
+        let source = self.source()?;
+        let state = match self.painted_state(field)? {
+            PaintedState::Source => source.appearance_state.as_deref(),
+            PaintedState::Checked(true) => source.button_on_state().ok(),
+            PaintedState::Checked(false) => Some(OFF_STATE),
+        };
+        source.widget_appearance(state, pressed, source.rect?)
+    }
+
+    /// The normal appearance of this text entry, bound to `field`, with its live value;
+    /// `None` for other widgets and annotations.
+    fn text_entry_appearance(&self, field: &Field) -> Option<PaintedAppearance> {
+        let text = self.variable_text(field)?;
+        let source = self.source()?;
+        Some(PaintedAppearance {
+            text: Some(text),
+            ..source.normal_appearance(source.rect?)?
+        })
+    }
+}
+
 impl SourceAnnotation {
     /// The normal appearance selected by the source `/AS`, drawn at `rect`.
     fn normal_appearance(&self, rect: Rect) -> Option<PaintedAppearance> {
@@ -102,6 +191,7 @@ impl SourceAnnotation {
         Some(PaintedAppearance {
             stream: stream.clone(),
             rect: rect.normalized(),
+            text: None,
         })
     }
 
@@ -124,6 +214,7 @@ impl SourceAnnotation {
         Some(PaintedAppearance {
             stream: stream.clone(),
             rect: rect.normalized(),
+            text: None,
         })
     }
 }
@@ -148,7 +239,8 @@ impl AppearanceStreams {
 #[cfg(test)]
 mod tests {
     use crate::{
-        AnnotationOverlay,
+        AnnotationCommandRequest, AnnotationOverlay, PresentationState,
+        commands::{AnnotationCommand, Operation},
         pdf_data::{
             AppearanceDictionary, AppearanceStreams, NativeAnnotation, SourceAnnotation,
             TextAnnotation,
@@ -159,18 +251,26 @@ mod tests {
         Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
         pdf_array::PdfArray, pdf_object::PdfObject, pdf_string::PdfString, string_kind::StringKind,
     };
+    use std::sync::Arc;
 
     #[test]
-    fn read_only_text_widget_paints_its_normal_appearance() {
+    fn text_widget_draws_its_appearance_as_is_until_its_value_is_edited() {
         let name = |bytes: &[u8]| PdfString::from(bytes, StringKind::Name);
         let rect = PdfArray::new([4, 0, 40, 842].map(ObjectVariant::Integer));
         let appearance = StreamObject::new(2, 0, Dictionary::from_entries([]), b"0 g".to_vec());
-        // Read-only multiline (`/Ff 4097`) is painted; editable multiline (`/Ff 4096`) is not.
-        for (flags, painted) in [(4097, true), (4096, false)] {
+        // The widget declares no `/DA`, so it takes the interactive form's.
+        let form_appearance: Arc<[u8]> = Arc::from(b"/Helv 10 Tf 0 g".as_slice());
+        // Read-only (`/Ff 4097`) and editable (`/Ff 4096`) multiline fields both draw their
+        // stored appearance unchanged while their value is the source `/V`.
+        for flags in [4097, 4096] {
             let widget = ObjectVariant::Dictionary(Dictionary::from_entries([
                 (b"Subtype".as_slice(), name(b"Widget")),
                 (b"FT".as_slice(), name(b"Tx")),
                 (b"Ff".as_slice(), ObjectVariant::Integer(flags)),
+                (
+                    b"V".as_slice(),
+                    PdfString::from(b"Lorem", StringKind::Literal),
+                ),
                 (b"Rect".as_slice(), ObjectVariant::Array(rect.clone())),
                 (
                     b"AP".as_slice(),
@@ -181,15 +281,58 @@ mod tests {
                 ),
             ]));
             let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
-            let overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
-            let appearances = overlay.painted_appearances(0, None).unwrap();
-            assert_eq!(appearances.len(), usize::from(painted), "/Ff {flags}");
-            if let Some(painted) = appearances.first() {
-                assert_eq!(Some(painted.rect), source.rect);
-                assert_eq!(
-                    painted.stream.value(),
-                    &ObjectVariant::Stream(appearance.clone())
-                );
+            let mut overlay = AnnotationOverlay::new(
+                [std::slice::from_ref(&source)],
+                None,
+                Some(&form_appearance),
+            )
+            .unwrap();
+            let appearances = overlay
+                .painted_appearances(0, PresentationState::default())
+                .unwrap();
+            let painted = appearances.first().unwrap();
+            assert_eq!(appearances.len(), 1, "/Ff {flags}");
+            assert_eq!(Some(painted.rect), source.rect);
+            assert_eq!(
+                painted.stream.value(),
+                &ObjectVariant::Stream(appearance.clone())
+            );
+            assert!(painted.text.is_none(), "/Ff {flags}");
+            if flags == 4096 {
+                // An edited value is laid out in the form's `/DA` font instead.
+                let page = Rect {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 612.0,
+                    bottom: 842.0,
+                };
+                let viewport = PageViewport::new(page, 0, Size::new(612.0, 842.0)).unwrap();
+                let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+                let field = prepared
+                    .entries()
+                    .first()
+                    .unwrap()
+                    .control
+                    .as_ref()
+                    .unwrap()
+                    .field;
+                let request = AnnotationCommandRequest {
+                    target: None,
+                    command: AnnotationCommand {
+                        expected_revision: overlay.revision(),
+                        operation: Operation::SetText {
+                            field,
+                            value: "Ipsum".into(),
+                        },
+                    },
+                };
+                overlay.accept_event(request, None, None).unwrap();
+                let appearances = overlay
+                    .painted_appearances(0, PresentationState::default())
+                    .unwrap();
+                let text = appearances.first().unwrap().text.as_ref().unwrap();
+                assert_eq!(text.value, "Ipsum");
+                assert_eq!(text.font.as_ref(), b"Helv");
             }
         }
     }
@@ -216,7 +359,8 @@ mod tests {
             ),
         ]));
         let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
-        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
         let page = Rect {
             left: 0.0,
             top: 0.0,
@@ -228,7 +372,9 @@ mod tests {
         let entry = prepared.entries().first().unwrap();
         assert_eq!(entry.unsupported, None);
         assert!(entry.control.is_none());
-        let appearances = overlay.painted_appearances(0, None).unwrap();
+        let appearances = overlay
+            .painted_appearances(0, PresentationState::default())
+            .unwrap();
         let painted = appearances.first().unwrap();
         assert_eq!(appearances.len(), 1);
         assert_eq!(Some(painted.rect), source.rect);
@@ -271,7 +417,8 @@ mod tests {
                 intent: None,
             })),
         };
-        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&note)], None).unwrap();
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&note)], None, None).unwrap();
         let page = Rect {
             left: 0.0,
             top: 0.0,
@@ -317,7 +464,8 @@ mod tests {
             ),
         ]));
         let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&free_text).unwrap();
-        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
         let page = Rect {
             left: 0.0,
             top: 0.0,

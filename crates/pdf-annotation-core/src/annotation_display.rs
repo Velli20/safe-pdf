@@ -40,7 +40,7 @@ impl Annotation {
 
 #[cfg(test)]
 mod tests {
-    use crate::{AnnotationOverlay, pdf_data::SourceAnnotation};
+    use crate::{AnnotationOverlay, PresentationState, pdf_data::SourceAnnotation};
     use pdf_object_reader::{
         Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
         pdf_array::PdfArray, pdf_string::PdfString, string_kind::StringKind,
@@ -70,8 +70,10 @@ mod tests {
             ),
         ]));
         let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
-        let overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None).unwrap();
-        let appearances = overlay.painted_appearances(0, None).unwrap();
+        let overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
+        let appearances = overlay
+            .painted_appearances(0, PresentationState::default())
+            .unwrap();
         assert_eq!(appearances.len(), 1);
     }
 }

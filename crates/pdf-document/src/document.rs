@@ -3,7 +3,7 @@ use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{ObjectReader, ReadResult};
 use pdf_optional_content::OptionalContentProperties;
 
-use crate::page::PdfPage;
+use crate::{interactive_form::InteractiveForm, page::PdfPage};
 
 /// A decoded PDF document with page attributes and resources resolved.
 ///
@@ -14,6 +14,9 @@ pub struct PdfDocument {
     /// The catalog's `/OCProperties`, absent when the document declares no optional
     /// content or its declaration could not be read.
     pub optional_content: Option<OptionalContentProperties>,
+    /// The catalog's `/AcroForm`, absent when the document has no interactive form or its
+    /// declaration could not be read.
+    pub interactive_form: Option<InteractiveForm>,
     /// Owns the typed object cache that the pages' indirect resource handles point into,
     /// and resolves the streams of page contents when they are parsed; dropping it would
     /// expire those handles.
@@ -25,11 +28,13 @@ impl PdfDocument {
     pub(crate) fn new(
         pages: Vec<PdfPage>,
         optional_content: Option<OptionalContentProperties>,
+        interactive_form: Option<InteractiveForm>,
         objects: ObjectReader<ObjectCollection>,
     ) -> Self {
         Self {
             pages,
             optional_content,
+            interactive_form,
             objects,
         }
     }

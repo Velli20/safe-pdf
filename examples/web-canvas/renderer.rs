@@ -5,13 +5,38 @@ use pdf_graphics::{size::Size, transform::Transform};
 use pdf_graphics_web::{WebCanvasBackend, WebCanvasOptions};
 use pdf_renderer::{DocumentTextSelection, PdfRenderer};
 use pdf_web::{
-    WebAnnotationOverlay, WebPageRenderer, WebViewport,
+    FieldFont, WebAnnotationOverlay, WebPageRenderer, WebViewport,
     interop::{
         WebAnnotationEvent, WebAnnotationSnapshot, WebSelectionBatch, WebSelectionController,
     },
 };
 use std::{collections::BTreeMap, sync::Arc};
 use wasm_bindgen::prelude::*;
+
+/// The font a text entry's value is edited in, registered by the host as a `FontFace`.
+#[wasm_bindgen]
+pub struct WebFieldFont(FieldFont);
+
+#[wasm_bindgen]
+impl WebFieldFont {
+    /// A family name unique to the program; entries sharing it share one face.
+    #[wasm_bindgen(getter)]
+    pub fn family(&self) -> String {
+        self.0.family.clone()
+    }
+
+    /// The font program bytes.
+    #[wasm_bindgen(getter)]
+    pub fn data(&self) -> Vec<u8> {
+        self.0.data.clone()
+    }
+
+    /// The distance between baselines, in ems, the value is painted with.
+    #[wasm_bindgen(getter)]
+    pub fn line_height(&self) -> f32 {
+        self.0.line_height
+    }
+}
 
 /// Browser example's renderer-owned document, layouts and overlay resources.
 #[wasm_bindgen]
@@ -113,6 +138,38 @@ impl WebDocument {
             .transpose()
             .map_err(error)?;
         self.overlay.set_pressed(pressed);
+        self.repaint(page_index, canvas)
+    }
+
+    /// Returns the font the text entry `annotation` (a decimal Core id) on `page_index`
+    /// paints its value in, or `undefined` when no browser font can be built for it.
+    pub fn field_font(
+        &self,
+        page_index: u32,
+        annotation: &str,
+    ) -> Result<Option<WebFieldFont>, JsValue> {
+        let id = AnnotationId(annotation.parse().map_err(error)?);
+        Ok(self
+            .renderer
+            .field_font(&self.overlay, page_index, id)
+            .map_err(error)?
+            .map(WebFieldFont))
+    }
+
+    /// Marks the text entry `annotation` (a decimal Core id) as being edited, or ends
+    /// editing when `None`, and repaints `page_index`: the edited entry is painted
+    /// without its value, which its control shows instead.
+    pub fn edit(
+        &mut self,
+        page_index: u32,
+        canvas: web_sys::HtmlCanvasElement,
+        annotation: Option<String>,
+    ) -> Result<WebAnnotationSnapshot, JsValue> {
+        let editing = annotation
+            .map(|id| id.parse().map(AnnotationId))
+            .transpose()
+            .map_err(error)?;
+        self.overlay.set_editing(editing);
         self.repaint(page_index, canvas)
     }
 

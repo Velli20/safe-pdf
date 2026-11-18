@@ -12,13 +12,22 @@ import { VisualComponent } from './annotation_visuals.js';
  * submit consumes that promise and reports each failure once through onError,
  * returning acceptance to its owner.
  */
+/** A registered field font and the distance between its baselines, in ems.
+ * @typedef {{ family: string, lineHeight: number }} FieldFont */
+
 export class NativeAnnotationLayer {
   /** @param {HTMLElement} root
    * @param {import('./annotation_host').AnnotationLayerCallbacks} callbacks */
-  constructor(root, { onCommand, toPageDelta, onAction = () => { }, onPress = () => { }, renderArtwork = () => { }, onError = () => { } }) {
-    this.root = root; this.onCommand = onCommand; this.toPageDelta = toPageDelta; this.onAction = onAction; this.onPress = onPress; this.renderArtwork = renderArtwork; this.onError = onError;
+  constructor(root, { onCommand, toPageDelta, onAction = () => { }, onPress = () => { }, onEdit = () => { }, loadFont = () => undefined, renderArtwork = () => { }, onError = () => { } }) {
+    this.root = root; this.onCommand = onCommand; this.toPageDelta = toPageDelta; this.onAction = onAction; this.onPress = onPress; this.onEdit = onEdit; this.loadFont = loadFont; this.renderArtwork = renderArtwork; this.onError = onError;
     /** @type {Map<string, import('./annotation_dom.js').AnnotationComponent>} */
     this.nodes = new Map();
+    /** The field font of each text entry, or `null` when it has none.
+     * @type {Map<string, FieldFont | null>} */
+    this.fieldFonts = new Map();
+    /** Field fonts registered with `document.fonts`, one per family.
+     * @type {Map<string, FontFace>} */
+    this.faces = new Map();
     /** @type {import('./annotation_host').AnnotationLayerSnapshot | undefined} */
     this.snapshot = undefined;
     root.classList.add('native-annotations');
@@ -81,13 +90,17 @@ export class NativeAnnotationLayer {
     container.tabIndex = entry.editable || entry.draggable ? 0 : -1;
     container.setAttribute('aria-label', entry.text || entry.subtype);
     node.setAttribute('aria-label', entry.control?.label || entry.text || entry.subtype);
-    const font = { fontSize: `${style.font_size}px`, fontFamily: style.font_family, textAlign: style.alignment };
+    const field = this.fieldFont(entry);
+    const fontFamily = field ? `"${field.family}", ${style.font_family}` : style.font_family;
+    const font = { fontSize: `${style.font_size}px`, fontFamily, textAlign: style.alignment };
     Object.assign(container.style, font);
     // A canvas-painted widget, or a stamp, note or free text drawn from its artwork, shows its
     // PDF appearance through a transparent node.
     Object.assign(node.style, entry.control?.painted || entry.artwork
       ? { ...font, color: 'transparent', backgroundColor: 'transparent', border: 'none' }
-      : { ...font, color: css.color, backgroundColor: css.background, border: css.border });
+      : { ...font, color: css.color, backgroundColor: css.background, border: css.border || 'none' });
+    // A canvas-painted text entry shows its own text only while it is edited.
+    node.style.setProperty('--native-field-color', css.color);
     component.update();
   }
   /** Notes inherit a linked popup's initial open state once, then every note reconciles. */
@@ -110,11 +123,38 @@ export class NativeAnnotationLayer {
       return false;
     }
   }
+  /** The font a canvas-painted text entry paints its value in, registered once per family,
+   * or `null` for other entries and when no browser font can be built.
+   * @param {import('./annotation_contract').WebAnnotationEntry} entry
+   * @returns {FieldFont | null} */
+  fieldFont(entry) {
+    if (!FormControl.isPaintedTextEntry(entry.control)) return null;
+    let font = this.fieldFonts.get(entry.id);
+    if (font === undefined) {
+      font = null;
+      try {
+        const loaded = this.loadFont(entry);
+        if (loaded) {
+          font = { family: loaded.family, lineHeight: loaded.lineHeight };
+          if (!this.faces.has(font.family)) {
+            const face = new FontFace(font.family, loaded.data);
+            this.faces.set(font.family, face);
+            document.fonts.add(face);
+            face.load().catch(error => this.onError(error));
+          }
+        }
+      } catch (error) { this.onError(error); }
+      this.fieldFonts.set(entry.id, font);
+    }
+    return font;
+  }
   remove(component) { this.drag.remove(component); component.dispose(); }
   /** Releases pointer capture, draft sessions, all component listeners, and nodes. */
   dispose() {
     this.drag.dispose();
     for (const component of this.nodes.values()) component.dispose();
     this.nodes.clear(); this.snapshot = undefined;
+    for (const face of this.faces.values()) document.fonts.delete(face);
+    this.faces.clear(); this.fieldFonts.clear();
   }
 }

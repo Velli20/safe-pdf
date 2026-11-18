@@ -66,6 +66,11 @@ impl ToUnicodeCMap {
     pub fn map_char_code(&self, code: u32) -> Option<&UnicodeSequence> {
         self.0.get(&code)
     }
+
+    /// Returns every packed code with the Unicode it maps to, in no particular order.
+    pub fn entries(&self) -> impl Iterator<Item = (u32, &UnicodeSequence)> {
+        self.0.iter().map(|(code, unicode)| (*code, unicode))
+    }
 }
 
 impl TryFrom<&[u8]> for ToUnicodeCMap {

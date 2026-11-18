@@ -92,7 +92,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::Font(font, font_size) => {
                     let resource = font.get()?;
                     if let Resource::Font { font, resources } = resource.as_ref() {
-                        let handle = self.load_pdf_font(font.as_ref())?;
+                        let handle = self.load_pdf_font(font)?;
                         self.current_state_mut()?.text_state.font = Some(handle);
                         self.current_state_mut()?.text_state.font_spec = Some(Arc::clone(font));
                         if let Some(resources) = resources {

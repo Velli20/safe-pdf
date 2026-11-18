@@ -47,6 +47,12 @@ impl PdfCode {
     pub const fn byte_len(self) -> u8 {
         self.byte_len
     }
+
+    /// Returns the big-endian source bytes, the inverse of packing them.
+    pub fn bytes(self) -> impl Iterator<Item = u8> {
+        let skipped = 4_usize.saturating_sub(usize::from(self.byte_len));
+        self.value.to_be_bytes().into_iter().skip(skipped)
+    }
 }
 
 impl TryFrom<&[u8]> for PdfCode {
@@ -81,4 +87,20 @@ pub trait PdfCMap: Send + Sync {
 
     /// Reports whether the map uses horizontal or vertical writing.
     fn writing_mode(&self) -> WritingMode;
+
+    /// The shortest code of numeric `value` that this map reads back as exactly that
+    /// code, the inverse of [`Self::decode_next`]; `None` when no length of `value` is
+    /// a code of this map.
+    fn encode(&self, value: u32) -> Option<PdfCode> {
+        (1..=4).find_map(|byte_len| {
+            let code = PdfCode::new(value, byte_len).ok()?;
+            let mut buffer = [0; 4];
+            for (slot, byte) in buffer.iter_mut().zip(code.bytes()) {
+                *slot = byte;
+            }
+            let bytes = buffer.get(..usize::from(byte_len))?;
+            let mapping = self.decode_next(bytes).ok()??;
+            (mapping.source == code).then_some(code)
+        })
+    }
 }

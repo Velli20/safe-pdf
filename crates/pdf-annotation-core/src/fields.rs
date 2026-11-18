@@ -162,6 +162,17 @@ pub struct ComboBoxField {
     pub value: ComboValue,
 }
 
+impl ComboBoxField {
+    /// The option the value selects; `None` for custom text and no selection.
+    #[must_use]
+    pub fn selected_option(&self) -> Option<&ChoiceOption> {
+        let ComboValue::Option(id) = &self.value else {
+            return None;
+        };
+        self.options.iter().find(|option| option.id == *id)
+    }
+}
+
 /// Typed field configuration and value; field kinds cannot change through edits.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]

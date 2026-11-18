@@ -126,19 +126,24 @@ impl FontSystem {
     /// fallback policy. The returned handle records whether its primary face is a substitute so
     /// later glyph selection can prefer Unicode over incompatible PDF glyph identifiers.
     #[allow(clippy::arc_with_non_send_sync)]
-    pub fn load_pdf_font(&self, spec: PdfFontSpec) -> Result<PdfFontHandle, pdf_font::FontError> {
-        let spec = Arc::new(spec);
+    pub fn load_pdf_font(
+        &self,
+        spec: Arc<PdfFontSpec>,
+    ) -> Result<PdfFontHandle, pdf_font::FontError> {
         let source = match spec.as_ref() {
             PdfFontSpec::Type3(font) => Some(type3_source(font)),
             other => other.source().cloned(),
         };
-        let primary = source.map(|source| self.load_with_metadata(source, spec.metadata().clone()));
+        let primary = source.map(|source| {
+            self.load_with_metadata(source.clone(), spec.metadata().clone())
+                .map(|face| (face, source))
+        });
 
         match primary.transpose() {
-            Ok(Some(face)) => Ok(PdfFontHandle::new(spec, face)),
+            Ok(Some((face, source))) => Ok(PdfFontHandle::new(spec, face, source)),
             Ok(None) | Err(_) => {
-                let face = self.load_whole_font_fallback(spec.as_ref())?;
-                Ok(PdfFontHandle::new_with_substitute(spec, face))
+                let (face, source) = self.load_whole_font_fallback(spec.as_ref())?;
+                Ok(PdfFontHandle::new_with_substitute(spec, face, source))
             }
         }
     }
@@ -151,6 +156,24 @@ impl FontSystem {
     /// Decodes, resolves fallback, and positions a PDF text run.
     pub fn layout_pdf(&self, run: &PdfTextRun<'_>) -> Result<TextLayout, TextError> {
         crate::pdf_text_layout::layout_pdf(self, run)
+    }
+
+    /// The horizontal advance of the character codes `text` drawn in `font` at `font_size`;
+    /// zero when the codes cannot be laid out.
+    #[must_use]
+    pub fn text_width(&self, font: &PdfFontHandle, text: &[u8], font_size: f32) -> f32 {
+        let items = [crate::text::PdfTextItem::Text(text.into())];
+        let run = PdfTextRun {
+            font,
+            items: &items,
+            style: crate::text_style::TextStyle {
+                font_size,
+                ..crate::text_style::TextStyle::default()
+            },
+        };
+        self.layout_pdf(&run)
+            .map(|layout| layout.advance.x)
+            .unwrap_or_default()
     }
 
     /// Decodes and positions a PDF text run while emitting each glyph immediately.
@@ -211,7 +234,8 @@ impl FontSystem {
         Ok(face)
     }
 
-    /// Returns the first loadable whole-font fallback candidate in provider order.
+    /// Returns the first loadable whole-font fallback candidate in provider order, with the
+    /// source it was loaded from.
     ///
     /// A candidate-specific load error does not stop the search because later candidates may use a
     /// different format or driver. If the provider supplies no loadable face, the error is
@@ -219,7 +243,7 @@ impl FontSystem {
     fn load_whole_font_fallback(
         &self,
         spec: &PdfFontSpec,
-    ) -> Result<Arc<dyn FontFace>, pdf_font::FontError> {
+    ) -> Result<(Arc<dyn FontFace>, FontSource), pdf_font::FontError> {
         let candidates = self
             .fallback
             .whole_font_candidates(&WholeFontFallbackRequest {
@@ -228,8 +252,9 @@ impl FontSystem {
                 excluded_faces: &[],
             })?;
         for candidate in candidates {
-            if let Ok(face) = self.load_with_metadata(candidate.source, candidate.metadata) {
-                return Ok(face);
+            if let Ok(face) = self.load_with_metadata(candidate.source.clone(), candidate.metadata)
+            {
+                return Ok((face, candidate.source));
             }
         }
         Err(pdf_font::FontError::FallbackExhausted)

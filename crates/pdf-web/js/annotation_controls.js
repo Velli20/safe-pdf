@@ -37,6 +37,7 @@ export class FormControl extends AnnotationComponent {
     if (node instanceof HTMLButtonElement) node.type = 'button';
     this.bindDraftEvents();
     this.bindPressEvents();
+    this.bindEditEvents();
     this.bindTriggerEvents();
     this.listen(node, 'click', event => {
       if (this.control().kind === ControlKind.Button) { event.preventDefault(); layer.onAction(this.entry, 'activate'); }
@@ -59,12 +60,30 @@ export class FormControl extends AnnotationComponent {
       this.layer.onPress(this.entry, false);
     };
     this.listen(this.node, 'pointerdown', event => {
-      if (event.button !== 0 || !this.control().painted || !this.entry.editable && this.control().kind !== ControlKind.Button) return;
+      const control = this.control();
+      // Text entries have no down appearance; only buttons are pressed.
+      if (event.button !== 0 || !control.painted || FormControl.isTextEntry(control) || !this.entry.editable && control.kind !== ControlKind.Button) return;
       pressed = true;
       this.layer.onPress(this.entry, true);
     });
     for (const name of /** @type {const} */ (['pointerup', 'pointercancel', 'pointerleave'])) this.listen(this.node, name, release);
   }
+
+  /** Reports focus on a canvas-painted text entry so the host paints it without its value
+   * while the control shows the value being edited. `change` commits before `blur`. */
+  bindEditEvents() {
+    const edits = () => FormControl.isPaintedTextEntry(this.control());
+    this.listen(this.node, 'focus', () => { if (edits()) this.layer.onEdit(this.entry, true); });
+    this.listen(this.node, 'blur', () => { if (edits()) this.layer.onEdit(this.entry, false); });
+  }
+
+  /** Whether `control` takes typed text: a text field or a combo box.
+   * @param {import('./annotation_contract').WidgetControl} control */
+  static isTextEntry(control) { return control.kind === ControlKind.Text || control.kind === ControlKind.ComboBox; }
+
+  /** Whether the canvas paints `control`'s value, which the control shows only while edited.
+   * @param {import('./annotation_contract').WidgetControl | null | undefined} control */
+  static isPaintedTextEntry(control) { return !!control?.painted && FormControl.isTextEntry(control); }
 
   /** @returns {import('./annotation_contract').WidgetControl} */
   control() {
@@ -85,6 +104,7 @@ export class FormControl extends AnnotationComponent {
       this.revision ??= this.layer.snapshot?.annotationRevision;
       this.viewportRevision ??= this.layer.snapshot?.viewportRevision;
       if (this.phase !== EditPhase.Composing) this.phase = EditPhase.Draft;
+      this.updateCombStart(this.control());
     });
     this.listen(node, 'compositionstart', () => { this.phase = EditPhase.Composing; });
     this.listen(node, 'compositionend', () => {
@@ -159,8 +179,39 @@ export class FormControl extends AnnotationComponent {
     else if (p.input_type === 'checkbox' || p.input_type === 'radio' || p.tag === 'button') this.updateButton(p);
     else this.updateText(p);
     if (this.node instanceof HTMLInputElement || this.node instanceof HTMLTextAreaElement || this.node instanceof HTMLSelectElement) this.node.required = p.required;
-    this.node.style.lineHeight = String(LINE_SPACING);
+    this.updateSpacing(p);
     this.updateRotation(p);
+  }
+
+  /** Spaces a canvas-painted text entry's text as the canvas paints its value, so it stays
+   * in place while edited: inset by the control's `text_inset`, with lines the field font's
+   * line height apart. Other controls keep the default spacing.
+   * @param {import('./annotation_contract').WidgetControl} p */
+  updateSpacing(p) {
+    const style = this.node.style;
+    if (!FormControl.isPaintedTextEntry(p)) {
+      style.lineHeight = String(LINE_SPACING);
+      style.padding = '';
+      return;
+    }
+    style.lineHeight = String(this.layer.fieldFont(this.entry)?.lineHeight ?? LINE_SPACING);
+    style.padding = `${p.text_inset}px`;
+    style.fontKerning = p.comb == null ? '' : 'normal';
+    this.updateCombStart(p);
+  }
+
+  /** Starts a comb field's characters in the cell the canvas paints the first one in: the
+   * first cell, the cell that leaves the remaining cells after the value, or the middle of
+   * those, by the field's alignment. The field font spaces the characters one per cell.
+   * @param {import('./annotation_contract').WidgetControl} p */
+  updateCombStart(p) {
+    const node = this.node, cells = p.comb;
+    if (cells == null || !(node instanceof HTMLInputElement)) return;
+    const cell = (this.entry.size.width - 2 * p.text_inset) / cells;
+    const free = Math.max(cells - [...node.value].length, 0);
+    const start = { left: 0, center: Math.floor(free / 2), right: free }[this.entry.style.alignment];
+    node.style.textAlign = 'left';
+    node.style.paddingLeft = `${p.text_inset + start * cell}px`;
   }
 
   /** Rotates the control by its `/MK /R` angle; quarter turns swap its sides so the rotated box still covers the widget rectangle.

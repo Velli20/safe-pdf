@@ -1,7 +1,8 @@
 //! Best-effort font descriptor metadata and CID collection information.
 
 use crate::{
-    pdf::{CidSystemInfo, PdfFontDescriptor},
+    font::LineMetrics,
+    pdf::{CidSystemInfo, PDF_GLYPH_SPACE_UNITS_PER_EM, PdfFontDescriptor},
     type0_font_spec::CidToUnicode,
 };
 use pdf_cmap::predefined::PredefinedCMap;
@@ -20,11 +21,35 @@ impl FromPdfObject for PdfFontDescriptor {
             missing_width: context.lenient(b"MissingWidth"),
             italic_angle: context.lenient(b"ItalicAngle"),
             stem_v: context.lenient(b"StemV"),
+            ascent: context.lenient(b"Ascent"),
+            descent: context.lenient(b"Descent"),
         })
     }
 }
 
+/// A declared `/Descent` above this many thousandths of an em is a depth written without
+/// its sign; smaller positive values are too close to the baseline to tell apart and are
+/// kept as they are.
+const MISSIGNED_DESCENT: f32 = 10.0;
+
 impl PdfFontDescriptor {
+    /// The declared `/Ascent` and `/Descent` as fractions of an em, as viewers lay out
+    /// form text: a positive descent is read as its negation, and a descriptor declaring
+    /// neither, or both as zero, gives `None`.
+    pub(crate) fn line_metrics(&self) -> Option<LineMetrics> {
+        let ascent = self.ascent.unwrap_or_default();
+        let descent = self.descent.unwrap_or_default();
+        let descent = if descent > MISSIGNED_DESCENT {
+            -descent
+        } else {
+            descent
+        };
+        (ascent != 0.0 || descent != 0.0).then(|| LineMetrics {
+            ascent: ascent / PDF_GLYPH_SPACE_UNITS_PER_EM,
+            descent: descent / PDF_GLYPH_SPACE_UNITS_PER_EM,
+        })
+    }
+
     /// Derives family metadata from the enclosing font's BaseFont.
     pub(crate) fn named(mut self, base_font: Option<&[u8]>) -> Self {
         let family = base_font.map(|name| Arc::<str>::from(String::from_utf8_lossy(name)));

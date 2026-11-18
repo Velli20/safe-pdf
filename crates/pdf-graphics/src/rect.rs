@@ -59,6 +59,17 @@ impl Rect<f32> {
 
     /// Returns this rectangle with each edge moved to the nearest pixel boundary, keeping
     /// at least one pixel per axis, so thin bars stay solid and the gaps between them
+    /// This rectangle shrunk by `amount` on each side.
+    #[must_use]
+    pub fn inset(&self, amount: f32) -> Self {
+        Self {
+            left: self.left + amount,
+            top: self.top + amount,
+            right: self.right - amount,
+            bottom: self.bottom - amount,
+        }
+    }
+
     /// stay open.
     pub fn snapped_to_pixels(&self) -> Self {
         let snap = |start: f32, end: f32| {

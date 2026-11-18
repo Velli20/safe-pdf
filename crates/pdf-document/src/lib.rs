@@ -7,6 +7,7 @@ mod encrypt_objects;
 mod encryption;
 mod encryption_context;
 pub mod error;
+pub mod interactive_form;
 mod md5_key_derivation;
 pub mod object_loader;
 pub mod object_stream;

@@ -25,6 +25,8 @@ mod canvas_text_ops;
 mod content_stream_render_state;
 /// Errors reported across the canvas boundary.
 pub mod error;
+/// The font a `Tf` operand selects by resource name.
+pub mod font_selection;
 /// Decoded image rasters shared across renders.
 pub mod image_cache;
 /// Validated mask descriptions and portable coverage preparation.

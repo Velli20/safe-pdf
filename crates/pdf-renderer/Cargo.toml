@@ -10,6 +10,7 @@ error-backtrace = ["pdf-utils/error-backtrace"]
 pdf-optional-content = { path = "../pdf-optional-content" }
 pdf-utils = { path = "../pdf-utils" }
 pdf-content-stream = { path = "../pdf-content-stream" }
+pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }
 pdf-document = { path = "../pdf-document" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-canvas = { path = "../pdf-canvas" }
@@ -20,5 +21,6 @@ pdf-font = { path = "../pdf-font" }
 pdf-text-engine = { path = "../pdf-text-engine" }
 pdf-cmap = { path = "../pdf-cmap" }
 thiserror = "2.0.12"
+num-traits = "0.2.19"
 
 [dev-dependencies]

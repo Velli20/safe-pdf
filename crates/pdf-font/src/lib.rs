@@ -11,6 +11,7 @@ mod font_metadata;
 pub mod font_registry;
 pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
+pub mod host_font_program;
 mod metric_run;
 pub mod pdf;
 mod pdf_font_descriptor;
@@ -38,6 +39,7 @@ pub use fallback::{
 pub use font::{
     ExternalFontKey, FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
     FontProgramFormat, FontSource, FontStretch, FontWeight, GlyphGeometry, GlyphId, GlyphName,
+    LineMetrics,
 };
 pub use font_registry::FontRegistry;
 pub use pdf::{

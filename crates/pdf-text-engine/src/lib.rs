@@ -4,12 +4,15 @@
 
 pub mod error;
 mod pdf_text_decoder;
+pub mod pdf_text_encoder;
+mod pdf_text_host_font;
 mod pdf_text_layout;
 pub mod system;
 pub mod text;
 pub mod text_style;
 
 pub use error::TextError;
+pub use pdf_text_encoder::PdfTextEncoder;
 pub use system::FontSystem;
 
 /// Builds the standard font registry and bundled fallback policy.
@@ -37,20 +40,8 @@ pub fn measure_encoded_text_width(
     font_size: f32,
 ) -> f32 {
     let system = bundled_font_system();
-    let Ok(font) = system.load_pdf_font(spec.clone()) else {
+    let Ok(font) = system.load_pdf_font(std::sync::Arc::new(spec.clone())) else {
         return 0.0;
     };
-    let items = [pdf_content_stream_operators::PdfTextItem::Text(text.into())];
-    let run = text::PdfTextRun {
-        font: &font,
-        items: &items,
-        style: text_style::TextStyle {
-            font_size,
-            ..text_style::TextStyle::default()
-        },
-    };
-    system
-        .layout_pdf(&run)
-        .map(|layout| layout.advance.x)
-        .unwrap_or_default()
+    system.text_width(&font, text, font_size)
 }

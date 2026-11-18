@@ -2,7 +2,7 @@
 use crate::{WebViewport, annotation_entry::WebAnnotationEntry, error::WebResult};
 use pdf_annotation_core::{
     ActionReceipt, ActionTrigger, AnnotationCommandRequest, AnnotationOverlay, AnnotationReceipt,
-    PaintedAppearance, PreparedAnnotations, models::AnnotationId,
+    PaintedAppearance, PreparedAnnotations, PresentationState, models::AnnotationId,
 };
 use pdf_document::{diagnostic::PdfReadDiagnostic, document::PdfDocument};
 use pdf_graphics::{rect::Rect, transform::Transform};
@@ -65,9 +65,8 @@ impl PreparedAnnotationOverlay {
 /// One Core engine per document, independent of page mounts and canvas resources.
 pub struct WebAnnotationOverlay {
     overlay: AnnotationOverlay,
-    /// The widget held down by the pointer, painted with its down appearance.
-    /// Presentation state only; it never advances the document revision.
-    pressed: Option<AnnotationId>,
+    /// The pressed widget and the edited text entry the page canvas is painted with.
+    presentation: PresentationState,
 }
 
 impl WebAnnotationOverlay {
@@ -81,8 +80,15 @@ impl WebAnnotationOverlay {
             .iter()
             .map(|page| page.annotations.as_deref().unwrap_or_default());
         Ok(Self {
-            overlay: AnnotationOverlay::new(pages, document.optional_content.as_ref())?,
-            pressed: None,
+            overlay: AnnotationOverlay::new(
+                pages,
+                document.optional_content.as_ref(),
+                document
+                    .interactive_form
+                    .as_ref()
+                    .and_then(|form| form.default_appearance.as_ref()),
+            )?,
+            presentation: PresentationState::default(),
         })
     }
 
@@ -161,12 +167,12 @@ impl WebAnnotationOverlay {
     }
 
     /// Returns the widget appearances painted on `page`'s canvas under live field state,
-    /// with the pressed widget's down appearance.
+    /// with the pressed widget's down appearance and the edited text entry without its value.
     ///
     /// # Errors
     /// Propagates annotation layer errors for absent pages or unbound widgets.
     pub fn painted_appearances(&self, page: u32) -> WebResult<Vec<PaintedAppearance>> {
-        Ok(self.overlay.painted_appearances(page, self.pressed)?)
+        Ok(self.overlay.painted_appearances(page, self.presentation)?)
     }
 
     /// Returns the source artwork of the displayed stamp or note `id`, drawn into the
@@ -175,9 +181,24 @@ impl WebAnnotationOverlay {
         self.overlay.artwork(id)
     }
 
+    /// Returns the painted appearance of the displayed text entry `id` with its live value;
+    /// `None` for other annotations.
+    ///
+    /// # Errors
+    /// Rejects a widget whose bound field is missing.
+    pub fn text_entry(&self, id: AnnotationId) -> WebResult<Option<PaintedAppearance>> {
+        Ok(self.overlay.text_entry(id)?)
+    }
+
     /// Marks the widget the pointer holds down, or none; the host repaints its page.
     pub fn set_pressed(&mut self, pressed: Option<AnnotationId>) {
-        self.pressed = pressed;
+        self.presentation.pressed = pressed;
+    }
+
+    /// Marks the text entry the host is editing, or none; the host repaints its page so
+    /// only the control shows the value being edited.
+    pub fn set_editing(&mut self, editing: Option<AnnotationId>) {
+        self.presentation.editing = editing;
     }
 
     /// Returns the runtime optional content visibility page content is rendered with.

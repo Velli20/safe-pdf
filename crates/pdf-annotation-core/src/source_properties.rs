@@ -20,6 +20,15 @@ impl BorderStyle {
     pub fn resolved_width(&self) -> f32 {
         self.width.unwrap_or(1.0).max(0.0)
     }
+
+    /// Whether the border is beveled or inset, which draws it twice as deep inside the
+    /// annotation rectangle.
+    pub fn is_three_dimensional(&self) -> bool {
+        matches!(
+            self.style,
+            Some(BorderStyleName::Beveled | BorderStyleName::Inset)
+        )
+    }
 }
 
 impl SourceAnnotation {
@@ -146,6 +155,11 @@ impl WidgetAnnotation {
     /// on the field type, so callers check `/FT` separately.
     fn has_flag(&self, flag: WidgetFieldFlags) -> bool {
         self.field_flags.unwrap_or_default().contains(flag)
+    }
+
+    /// Whether the comb flag is set.
+    pub fn is_comb(&self) -> bool {
+        self.has_flag(WidgetFieldFlags::COMB)
     }
 
     /// Whether the radio flag is set.

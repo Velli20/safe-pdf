@@ -1,7 +1,7 @@
 //! Document-owned Core editing and disposable per-viewport annotation entries.
 use crate::{
     actions::ActionTrigger,
-    appearance_paint::PaintedAppearance,
+    appearance_paint::{PaintedAppearance, PresentationState},
     commands::{AnnotationCommand, Operation},
     engine::DocumentView,
     entry::AnnotationEntry,
@@ -78,6 +78,8 @@ impl AnnotationOverlay {
     ///
     /// `optional_content` is the document catalog's `/OCProperties`, which seeds
     /// which groups start visible. A document that declares none hides nothing.
+    /// `form_appearance` is the interactive form's `/DA`, which widgets whose field
+    /// hierarchy declares none are drawn and edited with.
     ///
     /// # Errors
     ///
@@ -86,8 +88,9 @@ impl AnnotationOverlay {
     pub fn new<'a>(
         pages: impl IntoIterator<Item = &'a [SourceAnnotation]>,
         optional_content: Option<&OptionalContentProperties>,
+        form_appearance: Option<&Arc<[u8]>>,
     ) -> AnnotationLayerResult<Self> {
-        let document = import::import(pages)?;
+        let document = import::import(pages, form_appearance)?;
         let imported = document.engine.view().data().revision;
         Ok(Self {
             document,
@@ -154,22 +157,22 @@ impl AnnotationOverlay {
 
     /// Returns the source appearances of `page`'s displayed button and read-only text
     /// widgets, selected by live field state, and of annotations drawn from their appearance,
-    /// in presentation order, for painting on the page canvas. The `pressed` widget draws its
-    /// down appearance.
+    /// in presentation order, for painting on the page canvas. The widget `presentation`
+    /// marks pressed draws its down appearance, and the text entry it marks editing draws
+    /// without its value.
     ///
     /// # Errors
     /// Rejects absent pages and widgets whose bound field is missing.
     pub fn painted_appearances(
         &self,
         page: u32,
-        pressed: Option<AnnotationId>,
+        presentation: PresentationState,
     ) -> AnnotationLayerResult<Vec<PaintedAppearance>> {
         let view = self.page_view(page)?;
         self.page_annotations(&view, page)
             .into_iter()
             .filter_map(|annotation| {
-                let pressed = pressed == Some(annotation.id);
-                PaintedAppearance::new(annotation, &view, &self.optional_content, pressed)
+                PaintedAppearance::new(annotation, &view, &self.optional_content, presentation)
                     .transpose()
             })
             .collect()
@@ -179,6 +182,22 @@ impl AnnotationOverlay {
     /// drawing into the annotation's own presentation; `None` for other annotations.
     pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
         PaintedAppearance::artwork(self.annotation(id)?, &self.optional_content)
+    }
+
+    /// Returns the painted appearance of the displayed text entry `id` with its live value,
+    /// whose `/DA` font a host shows the value being edited in; `None` for other annotations.
+    ///
+    /// # Errors
+    /// Rejects a widget whose bound field is missing.
+    pub fn text_entry(&self, id: AnnotationId) -> AnnotationLayerResult<Option<PaintedAppearance>> {
+        let Some(annotation) = self.annotation(id) else {
+            return Ok(None);
+        };
+        PaintedAppearance::text_entry(
+            annotation,
+            &self.document.engine.view(),
+            &self.optional_content,
+        )
     }
 
     /// Validates a GUI context, clamps interactive dragging, and dispatches one edit.

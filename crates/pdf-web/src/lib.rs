@@ -18,5 +18,5 @@ pub mod viewport;
 pub use annotation_entry::{WebAnnotationEntry, WebCss};
 pub use annotation_overlay::{PreparedAnnotationOverlay, WebAnnotationOverlay};
 pub use error::WebError;
-pub use page_renderer::{WebPageOutput, WebPageRenderer};
+pub use page_renderer::{FieldFont, WebPageOutput, WebPageRenderer};
 pub use viewport::WebViewport;

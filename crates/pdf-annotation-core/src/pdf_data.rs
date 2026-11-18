@@ -34,6 +34,8 @@ bitflags::bitflags! {
         const EDIT = 1 << 18;
         /// The choice field permits more than one selected option.
         const MULTI_SELECT = 1 << 21;
+        /// The text field is divided into `/MaxLen` equally spaced character cells.
+        const COMB = 1 << 24;
         /// Radio buttons with the same on-state value change in unison.
         const RADIOS_IN_UNISON = 1 << 25;
     }

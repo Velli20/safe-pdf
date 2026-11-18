@@ -53,9 +53,6 @@ pub enum PdfCanvasError {
     #[error(transparent)]
     /// Text layout or glyph preparation failed.
     Text(#[from] pdf_text_engine::TextError),
-    #[error("Font resource '{0}' was not found")]
-    /// The named font is absent from resources.
-    FontNotFound(String),
     #[error("Color space resource '{0}' was not found")]
     /// The named color space is absent from resources.
     ColorSpaceNotFound(String),
