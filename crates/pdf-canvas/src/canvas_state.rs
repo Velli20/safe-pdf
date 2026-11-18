@@ -36,22 +36,32 @@ pub(crate) struct CanvasState {
     /// as a clip region when the text object ends (ET operator).
     pub pending_text_clip: Option<PdfPath>,
     /// The current color space for stroking operations.
-    pub stroke_color_space: Option<Arc<ColorSpace>>,
+    pub stroke_color_space: Arc<ColorSpace>,
     /// The current color space for non-stroking operations.
-    pub fill_color_space: Option<Arc<ColorSpace>>,
+    pub fill_color_space: Arc<ColorSpace>,
 }
 
 impl CanvasState {
-    /// Default color space for both stroking and non-stroking operations.
-    const DEFAULT_COLOR_SPACE: ColorSpace = ColorSpace::DeviceGray;
-    /// Static DeviceGray color space.
-    pub const DEVICE_GRAY_COLOR_SPACE: ColorSpace = ColorSpace::DeviceGray;
-    /// Static DeviceRGB color space.
-    pub const DEVICE_RGB_COLOR_SPACE: ColorSpace = ColorSpace::DeviceRGB;
-    /// Static DeviceCMYK color space.
-    pub const DEVICE_CMYK_COLOR_SPACE: ColorSpace = ColorSpace::DeviceCMYK;
-    /// Static bare Pattern color space (no underlying space).
-    pub const PATTERN_COLOR_SPACE: ColorSpace = ColorSpace::Pattern(None);
+    /// Selects a device color space for stroking or non-stroking operations.
+    ///
+    /// Color operators such as `rg` select their space on every use, so the current
+    /// allocation is kept when it already holds `space`.
+    pub(crate) fn select_device_color_space(&mut self, stroking: bool, space: ColorSpace) {
+        let slot = if stroking {
+            &mut self.stroke_color_space
+        } else {
+            &mut self.fill_color_space
+        };
+        let unchanged = matches!(
+            (slot.as_ref(), &space),
+            (ColorSpace::DeviceGray, ColorSpace::DeviceGray)
+                | (ColorSpace::DeviceRGB, ColorSpace::DeviceRGB)
+                | (ColorSpace::DeviceCMYK, ColorSpace::DeviceCMYK)
+        );
+        if !unchanged {
+            *slot = Arc::new(space);
+        }
+    }
 }
 
 impl Default for CanvasState {
@@ -69,8 +79,8 @@ impl Default for CanvasState {
             fill_pattern: None,
             stroke_pattern: None,
             pending_text_clip: None,
-            stroke_color_space: Some(Arc::new(Self::DEFAULT_COLOR_SPACE)),
-            fill_color_space: Some(Arc::new(Self::DEFAULT_COLOR_SPACE)),
+            stroke_color_space: Arc::new(ColorSpace::DeviceGray),
+            fill_color_space: Arc::new(ColorSpace::DeviceGray),
         }
     }
 }

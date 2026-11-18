@@ -12,8 +12,14 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// filter out `d0`/`d1` before dispatch and apply the uncolored-glyph rule of `d1` there.
     pub(crate) fn apply_operator(&mut self, op: &PdfOperatorVariant) -> Result<(), PdfCanvasError> {
         match op {
-            PdfOperatorVariant::LineTo { x, y } => self.line_to(*x, *y),
-            PdfOperatorVariant::MoveTo { x, y } => self.move_to(*x, *y),
+            PdfOperatorVariant::LineTo { x, y } => {
+                self.current_path.line_to(*x, *y);
+                Ok(())
+            }
+            PdfOperatorVariant::MoveTo { x, y } => {
+                self.current_path.move_to(*x, *y);
+                Ok(())
+            }
             PdfOperatorVariant::CurveTo {
                 x1,
                 y1,
@@ -21,21 +27,42 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 y2,
                 x3,
                 y3,
-            } => self.curve_to(*x1, *y1, *x2, *y2, *x3, *y3),
-            PdfOperatorVariant::CurveToV { x2, y2, x3, y3 } => self.curve_to_v(*x2, *y2, *x3, *y3),
-            PdfOperatorVariant::CurveToY { x1, y1, x3, y3 } => self.curve_to_y(*x1, *y1, *x3, *y3),
-            PdfOperatorVariant::ClosePath => self.close_path(),
+            } => {
+                self.current_path.curve_to(*x1, *y1, *x2, *y2, *x3, *y3);
+                Ok(())
+            }
+            PdfOperatorVariant::CurveToV { x2, y2, x3, y3 } => {
+                // `v` uses the current point as its first control point.
+                let (x1, y1) = self
+                    .current_path
+                    .current_point()
+                    .ok_or(PdfCanvasError::CurrentPointRequired)?;
+                self.current_path.curve_to(x1, y1, *x2, *y2, *x3, *y3);
+                Ok(())
+            }
+            PdfOperatorVariant::CurveToY { x1, y1, x3, y3 } => {
+                // `y` uses its end point as its second control point.
+                self.current_path.curve_to(*x1, *y1, *x3, *y3, *x3, *y3);
+                Ok(())
+            }
+            PdfOperatorVariant::ClosePath => {
+                self.current_path.close();
+                Ok(())
+            }
             PdfOperatorVariant::Rectangle {
                 x,
                 y,
                 width,
                 height,
-            } => self.rectangle(*x, *y, *width, *height),
+            } => {
+                self.current_path.rect(*x, *y, *width, *height);
+                Ok(())
+            }
             PdfOperatorVariant::StrokePath => {
                 self.end_path(Some((PaintMode::Stroke, PathFillType::default())))
             }
             PdfOperatorVariant::CloseStrokePath => {
-                self.close_path()?;
+                self.current_path.close();
                 self.end_path(Some((PaintMode::Stroke, PathFillType::default())))
             }
             PdfOperatorVariant::FillPathNonZero => {
@@ -51,11 +78,11 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 self.end_path(Some((PaintMode::FillAndStroke, PathFillType::EvenOdd)))
             }
             PdfOperatorVariant::CloseFillAndStrokePathNonZero => {
-                self.close_path()?;
+                self.current_path.close();
                 self.end_path(Some((PaintMode::FillAndStroke, PathFillType::Winding)))
             }
             PdfOperatorVariant::CloseFillAndStrokePathEvenOdd => {
-                self.close_path()?;
+                self.current_path.close();
                 self.end_path(Some((PaintMode::FillAndStroke, PathFillType::EvenOdd)))
             }
             PdfOperatorVariant::EndPath => self.end_path(None),

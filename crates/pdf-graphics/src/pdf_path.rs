@@ -235,6 +235,24 @@ impl PdfPath {
     pub fn close(&mut self) {
         self.verbs.push(PathVerb::Close);
     }
+
+    /// Appends a closed rectangle subpath starting at (`x`, `y`), as the `re` operator does.
+    pub fn rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+        let right = x + width;
+        let bottom = y + height;
+        self.move_to(x, y);
+        self.line_to(right, y);
+        self.line_to(right, bottom);
+        self.line_to(x, bottom);
+        self.close();
+    }
+
+    /// Removes all verbs and the current point while keeping the verb buffer's capacity.
+    pub fn clear(&mut self) {
+        self.verbs.clear();
+        self.current_x = 0.0;
+        self.current_y = 0.0;
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 //! PDF operator interpretation and painting orchestration.
+use pdf_color_space::color_space::ColorSpace;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::font_selection::FontSelection;
@@ -58,8 +59,10 @@ impl PatternPaint {
 
 /// Interprets PDF operators and prepares device-space painting for a borrowed backend.
 pub struct PdfCanvas<'a, B: CanvasBackend> {
-    /// The current path being constructed or drawn, if any.
-    pub(crate) current_path: Option<PdfPath>,
+    /// The path being constructed; empty when no path is open.
+    ///
+    /// Its verb buffer is reused across paths that end without becoming a clip.
+    pub(crate) current_path: PdfPath,
     /// Clip rule requested by `W`/`W*`, applied to the current path once the next
     /// path-painting operator ends it.
     ///
@@ -151,7 +154,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         };
 
         Ok(Self {
-            current_path: None,
+            current_path: PdfPath::default(),
             pending_clip: None,
             canvas: backend,
             page,
@@ -312,7 +315,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ) -> Result<RecordingCanvas, PdfCanvasError> {
         let mut recording_canvas = RecordingCanvas::new(size.width, size.height);
         let mut other = PdfCanvas::<RecordingCanvas> {
-            current_path: None,
+            current_path: PdfPath::default(),
             pending_clip: None,
             canvas: &mut recording_canvas,
             page: self.page,
@@ -696,16 +699,24 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         paint: Option<(PaintMode, PathFillType)>,
     ) -> Result<(), PdfCanvasError> {
         let pending_clip = self.pending_clip.take();
-        let Some(path) = self.current_path.take() else {
+        if self.current_path.verbs.is_empty() {
             return Ok(());
-        };
-        if let Some((mode, fill_type)) = paint {
+        }
+        let mut path = std::mem::take(&mut self.current_path);
+        // Hidden optional content paints nothing, so skip preparing its paint.
+        if let Some((mode, fill_type)) = paint
+            && !self.content_hidden()
+        {
             let device_path = CanvasPath::transformed(&path, self.state.transform)?;
             self.draw_path(&device_path, mode, fill_type)?;
         }
         match pending_clip {
             Some(clip_rule) => self.set_clip_path(path, clip_rule),
-            None => Ok(()),
+            None => {
+                path.clear();
+                self.current_path = path;
+                Ok(())
+            }
         }
     }
 
@@ -949,36 +960,28 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         // The names /DeviceGray, /DeviceRGB, /DeviceCMYK, and /Pattern are reserved
         // keywords that always identify their corresponding colour spaces directly.
         // Per PDF spec §8.6.8 each also sets the current colour to its initial value.
-        if matches!(
-            name,
-            b"DeviceGray" | b"DeviceRGB" | b"DeviceCMYK" | b"Pattern"
-        ) {
-            let (cs, initial_color) = match name {
-                b"DeviceGray" => (
-                    Arc::new(CanvasState::DEVICE_GRAY_COLOR_SPACE),
-                    Some(Color::from_gray(0.0)),
-                ),
-                b"DeviceRGB" => (
-                    Arc::new(CanvasState::DEVICE_RGB_COLOR_SPACE),
-                    Some(Color::from_rgb(0.0, 0.0, 0.0)),
-                ),
-                b"DeviceCMYK" => (
-                    Arc::new(CanvasState::DEVICE_CMYK_COLOR_SPACE),
-                    Some(Color::from_cmyk(0.0, 0.0, 0.0, 1.0)),
-                ),
-                // Pattern: no initial colour is defined by the spec.
-                _ => (Arc::new(CanvasState::PATTERN_COLOR_SPACE), None),
-            };
+        let initial_color = match name {
+            b"DeviceGray" => Some((ColorSpace::DeviceGray, Color::from_gray(0.0))),
+            b"DeviceRGB" => Some((ColorSpace::DeviceRGB, Color::from_rgb(0.0, 0.0, 0.0))),
+            b"DeviceCMYK" => Some((ColorSpace::DeviceCMYK, Color::from_cmyk(0.0, 0.0, 0.0, 1.0))),
+            _ => None,
+        };
+        if let Some((space, color)) = initial_color {
+            state.select_device_color_space(is_stroking, space);
             if is_stroking {
-                state.stroke_color_space = Some(Arc::clone(&cs));
-                if let Some(color) = initial_color {
-                    state.paint.set_stroke_color(color);
-                }
+                state.paint.set_stroke_color(color);
             } else {
-                state.fill_color_space = Some(Arc::clone(&cs));
-                if let Some(color) = initial_color {
-                    state.paint.set_fill_color(color);
-                }
+                state.paint.set_fill_color(color);
+            }
+            return Ok(());
+        }
+        if name == b"Pattern" {
+            // Pattern: no initial colour is defined by the spec.
+            let cs = Arc::new(ColorSpace::Pattern(None));
+            if is_stroking {
+                state.stroke_color_space = cs;
+            } else {
+                state.fill_color_space = cs;
             }
             return Ok(());
         }
@@ -994,9 +997,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         };
 
         if is_stroking {
-            state.stroke_color_space = Some(Arc::clone(&cs));
+            state.stroke_color_space = cs;
         } else {
-            state.fill_color_space = Some(Arc::clone(&cs));
+            state.fill_color_space = cs;
         }
         Ok(())
     }
