@@ -59,9 +59,6 @@ pub enum PdfCanvasError {
     #[error("Pattern resource '{0}' was not found")]
     /// The named pattern or shading is absent from resources.
     PatternNotFound(String),
-    #[error("Graphics state stack is empty while accessing the current state")]
-    /// No PDF graphics state is available.
-    EmptyGraphicsStateStack,
     #[error("External object (XObject) '{0}' was not found in page resources")]
     /// The named external object is absent from resources.
     XObjectNotFound(String),

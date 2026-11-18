@@ -638,7 +638,7 @@ mod tests {
             pdf_text_engine::bundled_font_system(),
         )
         .unwrap();
-        canvas.current_state_mut().unwrap().soft_mask = Some(
+        canvas.state.soft_mask = Some(
             MaskLayer::new(
                 Arc::new(RecordingCanvas::new(128.0, 128.0)),
                 Transform::identity(),

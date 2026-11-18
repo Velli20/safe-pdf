@@ -30,7 +30,7 @@ fn apply_content_stream_color(
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Handles `SC`/`SCN` without a pattern: sets the stroking color.
     pub(crate) fn set_stroking_color(&mut self, components: &[f32]) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.stroke_pattern = None;
 
         let Some(color_space) = &state.stroke_color_space else {
@@ -48,7 +48,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         &mut self,
         components: &[f32],
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.fill_pattern = None;
 
         let Some(color_space) = &state.fill_color_space else {
@@ -68,7 +68,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         pattern_name: &[u8],
     ) -> Result<(), PdfCanvasError> {
         if !components.is_empty() {
-            let state = self.current_state_mut()?;
+            let state = &mut self.state;
             state.fill_pattern = None;
             let Some(cs) = state.fill_color_space.as_deref() else {
                 return Err(PdfCanvasError::ColorSpaceNotSet);
@@ -94,7 +94,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         pattern_name: &[u8],
     ) -> Result<(), PdfCanvasError> {
         if !components.is_empty() {
-            let state = self.current_state_mut()?;
+            let state = &mut self.state;
             state.stroke_pattern = None;
             let Some(cs) = state.stroke_color_space.as_deref() else {
                 return Err(PdfCanvasError::ColorSpaceNotSet);
@@ -115,7 +115,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 
     /// Handles `G`: sets a DeviceGray stroking color.
     pub(crate) fn set_stroking_gray(&mut self, gray: f32) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.paint.set_stroke_color(Color::from_gray(gray));
         state.stroke_pattern = None;
         state.stroke_color_space = Some(Arc::new(CanvasState::DEVICE_GRAY_COLOR_SPACE));
@@ -124,7 +124,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 
     /// Handles `g`: sets a DeviceGray non-stroking color.
     pub(crate) fn set_non_stroking_gray(&mut self, gray: f32) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.paint.set_fill_color(Color::from_gray(gray));
         state.fill_pattern = None;
         state.fill_color_space = Some(Arc::new(CanvasState::DEVICE_GRAY_COLOR_SPACE));
@@ -138,7 +138,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         g: f32,
         b: f32,
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.paint.set_stroke_color(Color::from_rgb(r, g, b));
         state.stroke_pattern = None;
         state.stroke_color_space = Some(Arc::new(CanvasState::DEVICE_RGB_COLOR_SPACE));
@@ -152,7 +152,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         g: f32,
         b: f32,
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.paint.set_fill_color(Color::from_rgb(r, g, b));
         state.fill_pattern = None;
         state.fill_color_space = Some(Arc::new(CanvasState::DEVICE_RGB_COLOR_SPACE));
@@ -167,7 +167,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         y: f32,
         k: f32,
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.paint.set_stroke_color(Color::from_cmyk(c, m, y, k));
         state.stroke_pattern = None;
         state.stroke_color_space = Some(Arc::new(CanvasState::DEVICE_CMYK_COLOR_SPACE));
@@ -182,7 +182,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         y: f32,
         k: f32,
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state_mut()?;
+        let state = &mut self.state;
         state.paint.set_fill_color(Color::from_cmyk(c, m, y, k));
         state.fill_pattern = None;
         state.fill_color_space = Some(Arc::new(CanvasState::DEVICE_CMYK_COLOR_SPACE));
