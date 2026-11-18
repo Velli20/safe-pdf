@@ -544,19 +544,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
                 // Uncolored patterns use the current color from the graphics state,
                 // so we filter out color-setting operators from the content stream.
-                let mut uncolored_filter = |op: &PdfOperatorVariant| -> bool {
-                    matches!(
-                        op,
-                        PdfOperatorVariant::SetNonStrokingColor(_)
-                            | PdfOperatorVariant::SetStrokingColor(_)
-                            | PdfOperatorVariant::SetGrayFill { .. }
-                            | PdfOperatorVariant::SetGrayStroke { .. }
-                            | PdfOperatorVariant::SetRGBFill { .. }
-                            | PdfOperatorVariant::SetRGBStroke { .. }
-                            | PdfOperatorVariant::SetCMYKFill { .. }
-                            | PdfOperatorVariant::SetCMYKStroke { .. }
-                    )
-                };
+                let mut uncolored_filter = PdfOperatorVariant::sets_color;
 
                 let filter: Option<&mut dyn FnMut(&PdfOperatorVariant) -> bool> = match paint_type {
                     PaintType::Colored => None,

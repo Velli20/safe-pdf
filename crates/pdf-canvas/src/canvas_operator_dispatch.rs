@@ -8,7 +8,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Applies one content-stream operator to the canvas.
     ///
     /// Operators without a visual effect on this canvas (compatibility sections, Type 3 glyph
-    /// metrics, rendering intent and flatness) are accepted and ignored.
+    /// metrics, rendering intent and flatness) are accepted and ignored. Type 3 glyph procedures
+    /// filter out `d0`/`d1` before dispatch and apply the uncolored-glyph rule of `d1` there.
     pub(crate) fn apply_operator(&mut self, op: &PdfOperatorVariant) -> Result<(), PdfCanvasError> {
         match op {
             PdfOperatorVariant::LineTo { x, y } => self.line_to(*x, *y),
