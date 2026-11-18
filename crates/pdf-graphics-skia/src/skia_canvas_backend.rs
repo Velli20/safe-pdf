@@ -310,7 +310,7 @@ fn to_skia_blend_mode(mode: BlendMode) -> skia_safe::BlendMode {
         BlendMode::Color => skia_safe::BlendMode::Color,
         BlendMode::Luminosity => skia_safe::BlendMode::Luminosity,
         BlendMode::DestinationIn => skia_safe::BlendMode::DstIn,
-        BlendMode::Unknown(_) => skia_safe::BlendMode::SrcOver,
+        BlendMode::Unknown => skia_safe::BlendMode::SrcOver,
     }
 }
 
@@ -972,7 +972,7 @@ mod tests {
     /// Verifies that unknown blend mode uses normal compositing.
     fn unknown_blend_mode_uses_normal_compositing() {
         assert_eq!(
-            to_skia_blend_mode(BlendMode::Unknown(Vec::from(b"VendorBlend"))),
+            to_skia_blend_mode(BlendMode::Unknown),
             skia_safe::BlendMode::SrcOver
         );
     }

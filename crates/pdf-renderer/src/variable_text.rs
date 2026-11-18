@@ -38,9 +38,14 @@ impl PdfRenderer {
             .zip(form.bbox)
             .and_then(|(text, bbox)| {
                 let (font, _) = canvas.load_named_font(&text.font, resources).ok()?;
-                ValueLayout::new(&self.font_system, font, bbox, text)
-                    .ok()?
-                    .stream(&form.content_stream)
+                ValueLayout::new(
+                    &self.font_system,
+                    std::sync::Arc::unwrap_or_clone(font),
+                    bbox,
+                    text,
+                )
+                .ok()?
+                .stream(&form.content_stream)
             })
     }
 

@@ -236,13 +236,7 @@ fn replay_commands<B: CanvasBackend>(
                     shader,
                     blend_mode,
                 } => {
-                    backend.fill_path(
-                        path,
-                        *fill_type,
-                        *color,
-                        shader.as_ref(),
-                        blend_mode.clone(),
-                    )?;
+                    backend.fill_path(path, *fill_type, *color, shader.as_ref(), *blend_mode)?;
                 }
                 StrokePath {
                     path,
@@ -258,7 +252,7 @@ fn replay_commands<B: CanvasBackend>(
                         *line_width,
                         stroke_style,
                         shader.as_ref(),
-                        blend_mode.clone(),
+                        *blend_mode,
                     )?;
                 }
                 SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
@@ -276,7 +270,7 @@ fn replay_commands<B: CanvasBackend>(
                     alpha,
                     transform,
                 } => {
-                    backend.draw_image(image, blend_mode.clone(), *alpha, *transform)?;
+                    backend.draw_image(image, *blend_mode, *alpha, *transform)?;
                 }
                 DrawInlineImage {
                     image,
@@ -284,7 +278,7 @@ fn replay_commands<B: CanvasBackend>(
                     alpha,
                     transform,
                 } => {
-                    backend.draw_inline_image(image, blend_mode.clone(), *alpha, *transform)?;
+                    backend.draw_inline_image(image, *blend_mode, *alpha, *transform)?;
                 }
                 Mask { mask, len } => {
                     let (body, rest) = commands
@@ -301,7 +295,7 @@ fn replay_commands<B: CanvasBackend>(
                     let (body, rest) = commands
                         .split_at_checked(*len)
                         .ok_or(RecordingError::InvalidLayerBody)?;
-                    backend.with_group_layer(*alpha, blend_mode.clone(), |backend| {
+                    backend.with_group_layer(*alpha, *blend_mode, |backend| {
                         replay_commands(body, backend)
                     })?;
                     commands = rest;

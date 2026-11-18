@@ -27,7 +27,7 @@ pub enum ExternalGraphicsStateKey {
     /// Dash pattern (`D`), read from a `[dash_array dash_phase]` array.
     ///
     /// An empty dash array means a solid line and produces no entry.
-    DashPattern(DashPattern),
+    DashPattern(Arc<DashPattern>),
     /// Text font (`Font`), read from a `[font size]` array: the shared font resource and
     /// the font size.
     Font(pdf_object_reader::ObjectHandle<Resource>, f32),
@@ -67,7 +67,7 @@ impl FromPdfObject for ExternalGraphicsState {
             context
                 .optional::<DashEntry>(b"D")?
                 .and_then(|DashEntry(pattern)| pattern)
-                .map(ExternalGraphicsStateKey::DashPattern),
+                .map(|pattern| ExternalGraphicsStateKey::DashPattern(Arc::new(pattern))),
             context
                 .optional::<FontEntry>(b"Font")?
                 .map(|FontEntry(font, size)| ExternalGraphicsStateKey::Font(font, size)),
@@ -163,7 +163,7 @@ impl FromPdfObject for BlendModeEntry {
         let mut names = context.array()?;
         for index in 0..names.array().len() {
             let mode = BlendMode::from(&*names.at::<Arc<[u8]>>(index)?);
-            if !matches!(mode, BlendMode::Unknown(_)) {
+            if mode != BlendMode::Unknown {
                 return Ok(Self(mode));
             }
         }

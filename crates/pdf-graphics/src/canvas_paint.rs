@@ -1,5 +1,7 @@
 //! Paint properties shared by canvas and text rendering operations.
 
+use std::sync::Arc;
+
 use crate::{BlendMode, DashPattern, LineCap, LineJoin, TextRenderingMode, color::Color};
 
 // The PDF specification's initial graphics state sets both stroking and non-stroking colors to
@@ -26,7 +28,9 @@ pub struct CanvasPaint {
     /// Shape used at stroked path joins.
     pub line_join: LineJoin,
     /// Optional dash pattern. `None` represents a solid stroke.
-    pub dash_pattern: Option<DashPattern>,
+    ///
+    /// Shared so saving the graphics state does not copy the intervals.
+    pub dash_pattern: Option<Arc<DashPattern>>,
     /// Optional compositing blend mode.
     pub blend_mode: Option<BlendMode>,
     /// PDF text painting and clipping mode.

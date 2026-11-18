@@ -51,7 +51,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         dash_array: &[f32],
         dash_phase: f32,
     ) -> Result<(), PdfCanvasError> {
-        self.state.paint.dash_pattern = DashPattern::new(dash_array.to_vec(), dash_phase)?;
+        self.state.paint.dash_pattern =
+            DashPattern::new(dash_array.to_vec(), dash_phase)?.map(Arc::new);
         Ok(())
     }
 
@@ -84,14 +85,13 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                     self.state.paint.miter_limit = *miter;
                 }
                 ExternalGraphicsStateKey::DashPattern(dash_pattern) => {
-                    self.state.paint.dash_pattern = Some(dash_pattern.clone());
+                    self.state.paint.dash_pattern = Some(Arc::clone(dash_pattern));
                 }
                 ExternalGraphicsStateKey::Font(font, font_size) => {
                     let resource = font.get()?;
                     if let Resource::Font { font, resources } = resource.as_ref() {
                         let handle = self.load_pdf_font(font)?;
                         self.state.text_state.font = Some(handle);
-                        self.state.text_state.font_spec = Some(Arc::clone(font));
                         if let Some(resources) = resources {
                             self.state.text_state.resources = Some(resources.get()?);
                         }
@@ -104,7 +104,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                     self.state.text_state.style.font_size = *font_size;
                 }
                 ExternalGraphicsStateKey::BlendMode(mode) => {
-                    self.state.paint.blend_mode = Some(mode.clone());
+                    self.state.paint.blend_mode = Some(*mode);
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
                     // Handle the `/SMask` entry from an `ExtGState` dictionary.
