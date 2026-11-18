@@ -1,4 +1,4 @@
-use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath};
+use pdf_graphics::pdf_path::PdfPath;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
@@ -90,57 +90,5 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         path.line_to(x, y + height);
         path.close();
         Ok(())
-    }
-}
-
-impl<B: CanvasBackend> PdfCanvas<'_, B> {
-    /// Handles `S`: strokes the current path.
-    pub(crate) fn stroke_path(&mut self) -> Result<(), PdfCanvasError> {
-        self.end_path(Some((PaintMode::Stroke, PathFillType::default())))
-    }
-
-    /// Handles `s`: closes and strokes the current path.
-    pub(crate) fn close_and_stroke_path(&mut self) -> Result<(), PdfCanvasError> {
-        self.close_path()?;
-        self.stroke_path()
-    }
-
-    /// Handles `f`/`F`: fills the current path with the nonzero winding rule.
-    pub(crate) fn fill_path_nonzero_winding(&mut self) -> Result<(), PdfCanvasError> {
-        self.end_path(Some((PaintMode::Fill, PathFillType::Winding)))
-    }
-
-    /// Handles `f*`: fills the current path with the even-odd rule.
-    pub(crate) fn fill_path_even_odd(&mut self) -> Result<(), PdfCanvasError> {
-        self.end_path(Some((PaintMode::Fill, PathFillType::EvenOdd)))
-    }
-
-    /// Handles `B`: fills (nonzero winding) and strokes the current path.
-    pub(crate) fn fill_and_stroke_path_nonzero_winding(&mut self) -> Result<(), PdfCanvasError> {
-        self.end_path(Some((PaintMode::FillAndStroke, PathFillType::Winding)))
-    }
-
-    /// Handles `B*`: fills (even-odd) and strokes the current path.
-    pub(crate) fn fill_and_stroke_path_even_odd(&mut self) -> Result<(), PdfCanvasError> {
-        self.end_path(Some((PaintMode::FillAndStroke, PathFillType::EvenOdd)))
-    }
-
-    /// Handles `b`: closes, fills (nonzero winding) and strokes the current path.
-    pub(crate) fn close_fill_and_stroke_path_nonzero_winding(
-        &mut self,
-    ) -> Result<(), PdfCanvasError> {
-        self.close_path()?;
-        self.fill_and_stroke_path_nonzero_winding()
-    }
-
-    /// Handles `b*`: closes, fills (even-odd) and strokes the current path.
-    pub(crate) fn close_fill_and_stroke_path_even_odd(&mut self) -> Result<(), PdfCanvasError> {
-        self.close_path()?;
-        self.fill_and_stroke_path_even_odd()
-    }
-
-    /// Handles `n`: ends the current path without painting it.
-    pub(crate) fn end_path_no_op(&mut self) -> Result<(), PdfCanvasError> {
-        self.end_path(None)
     }
 }

@@ -140,42 +140,6 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 }
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
-    /// Handles `Tj`: shows a text string.
-    pub(crate) fn show_text(&mut self, text: &PdfTextItem) -> Result<(), PdfCanvasError> {
-        self.render_text_items(std::slice::from_ref(text))
-    }
-
-    /// Handles `TJ`: shows strings with individual position adjustments.
-    pub(crate) fn show_text_with_glyph_positioning(
-        &mut self,
-        elements: &[PdfTextItem],
-    ) -> Result<(), PdfCanvasError> {
-        self.render_text_items(elements)
-    }
-
-    /// Handles `'`: moves to the next line and shows text.
-    pub(crate) fn move_to_next_line_and_show_text(
-        &mut self,
-        text: &PdfTextItem,
-    ) -> Result<(), PdfCanvasError> {
-        self.move_to_start_of_next_line()?;
-        self.show_text(text)
-    }
-
-    /// Handles `"`: sets word and character spacing, then behaves as `'`.
-    pub(crate) fn set_spacing_and_show_text(
-        &mut self,
-        word_spacing: f32,
-        char_spacing: f32,
-        text: &PdfTextItem,
-    ) -> Result<(), PdfCanvasError> {
-        self.set_word_spacing(word_spacing)?;
-        self.set_character_spacing(char_spacing)?;
-        self.move_to_next_line_and_show_text(text)
-    }
-}
-
-impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Paints or accumulates one scalable glyph outline.
     ///
     /// `outline` is expressed in font design coordinates. `transform` maps those coordinates into
@@ -283,7 +247,11 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         result.and(restore_result)
     }
 
-    fn render_text_items(&mut self, items: &[PdfTextItem]) -> Result<(), PdfCanvasError> {
+    /// Handles `Tj`/`TJ`: shows text items, then advances the text matrix past them.
+    pub(crate) fn render_text_items(
+        &mut self,
+        items: &[PdfTextItem],
+    ) -> Result<(), PdfCanvasError> {
         let state = self.current_state()?;
         let font = state
             .text_state

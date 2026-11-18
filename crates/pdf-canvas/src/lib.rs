@@ -3,7 +3,6 @@
 /// Drawing operations implemented by concrete rendering backends.
 pub mod canvas_backend;
 /// PDF clipping-path operator handling.
-mod canvas_clip_ops;
 /// PDF color-space and color-setting operators.
 mod canvas_color_ops;
 /// Canvas external object ops.

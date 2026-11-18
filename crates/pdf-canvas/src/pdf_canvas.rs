@@ -61,6 +61,9 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) current_path: Option<PdfPath>,
     /// Clip rule requested by `W`/`W*`, applied to the current path once the next
     /// path-painting operator ends it.
+    ///
+    /// The mark applies even when `W`/`W*` comes before the path is built. If that
+    /// operator ends no path, the mark is dropped and the clipping path stays unchanged.
     pub(crate) pending_clip: Option<PathFillType>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
     pub(crate) canvas: &'a mut B,
