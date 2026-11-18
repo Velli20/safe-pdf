@@ -1,6 +1,6 @@
 //! PDF graphics-state values retained across saved states.
 use pdf_color_space::color_space::ColorSpace;
-use pdf_graphics::{CanvasPaint, pdf_path::PdfPath, transform::Transform};
+use pdf_graphics::{CanvasPaint, transform::Transform};
 use pdf_resources::{color_transfer::ColorTransferTables, pattern::Pattern, resources::Resources};
 use std::sync::Arc;
 
@@ -30,11 +30,6 @@ pub(crate) struct CanvasState {
     pub fill_pattern: Option<Arc<Pattern>>,
     /// The current pattern used for stroking.
     pub stroke_pattern: Option<Arc<Pattern>>,
-    /// Accumulated glyph outlines (in device space) for clip-mode text rendering (modes 4–7).
-    ///
-    /// Glyphs are appended here during a text object and the resulting path is applied
-    /// as a clip region when the text object ends (ET operator).
-    pub pending_text_clip: Option<PdfPath>,
     /// The current color space for stroking operations.
     pub stroke_color_space: Arc<ColorSpace>,
     /// The current color space for non-stroking operations.
@@ -78,7 +73,6 @@ impl Default for CanvasState {
             resources: None,
             fill_pattern: None,
             stroke_pattern: None,
-            pending_text_clip: None,
             stroke_color_space: Arc::new(ColorSpace::DeviceGray),
             fill_color_space: Arc::new(ColorSpace::DeviceGray),
         }

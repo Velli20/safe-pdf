@@ -69,6 +69,12 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The mark applies even when `W`/`W*` comes before the path is built. If that
     /// operator ends no path, the mark is dropped and the clipping path stays unchanged.
     pub(crate) pending_clip: Option<PathFillType>,
+    /// Glyph outlines, in device space, accumulated by clip-mode text (modes 4–7) and
+    /// applied as a clip when the text object ends (`ET`).
+    ///
+    /// Like the current path, this is text-object state rather than graphics state, so
+    /// `q`/`Q` neither copy nor restore it.
+    pub(crate) pending_text_clip: Option<PdfPath>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
     pub(crate) canvas: &'a mut B,
     /// The PDF page associated with this canvas.
@@ -76,7 +82,7 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// Shared text engine used to load and lay out font resources.
     pub(crate) font_system: Arc<FontSystem>,
     /// Loaded font handles keyed by the font they were selected as.
-    font_cache: HashMap<FontKey, PdfFontHandle>,
+    font_cache: HashMap<FontKey, Arc<PdfFontHandle>>,
     /// Decoded image XObjects, shared with nested canvases and, through
     /// [`Self::with_image_cache`], with other renders.
     image_cache: Arc<ImageCache>,
@@ -156,6 +162,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(Self {
             current_path: PdfPath::default(),
             pending_clip: None,
+            pending_text_clip: None,
             canvas: backend,
             page,
             font_system,
@@ -317,6 +324,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let mut other = PdfCanvas::<RecordingCanvas> {
             current_path: PdfPath::default(),
             pending_clip: None,
+            pending_text_clip: None,
             canvas: &mut recording_canvas,
             page: self.page,
             font_system: Arc::clone(&self.font_system),
@@ -353,7 +361,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         &mut self,
         name: &[u8],
         resources: Option<&Resources>,
-    ) -> Result<(PdfFontHandle, Option<Arc<Resources>>), PdfCanvasError> {
+    ) -> Result<(Arc<PdfFontHandle>, Option<Arc<Resources>>), PdfCanvasError> {
         match FontSelection::new(name, resources, self.fallback_fonts.as_deref()) {
             FontSelection::Resource { font, resources } => {
                 Ok((self.load_pdf_font(&font)?, resources))
@@ -369,7 +377,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     pub(crate) fn load_pdf_font(
         &mut self,
         spec: &Arc<PdfFontSpec>,
-    ) -> Result<PdfFontHandle, PdfCanvasError> {
+    ) -> Result<Arc<PdfFontHandle>, PdfCanvasError> {
         let key = FontKey::Resource(Arc::as_ptr(spec));
         self.load_cached_font(key, || Arc::clone(spec))
     }
@@ -379,12 +387,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         &mut self,
         key: FontKey,
         spec: impl FnOnce() -> Arc<PdfFontSpec>,
-    ) -> Result<PdfFontHandle, PdfCanvasError> {
+    ) -> Result<Arc<PdfFontHandle>, PdfCanvasError> {
         if let Some(handle) = self.font_cache.get(&key) {
-            return Ok(handle.clone());
+            return Ok(Arc::clone(handle));
         }
-        let handle = self.font_system.load_pdf_font(spec())?;
-        self.font_cache.insert(key, handle.clone());
+        let handle = Arc::new(self.font_system.load_pdf_font(spec())?);
+        self.font_cache.insert(key, Arc::clone(&handle));
         Ok(handle)
     }
 
@@ -600,7 +608,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     let paint = &self.state.paint;
                     Some((
                         paint.fill_color,
-                        paint.blend_mode.clone(),
+                        paint.blend_mode,
                         pattern_paint.into_shader(),
                         self.pattern_bbox_clip(false)?,
                     ))
@@ -616,7 +624,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     let state = &self.state;
                     Some((
                         state.paint.stroke_color,
-                        state.paint.blend_mode.clone(),
+                        state.paint.blend_mode,
                         state.paint.line_width * state.transform.area_scale(),
                         StrokeStyle::from_paint(&state.paint, &state.transform)?,
                         pattern_paint.into_shader(),
@@ -746,10 +754,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Call this for every glyph rendered with a clip mode (4–7). The accumulated path
     /// is applied as a clip region when the text object ends via `end_text_object`.
     pub(crate) fn add_to_text_clip(&mut self, path: &CanvasPath<'_>) -> Result<(), PdfCanvasError> {
-        let clip = self
-            .state
-            .pending_text_clip
-            .get_or_insert_with(PdfPath::default);
+        let clip = self.pending_text_clip.get_or_insert_with(PdfPath::default);
         path.extend_into(clip)?;
         Ok(())
     }
@@ -858,6 +863,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             .map(OptionalContentFilter::depth);
         self.save()?;
         let outer_floor = std::mem::replace(&mut self.restore_floor, self.saved_states.len());
+        let outer_text_clip = self.pending_text_clip.take();
 
         let result = (|| {
             if let Some(mat) = mat {
@@ -889,6 +895,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
             Ok(())
         })();
+        // A Type 3 glyph procedure runs inside the caller's text object; its own text
+        // objects must neither clear nor apply the caller's pending text clip.
+        self.pending_text_clip = outer_text_clip;
 
         self.restore_floor = outer_floor;
         // Marked-content sequences cannot span streams, so close any left open.

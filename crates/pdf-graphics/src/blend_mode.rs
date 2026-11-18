@@ -1,7 +1,7 @@
 /// Represents the blend mode used for compositing graphics.
 ///
 /// Blend modes determine how colors from different layers are combined.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum BlendMode {
     Normal,
     Multiply,
@@ -20,7 +20,8 @@ pub enum BlendMode {
     Color,
     Luminosity,
     DestinationIn,
-    Unknown(Vec<u8>),
+    /// A name this renderer does not implement; it composites as `Normal`.
+    Unknown,
 }
 
 impl From<&[u8]> for BlendMode {
@@ -42,7 +43,7 @@ impl From<&[u8]> for BlendMode {
             b"Saturation" => Self::Saturation,
             b"Color" => Self::Color,
             b"Luminosity" => Self::Luminosity,
-            other => Self::Unknown(Vec::from(other)),
+            _ => Self::Unknown,
         }
     }
 }
@@ -52,10 +53,10 @@ mod tests {
     use super::BlendMode;
 
     #[test]
-    fn preserves_unknown_blend_mode() {
+    fn unrecognized_name_is_unknown_blend_mode() {
         assert_eq!(
             BlendMode::from(b"VendorBlend".as_slice()),
-            BlendMode::Unknown(Vec::from(b"VendorBlend"))
+            BlendMode::Unknown
         );
     }
 }

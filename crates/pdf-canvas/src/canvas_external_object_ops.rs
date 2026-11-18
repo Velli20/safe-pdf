@@ -127,7 +127,6 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let blend_mode = state
             .paint
             .blend_mode
-            .clone()
             .filter(|mode| *mode != BlendMode::Normal);
         let mask = state.soft_mask.clone();
         // A non-isolated group's contents painted straight onto the backdrop composite
@@ -241,7 +240,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     ) -> Result<(), PdfCanvasError> {
         let transform = self.image_transform()?;
         let paint = &self.state.paint;
-        let blend_mode = paint.blend_mode.clone();
+        let blend_mode = paint.blend_mode;
         // Images paint with the non-stroking alpha constant (`ca`).
         let alpha = paint.fill_color.a;
         self.with_soft_mask(|backend| {
@@ -273,7 +272,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let state = &self.state;
         let area = CanvasPath::transformed(&PdfPath::from(&Rect::new(1.0, 1.0)), state.transform)?
             .into_owned();
-        let (color, blend_mode) = (state.paint.fill_color, state.paint.blend_mode.clone());
+        let (color, blend_mode) = (state.paint.fill_color, state.paint.blend_mode);
         self.with_soft_mask(|backend| {
             backend.with_mask_layer(&stencil, |backend| {
                 with_clip(backend, clip.as_ref(), |backend| {

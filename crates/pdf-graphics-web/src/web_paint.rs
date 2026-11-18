@@ -19,7 +19,7 @@ pub(crate) fn color_css(color: Color) -> WebResult<String> {
 
 pub(crate) fn blend(mode: Option<&BlendMode>) -> &'static str {
     match mode {
-        None | Some(BlendMode::Normal | BlendMode::Unknown(_)) => "source-over",
+        None | Some(BlendMode::Normal | BlendMode::Unknown) => "source-over",
         Some(BlendMode::Multiply) => "multiply",
         Some(BlendMode::Screen) => "screen",
         Some(BlendMode::Overlay) => "overlay",

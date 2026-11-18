@@ -24,6 +24,22 @@ fn path_stream(count: usize) -> ContentStream {
         )
         .expect("writing to a string should succeed");
     }
+    parse(data)
+}
+
+/// Builds a stream that selects a font and a dash, then saves and restores `count` times.
+fn save_restore_stream(count: usize) -> ContentStream {
+    let mut data = String::from("BT /F1 12 Tf ET [3 1] 0 d\n");
+    for index in 0..count {
+        let x = index % 100;
+        let y = index / 100;
+        writeln!(data, "q 1 0 0 1 {x} {y} cm 0 0 1 1 re f Q")
+            .expect("writing to a string should succeed");
+    }
+    parse(data)
+}
+
+fn parse(data: String) -> ContentStream {
     let stream = StreamObject::new(1, 0, Dictionary::default(), data.into_bytes());
     pdf_object_reader::ObjectReader::new(EmptySource)
         .read::<ContentStream>(&ObjectVariant::Stream(stream))
@@ -33,17 +49,25 @@ fn path_stream(count: usize) -> ContentStream {
 fn benchmark(c: &mut Criterion) {
     let font_system = bundled_font_system();
     let page = PdfPage::default();
-    let stream = path_stream(5_000);
-    c.bench_function("dispatch/render_5000_colored_paths", |bencher| {
-        bencher.iter(|| {
-            let mut recording = RecordingCanvas::new(1000.0, 1000.0);
-            let mut canvas = PdfCanvas::new(&mut recording, &page, None, Arc::clone(&font_system))
-                .expect("canvas should initialize");
-            canvas
-                .render_content_stream(&stream, None, None, None, None)
-                .expect("paths should render");
+    for (name, stream) in [
+        ("dispatch/render_5000_colored_paths", path_stream(5_000)),
+        (
+            "dispatch/save_restore_5000_with_font_and_dash",
+            save_restore_stream(5_000),
+        ),
+    ] {
+        c.bench_function(name, |bencher| {
+            bencher.iter(|| {
+                let mut recording = RecordingCanvas::new(1000.0, 1000.0);
+                let mut canvas =
+                    PdfCanvas::new(&mut recording, &page, None, Arc::clone(&font_system))
+                        .expect("canvas should initialize");
+                canvas
+                    .render_content_stream(&stream, None, None, None, None)
+                    .expect("stream should render");
+            });
         });
-    });
+    }
 }
 
 criterion_group!(benches, benchmark);

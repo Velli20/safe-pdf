@@ -49,7 +49,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         state.text_state.matrix = Transform::identity();
         state.text_state.line_matrix = Transform::identity();
         // Clear any stale clip accumulator (guards against a missing ET from a prior object).
-        state.pending_text_clip = None;
+        self.pending_text_clip = None;
         Ok(())
     }
 
@@ -57,7 +57,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     pub(crate) fn end_text_object(&mut self) -> Result<(), PdfCanvasError> {
         // Apply any glyph outlines accumulated for clip-mode text rendering (modes 4–7).
         // Per ISO 32000 §9.3.6, the clip path is set at the end of the text object.
-        if let Some(clip_path) = self.state.pending_text_clip.take() {
+        if let Some(clip_path) = self.pending_text_clip.take() {
             let clip_path =
                 CanvasPath::shared(std::sync::Arc::new(clip_path), Transform::identity())?;
             self.canvas
@@ -107,7 +107,6 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let resources = self.state.resources.clone();
         let (handle, nested_resources) = self.load_named_font(font_name, resources.as_deref())?;
         let text_state = &mut self.state.text_state;
-        text_state.font_spec = Some(Arc::clone(handle.shared_spec()));
         text_state.font = Some(handle);
         text_state.resources = nested_resources;
         text_state.style.font_size = size;
@@ -201,8 +200,9 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let state = &self.state;
         let font = state
             .text_state
-            .font_spec
-            .clone()
+            .font
+            .as_ref()
+            .map(|font| Arc::clone(font.shared_spec()))
             .ok_or(PdfCanvasError::CurrentFontRequired)?;
         let resources = state.text_state.resources.clone();
 
@@ -254,8 +254,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             .text_state
             .font
             .as_ref()
-            .ok_or(PdfCanvasError::CurrentFontRequired)?
-            .clone();
+            .map(Arc::clone)
+            .ok_or(PdfCanvasError::CurrentFontRequired)?;
 
         let style = state.text_state.style.clone();
         let rendering_mode = state.paint.rendering_mode;

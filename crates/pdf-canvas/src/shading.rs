@@ -39,7 +39,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         };
 
         let fill_color = state.paint.fill_color;
-        let blend_mode = state.paint.blend_mode.clone();
+        let blend_mode = state.paint.blend_mode;
         let mat = state.transform;
         let bbox_clip = shading_bbox_clip(&shading, &mat)?;
         let shader = Some(self.build_shading_shader(&shading, &Some(mat), false)?);

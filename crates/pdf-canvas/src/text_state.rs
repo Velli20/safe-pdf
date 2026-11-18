@@ -1,4 +1,3 @@
-use pdf_font::PdfFontSpec;
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_graphics::transform::Transform;
 use pdf_resources::resources::Resources;
@@ -12,8 +11,8 @@ pub(crate) struct TextState {
     pub(crate) line_matrix: Transform,
     pub(crate) style: TextStyle,
     pub(crate) leading: f32,
-    pub(crate) font: Option<PdfFontHandle>,
-    pub(crate) font_spec: Option<Arc<PdfFontSpec>>,
+    /// Shared so saving the graphics state costs one reference count.
+    pub(crate) font: Option<Arc<PdfFontHandle>>,
     pub(crate) resources: Option<Arc<Resources>>,
 }
 
@@ -25,7 +24,6 @@ impl Default for TextState {
             style: TextStyle::default(),
             leading: 0.0,
             font: None,
-            font_spec: None,
             resources: None,
         }
     }
