@@ -7,6 +7,7 @@
 //! a host needs: a Unicode `cmap` onto the glyphs the PDF draws, horizontal metrics with
 //! the PDF widths, and the naming and metrics tables browsers require.
 
+use num_traits::ToPrimitive;
 use read_fonts::{FontRef, TableProvider, ps::cff::CffFontRef};
 use std::collections::BTreeMap;
 use write_fonts::{
@@ -31,8 +32,8 @@ use write_fonts::{
 };
 
 use crate::error::FontError;
+use crate::font::LineMetrics;
 use crate::font::{FontProgramFormat, FontSource, GlyphId};
-use crate::pdf_font_handle::LineMetrics;
 
 /// Tables the host program rebuilds, or leaves out, rather than copies from the drawing
 /// program. PDF text is drawn without the program's kerning and glyph substitutions, so
@@ -195,20 +196,6 @@ impl<'a> DrawingProgram<'a> {
         }
     }
 
-    /// The program's font bounds as `[x_min, y_min, x_max, y_max]` in design units.
-    fn bounds(&self) -> [i16; 4] {
-        match self {
-            Self::Sfnt(font) => font.head().map_or([0; 4], |head| {
-                [head.x_min(), head.y_min(), head.x_max(), head.y_max()]
-            }),
-            Self::Cff { font, .. } => font.metadata().map_or([0; 4], |metadata| {
-                let bbox = metadata.bbox();
-                [bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max]
-                    .map(|value| saturating_i16(value.to_f32()))
-            }),
-        }
-    }
-
     /// Every glyph's advance and left side bearing in the program, in design units; zero
     /// for a program without horizontal metrics.
     fn metrics(&self, num_glyphs: u16) -> Vec<LongMetric> {
@@ -243,37 +230,42 @@ impl<'a> DrawingProgram<'a> {
         comb_cell: Option<f32>,
     ) -> Result<Vec<u8>, HostBuildError> {
         let units_per_em = self.units_per_em().ok_or(HostBuildError::Unreadable)?;
-        let num_glyphs = self.num_glyphs().ok_or(HostBuildError::Unreadable)?;
-        let scale = f32::from(units_per_em) / PDF_GLYPH_SPACE_UNITS;
-        let mut metrics = self.metrics(num_glyphs);
-        for glyph in glyphs {
-            if let Some(metric) = usize::try_from(glyph.glyph.0)
-                .ok()
-                .and_then(|index| metrics.get_mut(index))
-            {
-                metric.advance = saturating_u16(comb_cell.unwrap_or(glyph.advance) * scale);
-            }
-        }
-        let [x_min, y_min, x_max, y_max] = self.bounds();
+        let glyphs = HostGlyphs {
+            glyphs,
+            num_glyphs: self.num_glyphs().ok_or(HostBuildError::Unreadable)?,
+            scale: f32::from(units_per_em) / PDF_GLYPH_SPACE_UNITS,
+        };
+        let metrics = glyphs.metrics(self.metrics(glyphs.num_glyphs), comb_cell);
         let vertical = VerticalMetrics::new(line, units_per_em);
         let mut builder = FontBuilder::new();
         builder
-            .add_table(&host_cmap(glyphs, num_glyphs)?)?
+            .add_table(&glyphs.cmap()?)?
             .add_table(&self.hhea(&metrics, vertical))?
-            .add_table(&Hmtx::new(metrics.clone(), Vec::new()))?
-            .add_table(&host_name(family))?
-            .add_table(&host_os2(glyphs, &metrics, vertical))?
+            .add_table(&glyphs.os2(&metrics, vertical))?
+            .add_table(&Hmtx::new(metrics, Vec::new()))?
+            .add_table(&Family(family).name())?
             .add_table(&Post {
                 version: Version16Dot16::VERSION_3_0,
                 ..Post::default()
             })?;
         if let Some(cell) = comb_cell {
-            builder.add_table(&comb_gpos(glyphs, cell, scale, num_glyphs))?;
+            builder.add_table(&glyphs.comb_gpos(cell))?;
         }
+        self.add_kept_tables(&mut builder, units_per_em, glyphs.num_glyphs)?;
+        Ok(builder.build())
+    }
+
+    /// Adds the tables kept from the drawing program: an sfnt's outline, hinting and header
+    /// tables as they are, without its digital signature, which no longer matches; or a
+    /// bare CFF program with the header tables its container needs.
+    fn add_kept_tables(
+        &self,
+        builder: &mut FontBuilder<'a>,
+        units_per_em: u16,
+        num_glyphs: u16,
+    ) -> Result<(), HostBuildError> {
         match self {
             Self::Sfnt(font) => {
-                // Outline, hinting and header tables are kept as they are; the digital
-                // signature no longer matches and is dropped.
                 for record in font.table_directory().table_records() {
                     let tag = record.tag();
                     if !REBUILT_TABLES.contains(&tag)
@@ -283,7 +275,12 @@ impl<'a> DrawingProgram<'a> {
                     }
                 }
             }
-            Self::Cff { data, .. } => {
+            Self::Cff { data, font } => {
+                let [x_min, y_min, x_max, y_max] = font.metadata().map_or([0; 4], |metadata| {
+                    let bbox = metadata.bbox();
+                    [bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max]
+                        .map(|value| value.to_f32().to_fword())
+                });
                 builder
                     .add_table(&Head {
                         units_per_em,
@@ -297,7 +294,7 @@ impl<'a> DrawingProgram<'a> {
                     .add_raw(CFF, *data);
             }
         }
-        Ok(builder.build())
+        Ok(())
     }
 
     /// The `hhea` table: the program's, when it has one, with the rebuilt metrics.
@@ -335,128 +332,165 @@ impl VerticalMetrics {
     fn new(line: LineMetrics, units_per_em: u16) -> Self {
         let units = f32::from(units_per_em);
         Self {
-            ascender: saturating_i16(line.ascent * units),
-            descender: saturating_i16(line.descent * units),
+            ascender: (line.ascent * units).to_fword(),
+            descender: (line.descent * units).to_fword(),
         }
     }
 }
 
-/// The `GPOS` table centring each mapped glyph in a comb cell `cell` thousandths of an em
-/// wide, by the half of the cell its PDF advance leaves free, under the `kern` feature.
-fn comb_gpos(glyphs: &[HostGlyph], cell: f32, scale: f32, num_glyphs: u16) -> Gpos {
-    let placements: BTreeMap<u16, i16> = glyphs
-        .iter()
-        .filter_map(|glyph| {
-            let id = u16::try_from(glyph.glyph.0)
-                .ok()
-                .filter(|id| *id < num_glyphs)?;
-            Some((id, saturating_i16((cell - glyph.advance) * scale / 2.0)))
-        })
-        .collect();
-    let coverage: CoverageTable = placements.keys().copied().map(GlyphId16::new).collect();
-    let records = placements
-        .values()
-        .map(|placement| ValueRecord::new().with_x_placement(*placement))
-        .collect();
-    let lookup = PositionLookup::Single(Lookup::new(
-        LookupFlag::empty(),
-        vec![SinglePos::format_2(coverage, records)],
-    ));
-    let scripts = COMB_SCRIPTS
-        .into_iter()
-        .map(|tag| ScriptRecord::new(tag, Script::new(Some(LangSys::new(vec![0])), Vec::new())))
-        .collect();
-    Gpos::new(
-        ScriptList::new(scripts),
-        FeatureList::new(vec![FeatureRecord::new(KERN, Feature::new(None, vec![0]))]),
-        PositionLookupList::new(vec![lookup]),
-    )
+/// The characters a host program maps onto the glyphs of its drawing program.
+struct HostGlyphs<'a> {
+    /// The mapped characters.
+    glyphs: &'a [HostGlyph],
+    /// The number of glyphs in the drawing program; mappings onto others are left out.
+    num_glyphs: u16,
+    /// Design units per thousandth of an em, the unit of PDF advances.
+    scale: f32,
 }
 
-/// The `cmap` mapping each character onto its glyph, leaving out glyphs the program lacks.
-fn host_cmap(glyphs: &[HostGlyph], num_glyphs: u16) -> Result<Cmap, HostBuildError> {
-    let mappings = glyphs
-        .iter()
-        .filter(|glyph| glyph.glyph.0 < u32::from(num_glyphs))
-        .map(|glyph| {
+impl HostGlyphs<'_> {
+    /// Each mapped character whose glyph the drawing program has, with that glyph.
+    fn present(&self) -> impl Iterator<Item = (&HostGlyph, u16)> {
+        self.glyphs.iter().filter_map(|glyph| {
+            let id = u16::try_from(glyph.glyph.0).ok()?;
+            (id < self.num_glyphs).then_some((glyph, id))
+        })
+    }
+
+    /// `metrics`, the drawing program's, with each mapped glyph advancing by its PDF
+    /// advance, or by `comb_cell` for a comb program.
+    fn metrics(&self, mut metrics: Vec<LongMetric>, comb_cell: Option<f32>) -> Vec<LongMetric> {
+        for (glyph, id) in self.present() {
+            if let Some(metric) = metrics.get_mut(usize::from(id)) {
+                metric.advance = (comb_cell.unwrap_or(glyph.advance) * self.scale).to_ufword();
+            }
+        }
+        metrics
+    }
+
+    /// The `cmap` mapping each character onto its glyph.
+    fn cmap(&self) -> Result<Cmap, HostBuildError> {
+        let mappings = self.present().map(|(glyph, id)| {
             (
                 glyph.character,
-                write_fonts::types::GlyphId::new(glyph.glyph.0),
+                write_fonts::types::GlyphId::new(u32::from(id)),
             )
         });
-    Cmap::from_mappings(mappings).map_err(|conflict| HostBuildError::Table(conflict.to_string()))
-}
+        Cmap::from_mappings(mappings)
+            .map_err(|conflict| HostBuildError::Table(conflict.to_string()))
+    }
 
-/// The `name` table naming the program `family`.
-fn host_name(family: &str) -> Name {
-    let postscript: String = family
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
-        .collect();
-    let record = |name_id, string: &str| {
-        NameRecord::new(
-            WINDOWS_PLATFORM,
-            UNICODE_BMP_ENCODING,
-            ENGLISH_LANGUAGE,
-            name_id,
-            OffsetMarker::new(string.to_owned()),
+    /// The `GPOS` table centring each glyph in a comb cell `cell` thousandths of an em
+    /// wide, by the half of the cell its PDF advance leaves free, under the `kern` feature.
+    fn comb_gpos(&self, cell: f32) -> Gpos {
+        let placements: BTreeMap<u16, i16> = self
+            .present()
+            .map(|(glyph, id)| (id, ((cell - glyph.advance) * self.scale / 2.0).to_fword()))
+            .collect();
+        let coverage: CoverageTable = placements.keys().copied().map(GlyphId16::new).collect();
+        let records = placements
+            .values()
+            .map(|placement| ValueRecord::new().with_x_placement(*placement))
+            .collect();
+        let lookup = PositionLookup::Single(Lookup::new(
+            LookupFlag::empty(),
+            vec![SinglePos::format_2(coverage, records)],
+        ));
+        let scripts = COMB_SCRIPTS
+            .into_iter()
+            .map(|tag| ScriptRecord::new(tag, Script::new(Some(LangSys::new(vec![0])), Vec::new())))
+            .collect();
+        Gpos::new(
+            ScriptList::new(scripts),
+            FeatureList::new(vec![FeatureRecord::new(KERN, Feature::new(None, vec![0]))]),
+            PositionLookupList::new(vec![lookup]),
         )
-    };
-    Name::new(vec![
-        record(NameId::FAMILY_NAME, family),
-        record(NameId::SUBFAMILY_NAME, "Regular"),
-        record(NameId::FULL_NAME, family),
-        record(NameId::POSTSCRIPT_NAME, &postscript),
-    ])
-}
+    }
 
-/// The `OS/2` table with the program's line metrics and mapped character range.
-fn host_os2(glyphs: &[HostGlyph], metrics: &[LongMetric], vertical: VerticalMetrics) -> Os2 {
-    let characters = || {
-        glyphs
+    /// The `OS/2` table with the program's line metrics and mapped character range.
+    fn os2(&self, metrics: &[LongMetric], vertical: VerticalMetrics) -> Os2 {
+        let characters = || {
+            self.glyphs
+                .iter()
+                .map(|glyph| u16::try_from(u32::from(glyph.character)).unwrap_or(u16::MAX))
+        };
+        let advances: Vec<u16> = metrics
             .iter()
-            .map(|glyph| u16::try_from(u32::from(glyph.character)).unwrap_or(u16::MAX))
-    };
-    let advances: Vec<u16> = metrics
-        .iter()
-        .map(|metric| metric.advance)
-        .filter(|advance| *advance > 0)
-        .collect();
-    let average = advances
-        .iter()
-        .map(|advance| u32::from(*advance))
-        .sum::<u32>()
-        .checked_div(u32::try_from(advances.len()).unwrap_or(u32::MAX))
-        .unwrap_or_default();
-    let descent = vertical.descender.unsigned_abs();
-    Os2 {
-        x_avg_char_width: i16::try_from(average).unwrap_or(i16::MAX),
-        us_first_char_index: characters().min().unwrap_or_default(),
-        us_last_char_index: characters().max().unwrap_or_default(),
-        s_typo_ascender: vertical.ascender,
-        s_typo_descender: vertical.descender,
-        us_win_ascent: vertical.ascender.unsigned_abs(),
-        us_win_descent: descent,
-        ul_code_page_range_1: Some(LATIN_1_CODE_PAGE),
-        ul_code_page_range_2: Some(0),
-        ..Os2::default()
+            .map(|metric| metric.advance)
+            .filter(|advance| *advance > 0)
+            .collect();
+        let average = advances
+            .iter()
+            .map(|advance| u32::from(*advance))
+            .sum::<u32>()
+            .checked_div(u32::try_from(advances.len()).unwrap_or(u32::MAX))
+            .unwrap_or_default();
+        Os2 {
+            x_avg_char_width: i16::try_from(average).unwrap_or(i16::MAX),
+            us_first_char_index: characters().min().unwrap_or_default(),
+            us_last_char_index: characters().max().unwrap_or_default(),
+            s_typo_ascender: vertical.ascender,
+            s_typo_descender: vertical.descender,
+            us_win_ascent: vertical.ascender.unsigned_abs(),
+            us_win_descent: vertical.descender.unsigned_abs(),
+            ul_code_page_range_1: Some(LATIN_1_CODE_PAGE),
+            ul_code_page_range_2: Some(0),
+            ..Os2::default()
+        }
     }
 }
 
-/// `value` rounded into the `i16` range.
-fn saturating_i16(value: f32) -> i16 {
-    num_traits::ToPrimitive::to_i16(
-        &value
-            .round()
-            .clamp(f32::from(i16::MIN), f32::from(i16::MAX)),
-    )
-    .unwrap_or_default()
+/// The family name a host program is registered under.
+struct Family<'a>(&'a str);
+
+impl Family<'_> {
+    /// The `name` table naming the program.
+    fn name(&self) -> Name {
+        let family = self.0;
+        let postscript: String = family
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+            .collect();
+        let record = |name_id, string: &str| {
+            NameRecord::new(
+                WINDOWS_PLATFORM,
+                UNICODE_BMP_ENCODING,
+                ENGLISH_LANGUAGE,
+                name_id,
+                OffsetMarker::new(string.to_owned()),
+            )
+        };
+        Name::new(vec![
+            record(NameId::FAMILY_NAME, family),
+            record(NameId::SUBFAMILY_NAME, "Regular"),
+            record(NameId::FULL_NAME, family),
+            record(NameId::POSTSCRIPT_NAME, &postscript),
+        ])
+    }
 }
 
-/// `value` rounded into the `u16` range.
-fn saturating_u16(value: f32) -> u16 {
-    num_traits::ToPrimitive::to_u16(&value.round().clamp(0.0, f32::from(u16::MAX)))
-        .unwrap_or_default()
+/// Rounding of design-unit values into the integer fields of font tables.
+trait DesignUnits {
+    /// The value rounded into the `i16` range of an `FWORD`.
+    fn to_fword(self) -> i16;
+    /// The value rounded into the `u16` range of a `UFWORD`.
+    fn to_ufword(self) -> u16;
+}
+
+impl DesignUnits for f32 {
+    fn to_fword(self) -> i16 {
+        self.round()
+            .clamp(f32::from(i16::MIN), f32::from(i16::MAX))
+            .to_i16()
+            .unwrap_or_default()
+    }
+
+    fn to_ufword(self) -> u16 {
+        self.round()
+            .clamp(0.0, f32::from(u16::MAX))
+            .to_u16()
+            .unwrap_or_default()
+    }
 }
 
 /// Why a host program could not be built.
@@ -480,8 +514,8 @@ impl From<BuilderError> for HostBuildError {
 mod tests {
     use super::{HostFontProgram, HostGlyph};
     use crate::{
+        font::LineMetrics,
         font::{FontProgramFormat, FontSource, GlyphId},
-        pdf_font_handle::LineMetrics,
     };
     use bytes::Bytes;
     use read_fonts::{

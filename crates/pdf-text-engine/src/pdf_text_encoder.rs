@@ -4,9 +4,9 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use pdf_cmap::{PdfCMap, PdfCode, ToUnicodeMap, UnicodeSequence};
-use pdf_font::{PdfFontSpec, PdfMetrics, SimpleEncoding, Type0FontSpec};
+use pdf_font::{PdfFontSpec, Type0FontSpec};
 
-use crate::{error::TextError, pdf_text_decoder::decode_one_byte_mapping};
+use crate::{error::TextError, pdf_text_decoder::decode_pdf_text};
 
 /// Printable ASCII, which a simple font draws by its own code when no code decodes to it.
 const PRINTABLE_ASCII: std::ops::RangeInclusive<u8> = 0x20..=0x7e;
@@ -34,20 +34,56 @@ impl PdfTextEncoder {
     /// # Errors
     /// Propagates character-code decoding failures.
     pub fn new(font: &PdfFontSpec) -> Result<Self, TextError> {
-        let (codes, identity) = match font {
-            PdfFontSpec::Type1(font)
-            | PdfFontSpec::MultipleMasterType1(font)
-            | PdfFontSpec::TrueType(font) => (
-                one_byte_codes(&font.encoding, &font.metrics, font.to_unicode.as_deref())?,
-                None,
-            ),
-            PdfFontSpec::Type3(font) => (
-                one_byte_codes(&font.encoding, &font.metrics, font.to_unicode.as_deref())?,
-                None,
-            ),
-            PdfFontSpec::Type0(font) => composite_codes(font),
+        match font {
+            PdfFontSpec::Type0(font) => Ok(Self::composite(font)),
+            simple => Self::one_byte(simple),
+        }
+    }
+
+    /// The encoder of a simple or Type 3 font: the lowest one-byte code each single
+    /// scalar decodes from, and printable ASCII no code decodes to by its own code.
+    fn one_byte(font: &PdfFontSpec) -> Result<Self, TextError> {
+        let mut codes = BTreeMap::new();
+        let bytes: Vec<u8> = (u8::MIN..=u8::MAX).collect();
+        decode_pdf_text(font, &bytes, |decoded| -> Result<(), TextError> {
+            if let UnicodeSequence::Scalar(character) = decoded.unicode {
+                codes.entry(character).or_insert(decoded.source_code);
+            }
+            Ok(())
+        })?;
+        for code in PRINTABLE_ASCII {
+            codes
+                .entry(char::from(code))
+                .or_insert(PdfCode::new(u32::from(code), 1)?);
+        }
+        Ok(Self {
+            codes,
+            identity: None,
+        })
+    }
+
+    /// The encoder of a composite font: the codes of its `/ToUnicode` scalars, or its
+    /// encoding CMap when that map is the identity.
+    fn composite(font: &Type0FontSpec) -> Self {
+        let mut codes = BTreeMap::new();
+        let identity = match font.to_unicode.as_deref() {
+            Some(ToUnicodeMap::CMap(map)) => {
+                for (value, unicode) in map.entries() {
+                    if let UnicodeSequence::Scalar(character) = unicode
+                        && let Some(code) = font.encoding.encode(value)
+                    {
+                        codes
+                            .entry(*character)
+                            .and_modify(|lowest: &mut PdfCode| *lowest = (*lowest).min(code))
+                            .or_insert(code);
+                    }
+                }
+                None
+            }
+            Some(ToUnicodeMap::Identity) => Some(Arc::clone(&font.encoding)),
+            None => None,
         };
-        Ok(Self { codes, identity })
+        Self { codes, identity }
     }
 
     /// The code of `character`, or `None` when the font has none.
@@ -56,7 +92,7 @@ impl PdfTextEncoder {
         self.codes
             .get(&character)
             .copied()
-            .or_else(|| composite_code(self.identity.as_deref()?, u32::from(character)))
+            .or_else(|| self.identity.as_deref()?.encode(u32::from(character)))
     }
 
     /// The codes of `text`, or `None` when the font has no code for one of its scalars.
@@ -76,59 +112,4 @@ impl PdfTextEncoder {
             .iter()
             .map(|(character, code)| (*character, *code))
     }
-}
-
-/// The lowest one-byte code each single scalar decodes from, and printable ASCII no code
-/// decodes to by its own code.
-fn one_byte_codes(
-    encoding: &SimpleEncoding,
-    metrics: &PdfMetrics,
-    to_unicode: Option<&ToUnicodeMap>,
-) -> Result<BTreeMap<char, PdfCode>, TextError> {
-    let mut codes = BTreeMap::new();
-    for code in u8::MIN..=u8::MAX {
-        let decoded = decode_one_byte_mapping(encoding, metrics, to_unicode, code)?;
-        if let UnicodeSequence::Scalar(character) = decoded.unicode {
-            codes.entry(character).or_insert(decoded.source_code);
-        }
-    }
-    for code in PRINTABLE_ASCII {
-        codes
-            .entry(char::from(code))
-            .or_insert(PdfCode::new(u32::from(code), 1)?);
-    }
-    Ok(codes)
-}
-
-/// The codes of a composite font's `/ToUnicode` scalars, or its encoding CMap when that
-/// map is the identity.
-fn composite_codes(font: &Type0FontSpec) -> (BTreeMap<char, PdfCode>, Option<Arc<dyn PdfCMap>>) {
-    let mut codes = BTreeMap::new();
-    match font.to_unicode.as_deref() {
-        Some(ToUnicodeMap::CMap(map)) => {
-            for (value, unicode) in map.entries() {
-                if let UnicodeSequence::Scalar(character) = unicode
-                    && let Some(code) = composite_code(font.encoding.as_ref(), value)
-                {
-                    codes
-                        .entry(*character)
-                        .and_modify(|lowest: &mut PdfCode| *lowest = (*lowest).min(code))
-                        .or_insert(code);
-                }
-            }
-            (codes, None)
-        }
-        Some(ToUnicodeMap::Identity) => (codes, Some(Arc::clone(&font.encoding))),
-        None => (codes, None),
-    }
-}
-
-/// The shortest code of numeric `value` that `encoding` reads back as exactly that code.
-fn composite_code(encoding: &dyn PdfCMap, value: u32) -> Option<PdfCode> {
-    (1..=4).find_map(|byte_len| {
-        let code = PdfCode::new(value, byte_len).ok()?;
-        let bytes: Vec<u8> = code.bytes().collect();
-        let mapping = encoding.decode_next(&bytes).ok()??;
-        (mapping.source == code).then_some(code)
-    })
 }

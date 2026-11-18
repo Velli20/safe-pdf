@@ -1,8 +1,8 @@
 //! Best-effort font descriptor metadata and CID collection information.
 
 use crate::{
-    pdf::{CidSystemInfo, PdfFontDescriptor},
-    pdf_font_handle::LineMetrics,
+    font::LineMetrics,
+    pdf::{CidSystemInfo, PDF_GLYPH_SPACE_UNITS_PER_EM, PdfFontDescriptor},
     type0_font_spec::CidToUnicode,
 };
 use pdf_cmap::predefined::PredefinedCMap;
@@ -27,6 +27,11 @@ impl FromPdfObject for PdfFontDescriptor {
     }
 }
 
+/// A declared `/Descent` above this many thousandths of an em is a depth written without
+/// its sign; smaller positive values are too close to the baseline to tell apart and are
+/// kept as they are.
+const MISSIGNED_DESCENT: f32 = 10.0;
+
 impl PdfFontDescriptor {
     /// The declared `/Ascent` and `/Descent` as fractions of an em, as viewers lay out
     /// form text: a positive descent is read as its negation, and a descriptor declaring
@@ -34,10 +39,14 @@ impl PdfFontDescriptor {
     pub(crate) fn line_metrics(&self) -> Option<LineMetrics> {
         let ascent = self.ascent.unwrap_or_default();
         let descent = self.descent.unwrap_or_default();
-        let descent = if descent > 10.0 { -descent } else { descent };
+        let descent = if descent > MISSIGNED_DESCENT {
+            -descent
+        } else {
+            descent
+        };
         (ascent != 0.0 || descent != 0.0).then(|| LineMetrics {
-            ascent: ascent / 1000.0,
-            descent: descent / 1000.0,
+            ascent: ascent / PDF_GLYPH_SPACE_UNITS_PER_EM,
+            descent: descent / PDF_GLYPH_SPACE_UNITS_PER_EM,
         })
     }
 

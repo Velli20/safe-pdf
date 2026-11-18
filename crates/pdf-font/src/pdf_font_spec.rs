@@ -13,12 +13,12 @@ use crate::fallback::{
 };
 use crate::flags::FontFlags;
 use crate::font::GlyphId;
+use crate::font::LineMetrics;
 use crate::font::{FontMetadata, FontProgramFormat, FontSource};
 use crate::pdf::{
     FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding, SimpleFontSpec,
     Type0FontSpec, Type3FontSpec,
 };
-use crate::pdf_font_handle::LineMetrics;
 use crate::standard14::{self, Standard14Font};
 use pdf_cmap::WritingMode;
 

@@ -71,35 +71,31 @@ impl PaintedAppearance {
         let Some(field) = annotation.widget_field(view)? else {
             return Ok(None);
         };
-        if let Some(mut appearance) = annotation.text_entry_appearance(field) {
-            if presentation.editing == Some(annotation.id) {
-                if let Some(text) = &mut appearance.text {
-                    text.value.clear();
-                }
-            } else if annotation.shows_source_value(field) {
-                // The source appearance already shows the value, laid out by its author.
-                appearance.text = None;
+        let editing = presentation.is_editing(annotation.id);
+        Ok(match annotation.text_entry_appearance(field) {
+            Some(appearance) => Some(appearance.presented(annotation, field, editing)),
+            // A text field without a value layout cannot leave its value out, so while it
+            // is edited only its control shows it.
+            None if editing => None,
+            None => {
+                annotation.widget_state_appearance(field, presentation.is_pressed(annotation.id))
             }
-            return Ok(Some(appearance));
-        }
-        // A text field without a value layout cannot leave its value out, so while it is
-        // edited only its control shows it.
-        if presentation.editing == Some(annotation.id) {
-            return Ok(None);
-        }
-        let Some(source) = annotation.source() else {
-            return Ok(None);
+        })
+    }
+
+    /// This text-entry appearance as `annotation`, bound to `field`, presents it: without
+    /// its value while `editing`, since the control shows it, and drawn as it is while the
+    /// value is still the source `/V`, which the source appearance shows as its author
+    /// laid it out.
+    fn presented(self, annotation: &Annotation, field: &Field, editing: bool) -> Self {
+        let text = if editing {
+            self.text.map(VariableText::without_value)
+        } else if annotation.shows_source_value(field) {
+            None
+        } else {
+            self.text
         };
-        let pressed = presentation.pressed == Some(annotation.id);
-        let state = match annotation.painted_state(field) {
-            Some(PaintedState::Source) => source.appearance_state.as_deref(),
-            Some(PaintedState::Checked(true)) => source.button_on_state().ok(),
-            Some(PaintedState::Checked(false)) => Some(OFF_STATE),
-            None => return Ok(None),
-        };
-        Ok(source
-            .rect
-            .and_then(|rect| source.widget_appearance(state, pressed, rect)))
+        Self { text, ..self }
     }
 
     /// The appearance of the displayed text entry `annotation` with its live value; `None`
@@ -147,7 +143,34 @@ impl PaintedAppearance {
     }
 }
 
+impl PresentationState {
+    /// Whether the pointer holds the widget `id` down.
+    #[must_use]
+    pub fn is_pressed(&self, id: AnnotationId) -> bool {
+        self.pressed == Some(id)
+    }
+
+    /// Whether the text entry `id` is being edited.
+    #[must_use]
+    pub fn is_editing(&self, id: AnnotationId) -> bool {
+        self.editing == Some(id)
+    }
+}
+
 impl Annotation {
+    /// The appearance this widget, bound to `field`, selects by its live state, with its
+    /// down appearance while `pressed`; `None` for widgets whose control presents their
+    /// value.
+    fn widget_state_appearance(&self, field: &Field, pressed: bool) -> Option<PaintedAppearance> {
+        let source = self.source()?;
+        let state = match self.painted_state(field)? {
+            PaintedState::Source => source.appearance_state.as_deref(),
+            PaintedState::Checked(true) => source.button_on_state().ok(),
+            PaintedState::Checked(false) => Some(OFF_STATE),
+        };
+        source.widget_appearance(state, pressed, source.rect?)
+    }
+
     /// The normal appearance of this text entry, bound to `field`, with its live value;
     /// `None` for other widgets and annotations.
     fn text_entry_appearance(&self, field: &Field) -> Option<PaintedAppearance> {

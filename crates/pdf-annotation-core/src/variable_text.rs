@@ -3,7 +3,7 @@
 use crate::{
     fields::{ComboValue, Field, FieldKind, TextMode},
     models::Annotation,
-    pdf_data::BorderStyleName,
+    pdf_data::BorderStyle,
     style::{Alignment, DefaultAppearance},
 };
 use num_traits::ToPrimitive;
@@ -34,6 +34,15 @@ pub struct VariableText {
 }
 
 impl VariableText {
+    /// This text with its value left out, for an entry whose control shows the value.
+    #[must_use]
+    pub fn without_value(self) -> Self {
+        Self {
+            value: String::new(),
+            ..self
+        }
+    }
+
     /// The width of each cell of a comb field whose appearance box is `width` wide: the
     /// box less the text inset on each side, divided evenly between the cells. `None` for
     /// other fields.
@@ -61,10 +70,8 @@ impl Annotation {
             FieldKind::ComboBox(combo) if combo.editable => {
                 let value = match &combo.value {
                     ComboValue::Text(text) => text.clone(),
-                    ComboValue::Option(id) => combo
-                        .options
-                        .iter()
-                        .find(|option| option.id == *id)
+                    ComboValue::Option(_) => combo
+                        .selected_option()
                         .map(|option| option.label.clone())
                         .unwrap_or_default(),
                     ComboValue::Empty => String::new(),
@@ -95,14 +102,11 @@ impl Annotation {
     /// value out in, as viewers lay form text out: the border width, doubled for a beveled
     /// or inset border.
     pub(crate) fn text_inset(&self, border_width: f32) -> f32 {
-        let doubled = self
+        let three_dimensional = self
             .source_widget()
             .and_then(|widget| widget.border_style.as_ref())
-            .and_then(|border| border.style.as_ref())
-            .is_some_and(|style| {
-                matches!(style, BorderStyleName::Beveled | BorderStyleName::Inset)
-            });
-        if doubled {
+            .is_some_and(BorderStyle::is_three_dimensional);
+        if three_dimensional {
             border_width * 2.0
         } else {
             border_width

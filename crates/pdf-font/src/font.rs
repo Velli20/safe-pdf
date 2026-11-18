@@ -203,6 +203,47 @@ pub const FALLBACK_ASCENDER_EM_RATIO: f32 = 0.8;
 /// negative because font descenders are expressed below the baseline.
 pub const FALLBACK_DESCENDER_EM_RATIO: f32 = -0.2;
 
+impl FontMetrics {
+    /// The ascender and descender as fractions of an em; `None` when the face has no
+    /// units per em or no positive, finite extent between them.
+    #[must_use]
+    pub fn line_metrics(&self) -> Option<LineMetrics> {
+        let units = f32::from(self.units_per_em);
+        let line = LineMetrics {
+            ascent: self.ascender / units,
+            descent: self.descender / units,
+        };
+        (self.units_per_em > 0
+            && line.ascent.is_finite()
+            && line.descent.is_finite()
+            && line.ascent > line.descent)
+            .then_some(line)
+    }
+}
+
+/// The extent of a line of text, in fractions of the font size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineMetrics {
+    /// Height above the baseline.
+    pub ascent: f32,
+    /// Depth below the baseline, as a negative value.
+    pub descent: f32,
+}
+
+impl LineMetrics {
+    /// The extent of a face without usable metrics: the conventional 80/20 split of an em.
+    pub const FALLBACK: Self = Self {
+        ascent: FALLBACK_ASCENDER_EM_RATIO,
+        descent: FALLBACK_DESCENDER_EM_RATIO,
+    };
+
+    /// The distance between the baselines of consecutive lines.
+    #[must_use]
+    pub fn line_height(&self) -> f32 {
+        self.ascent - self.descent
+    }
+}
+
 /// Renderable geometry supplied by a loaded font face.
 #[derive(Clone)]
 pub enum GlyphGeometry {

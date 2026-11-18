@@ -5,6 +5,7 @@ use pdf_object_reader::{
     ReadResult, ReadSession, object_kind::ObjectKind, object_variant::ObjectVariant,
     stream::StreamObject,
 };
+use std::ops::Range;
 
 /// Represents one materialized PDF content stream as parsed operators plus its
 /// stable content-stream ID.
@@ -13,6 +14,38 @@ pub struct ContentStream {
     pub operators: Vec<PdfOperatorVariant>,
     /// A monotonic ID assigned when this content stream is materialized.
     pub id: usize,
+}
+
+impl ContentStream {
+    /// The range of operators from the first marked-content begin tagged `tag` up to, not
+    /// including, the end that closes it; up to the last operator when it is not closed.
+    #[must_use]
+    pub fn marked_content_span(&self, tag: &[u8]) -> Option<Range<usize>> {
+        let start = self.operators.iter().position(|operator| match operator {
+            PdfOperatorVariant::BeginMarkedContent { tag: begin } => begin.as_bytes() == tag,
+            PdfOperatorVariant::BeginMarkedContentWithProps(begin) => begin.tag() == tag,
+            _ => false,
+        })?;
+        let mut depth = 0_usize;
+        let len = self
+            .operators
+            .get(start..)
+            .unwrap_or_default()
+            .iter()
+            .position(|operator| {
+                match operator {
+                    PdfOperatorVariant::BeginMarkedContent { .. }
+                    | PdfOperatorVariant::BeginMarkedContentWithProps(_) => {
+                        depth = depth.saturating_add(1);
+                    }
+                    PdfOperatorVariant::EndMarkedContent => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                depth == 0
+            })
+            .unwrap_or_else(|| self.operators.len().saturating_sub(start));
+        Some(start..start.saturating_add(len))
+    }
 }
 
 impl FromPdfObject for ContentStream {

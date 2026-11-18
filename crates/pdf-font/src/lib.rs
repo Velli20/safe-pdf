@@ -39,6 +39,7 @@ pub use fallback::{
 pub use font::{
     ExternalFontKey, FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
     FontProgramFormat, FontSource, FontStretch, FontWeight, GlyphGeometry, GlyphId, GlyphName,
+    LineMetrics,
 };
 pub use font_registry::FontRegistry;
 pub use pdf::{

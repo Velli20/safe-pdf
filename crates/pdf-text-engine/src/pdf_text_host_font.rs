@@ -3,14 +3,19 @@
 
 use std::sync::Arc;
 
+use pdf_cmap::PdfCode;
 use pdf_font::{
-    GlyphId, PdfFontSpec,
+    GlyphId, PDF_GLYPH_SPACE_UNITS_PER_EM, PdfFontSpec,
     host_font_program::{HostFontProgram, HostGlyph},
+    pdf_font_handle::PdfFontHandle,
 };
 
 use crate::{
-    error::TextError, pdf_text_decoder::decode_one_byte_mapping, pdf_text_encoder::PdfTextEncoder,
-    pdf_text_layout::select_glyph, system::FontSystem,
+    error::TextError,
+    pdf_text_encoder::PdfTextEncoder,
+    system::FontSystem,
+    text::{PdfTextItem, PdfTextRun},
+    text_style::TextStyle,
 };
 
 impl FontSystem {
@@ -31,36 +36,15 @@ impl FontSystem {
         family: &str,
         comb_cell: Option<f32>,
     ) -> Result<Option<HostFontProgram>, TextError> {
-        let font = match spec.as_ref() {
-            PdfFontSpec::Type1(font)
-            | PdfFontSpec::MultipleMasterType1(font)
-            | PdfFontSpec::TrueType(font) => font,
-            PdfFontSpec::Type0(_) | PdfFontSpec::Type3(_) => return Ok(None),
-        };
-        let encoder = PdfTextEncoder::new(&spec)?;
-        let handle = self.load_pdf_font(Arc::clone(&spec))?;
-        let face = handle.primary().as_ref();
-        let mut glyphs = Vec::new();
-        for (character, code) in encoder.codes() {
-            let Ok(code) = u8::try_from(code.value()) else {
-                continue;
-            };
-            let decoded = decode_one_byte_mapping(
-                &font.encoding,
-                &font.metrics,
-                font.to_unicode.as_deref(),
-                code,
-            )?;
-            if let Some(glyph) = select_glyph(face, &decoded, handle.uses_substitute())
-                .filter(|glyph| *glyph != GlyphId(0))
-            {
-                glyphs.push(HostGlyph {
-                    character,
-                    glyph,
-                    advance: decoded.pdf_advance.x,
-                });
-            }
+        if matches!(spec.as_ref(), PdfFontSpec::Type0(_) | PdfFontSpec::Type3(_)) {
+            return Ok(None);
         }
+        let encoder = PdfTextEncoder::new(&spec)?;
+        let handle = self.load_pdf_font(spec)?;
+        let glyphs: Vec<HostGlyph> = encoder
+            .codes()
+            .filter_map(|(character, code)| self.drawn_glyph(&handle, character, code))
+            .collect();
         Ok(HostFontProgram::new(
             handle.source(),
             family,
@@ -68,5 +52,40 @@ impl FontSystem {
             handle.line_metrics(),
             comb_cell,
         )?)
+    }
+
+    /// The glyph of `font`'s primary face that layout draws `code` with, mapped from
+    /// `character`, with the code's PDF advance; `None` when layout draws it from another
+    /// face or with the missing glyph.
+    fn drawn_glyph(
+        &self,
+        font: &PdfFontHandle,
+        character: char,
+        code: PdfCode,
+    ) -> Option<HostGlyph> {
+        let items = [PdfTextItem::Text(code.bytes().collect::<Vec<u8>>().into())];
+        let run = PdfTextRun {
+            font,
+            items: &items,
+            // At a size of one glyph-space em, advances are in thousandths of an em.
+            style: TextStyle {
+                font_size: PDF_GLYPH_SPACE_UNITS_PER_EM,
+                ..TextStyle::default()
+            },
+        };
+        let layout = self.layout_pdf(&run).ok()?;
+        let [glyph_run] = layout.runs.as_slice() else {
+            return None;
+        };
+        let [positioned] = glyph_run.glyphs.as_slice() else {
+            return None;
+        };
+        (glyph_run.face.id() == font.primary().id() && positioned.glyph_id != GlyphId(0)).then_some(
+            HostGlyph {
+                character,
+                glyph: positioned.glyph_id,
+                advance: layout.advance.x,
+            },
+        )
     }
 }

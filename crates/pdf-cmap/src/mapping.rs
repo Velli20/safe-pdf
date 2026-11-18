@@ -87,4 +87,20 @@ pub trait PdfCMap: Send + Sync {
 
     /// Reports whether the map uses horizontal or vertical writing.
     fn writing_mode(&self) -> WritingMode;
+
+    /// The shortest code of numeric `value` that this map reads back as exactly that
+    /// code, the inverse of [`Self::decode_next`]; `None` when no length of `value` is
+    /// a code of this map.
+    fn encode(&self, value: u32) -> Option<PdfCode> {
+        (1..=4).find_map(|byte_len| {
+            let code = PdfCode::new(value, byte_len).ok()?;
+            let mut buffer = [0; 4];
+            for (slot, byte) in buffer.iter_mut().zip(code.bytes()) {
+                *slot = byte;
+            }
+            let bytes = buffer.get(..usize::from(byte_len))?;
+            let mapping = self.decode_next(bytes).ok()??;
+            (mapping.source == code).then_some(code)
+        })
+    }
 }

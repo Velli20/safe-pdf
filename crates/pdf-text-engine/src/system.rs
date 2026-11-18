@@ -158,6 +158,24 @@ impl FontSystem {
         crate::pdf_text_layout::layout_pdf(self, run)
     }
 
+    /// The horizontal advance of the character codes `text` drawn in `font` at `font_size`;
+    /// zero when the codes cannot be laid out.
+    #[must_use]
+    pub fn text_width(&self, font: &PdfFontHandle, text: &[u8], font_size: f32) -> f32 {
+        let items = [crate::text::PdfTextItem::Text(text.into())];
+        let run = PdfTextRun {
+            font,
+            items: &items,
+            style: crate::text_style::TextStyle {
+                font_size,
+                ..crate::text_style::TextStyle::default()
+            },
+        };
+        self.layout_pdf(&run)
+            .map(|layout| layout.advance.x)
+            .unwrap_or_default()
+    }
+
     /// Decodes and positions a PDF text run while emitting each glyph immediately.
     ///
     /// This avoids allocating a retained [`TextLayout`] when a caller only needs to paint or

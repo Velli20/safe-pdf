@@ -17,9 +17,8 @@ use crate::text_style::TextStyle;
 use pdf_cmap::{Cid, PdfCode, WritingMode};
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_font::{
-    FontFace, FontFaceId, FontMetrics, GlyphFallbackRequest, GlyphId, PDF_GLYPH_SPACE_UNITS_PER_EM,
-    PdfFontSpec,
-    font::{FALLBACK_ASCENDER_EM_RATIO, FALLBACK_DESCENDER_EM_RATIO},
+    FontFace, FontFaceId, FontMetrics, GlyphFallbackRequest, GlyphId, LineMetrics,
+    PDF_GLYPH_SPACE_UNITS_PER_EM, PdfFontSpec,
 };
 
 /// Per-layout memoization of glyph fallback results, including definitive misses.
@@ -371,7 +370,7 @@ fn fallback_fit(
 /// then use the first Unicode scalar as a recovery path. Without an explicit selector, a one-byte
 /// code is looked up in the face's code-keyed cmap subtables: before Unicode for a symbolic font,
 /// whose codes address those subtables directly, and after it otherwise.
-pub(crate) fn select_glyph(
+fn select_glyph(
     face: &dyn FontFace,
     decoded: &DecodedGlyph<'_>,
     prefer_unicode: bool,
@@ -505,18 +504,13 @@ fn glyph_bounds(
     advance: TextVector,
     writing_mode: WritingMode,
 ) -> Rect {
-    let (ascender, descender) = face_metrics
-        .and_then(|metrics| {
-            let units = f32::from(metrics.units_per_em.max(1));
-            let ascender = metrics.ascender / units * style.font_size;
-            let descender = metrics.descender / units * style.font_size;
-            (ascender.is_finite() && descender.is_finite() && ascender != descender)
-                .then_some((ascender, descender))
-        })
-        .unwrap_or((
-            style.font_size * FALLBACK_ASCENDER_EM_RATIO,
-            style.font_size * FALLBACK_DESCENDER_EM_RATIO,
-        ));
+    let line = face_metrics
+        .and_then(|metrics| metrics.line_metrics())
+        .unwrap_or(LineMetrics::FALLBACK);
+    let (ascender, descender) = (
+        line.ascent * style.font_size,
+        line.descent * style.font_size,
+    );
     let baseline = origin.y + style.rise;
     match writing_mode {
         WritingMode::Horizontal => Rect {

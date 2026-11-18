@@ -5,7 +5,7 @@ use pdf_graphics::{size::Size, transform::Transform};
 use pdf_graphics_web::{WebCanvasBackend, WebCanvasOptions};
 use pdf_renderer::{DocumentTextSelection, PdfRenderer};
 use pdf_web::{
-    WebAnnotationOverlay, WebPageRenderer, WebViewport,
+    FieldFont, WebAnnotationOverlay, WebPageRenderer, WebViewport,
     interop::{
         WebAnnotationEvent, WebAnnotationSnapshot, WebSelectionBatch, WebSelectionController,
     },
@@ -15,30 +15,26 @@ use wasm_bindgen::prelude::*;
 
 /// The font a text entry's value is edited in, registered by the host as a `FontFace`.
 #[wasm_bindgen]
-pub struct WebFieldFont {
-    family: String,
-    data: Vec<u8>,
-    line_height: f32,
-}
+pub struct WebFieldFont(FieldFont);
 
 #[wasm_bindgen]
 impl WebFieldFont {
     /// A family name unique to the program; entries sharing it share one face.
     #[wasm_bindgen(getter)]
     pub fn family(&self) -> String {
-        self.family.clone()
+        self.0.family.clone()
     }
 
     /// The font program bytes.
     #[wasm_bindgen(getter)]
     pub fn data(&self) -> Vec<u8> {
-        self.data.clone()
+        self.0.data.clone()
     }
 
     /// The distance between baselines, in ems, the value is painted with.
     #[wasm_bindgen(getter)]
     pub fn line_height(&self) -> f32 {
-        self.line_height
+        self.0.line_height
     }
 }
 
@@ -157,11 +153,7 @@ impl WebDocument {
             .renderer
             .field_font(&self.overlay, page_index, id)
             .map_err(error)?
-            .map(|font| WebFieldFont {
-                family: font.family,
-                data: font.data,
-                line_height: font.line_height,
-            }))
+            .map(WebFieldFont))
     }
 
     /// Marks the text entry `annotation` (a decimal Core id) as being edited, or ends

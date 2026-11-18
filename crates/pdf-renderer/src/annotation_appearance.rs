@@ -48,21 +48,10 @@ impl PdfRenderer {
                 continue;
             };
             let resources = self.appearance_resources(&form, page)?;
-            let value = appearance
-                .text
-                .as_ref()
-                .zip(form.bbox)
-                .and_then(|(text, bbox)| {
-                    self.variable_text_stream(
-                        &mut canvas,
-                        &form.content_stream,
-                        bbox,
-                        resources.as_deref(),
-                        text,
-                    )
-                });
+            let live =
+                self.live_value_content(&mut canvas, &form, resources.as_deref(), appearance);
             canvas.render_content_stream(
-                value.as_ref().unwrap_or(&form.content_stream),
+                live.as_ref().unwrap_or(&form.content_stream),
                 Some(matrix),
                 form.bbox.as_ref(),
                 resources,

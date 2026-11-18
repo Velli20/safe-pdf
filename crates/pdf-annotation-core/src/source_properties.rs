@@ -20,6 +20,15 @@ impl BorderStyle {
     pub fn resolved_width(&self) -> f32 {
         self.width.unwrap_or(1.0).max(0.0)
     }
+
+    /// Whether the border is beveled or inset, which draws it twice as deep inside the
+    /// annotation rectangle.
+    pub fn is_three_dimensional(&self) -> bool {
+        matches!(
+            self.style,
+            Some(BorderStyleName::Beveled | BorderStyleName::Inset)
+        )
+    }
 }
 
 impl SourceAnnotation {

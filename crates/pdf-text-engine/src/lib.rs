@@ -43,17 +43,5 @@ pub fn measure_encoded_text_width(
     let Ok(font) = system.load_pdf_font(std::sync::Arc::new(spec.clone())) else {
         return 0.0;
     };
-    let items = [pdf_content_stream_operators::PdfTextItem::Text(text.into())];
-    let run = text::PdfTextRun {
-        font: &font,
-        items: &items,
-        style: text_style::TextStyle {
-            font_size,
-            ..text_style::TextStyle::default()
-        },
-    };
-    system
-        .layout_pdf(&run)
-        .map(|layout| layout.advance.x)
-        .unwrap_or_default()
+    system.text_width(&font, text, font_size)
 }

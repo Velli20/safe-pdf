@@ -43,6 +43,7 @@ impl Annotation {
         };
         let option = widget.binding.option();
         let painted_state = self.painted_state(field);
+        let text = self.variable_text(field);
         let source = self.source_widget();
         let definition = &field.definition;
         let mut model = WidgetControl {
@@ -66,14 +67,10 @@ impl Annotation {
                 .and_then(|w| w.appearance_characteristics.as_ref())
                 .and_then(|mk| mk.rotation)
                 .unwrap_or(0),
-            painted: painted_state.is_some() && self.has_normal_appearance(),
-            text_inset: 0.0,
+            painted: text.is_some() || painted_state.is_some() && self.has_normal_appearance(),
+            text_inset: text.as_ref().map_or(0.0, |text| text.inset),
             comb: self.comb_cells(field),
         };
-        if let Some(text) = self.variable_text(field) {
-            model.painted = true;
-            model.text_inset = text.inset;
-        }
         match &definition.content {
             FieldKind::Text(text) => {
                 model.tag = if text.mode == TextMode::Multiline {
@@ -137,10 +134,8 @@ impl Annotation {
                     ComboValue::Option(id) => {
                         model.selected = indices(&combo.options, std::slice::from_ref(id));
                         model.value = combo
-                            .options
-                            .iter()
-                            .find(|o| o.id == *id)
-                            .map(|o| o.export_value.clone())
+                            .selected_option()
+                            .map(|option| option.export_value.clone())
                             .unwrap_or_default();
                     }
                     ComboValue::Text(text) => model.value = text.clone(),
