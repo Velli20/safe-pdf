@@ -215,12 +215,18 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             return Ok(());
         };
 
+        // A procedure started with `d1` describes an uncolored glyph: it is painted in the
+        // current fill color, so its own color operators are ignored.
+        let uncolored = matches!(
+            procedure.operators.first(),
+            Some(PdfOperatorVariant::SetCharWidthAndBoundingBox { .. })
+        );
         let mut filter = |operator: &PdfOperatorVariant| {
             matches!(
                 operator,
                 PdfOperatorVariant::SetCharWidth { .. }
                     | PdfOperatorVariant::SetCharWidthAndBoundingBox { .. }
-            )
+            ) || (uncolored && operator.sets_color())
         };
 
         // The text engine supplies a complete glyph-to-device transform. A

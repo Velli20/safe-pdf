@@ -595,6 +595,26 @@ impl PdfOperatorVariant {
         };
         Ok(Some(operator))
     }
+
+    /// Returns `true` for operators that set a color or a color space.
+    ///
+    /// Uncolored content (uncolored tiling pattern cells and Type 3 glyphs started with `d1`)
+    /// is painted in a color chosen outside of it, so these operators are ignored there.
+    pub fn sets_color(&self) -> bool {
+        matches!(
+            self,
+            Self::SetNonStrokingColor(_)
+                | Self::SetStrokingColor(_)
+                | Self::SetGrayFill { .. }
+                | Self::SetGrayStroke { .. }
+                | Self::SetRGBFill { .. }
+                | Self::SetRGBStroke { .. }
+                | Self::SetCMYKFill { .. }
+                | Self::SetCMYKStroke { .. }
+                | Self::SetStrokeColorSpace { .. }
+                | Self::SetNonStrokingColorSpace { .. }
+        )
+    }
 }
 
 #[cfg(test)]
