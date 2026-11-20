@@ -9,10 +9,10 @@ use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
 use pdf_font::{FontProgramFormat, FontSource, PdfFontSpec};
 use pdf_object_reader::{
-    EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, pdf_name::PdfName,
-    stream::StreamObject,
+    EmptySource, ObjectHandle, dictionary::Dictionary, object_variant::ObjectVariant,
+    pdf_name::PdfName, pdf_string::PdfString, stream::StreamObject, string_kind::StringKind,
 };
-use pdf_resources::{resource::Resource, resources::Resources};
+use pdf_resources::{pattern::Pattern, resource::Resource, resources::Resources};
 use pdf_text_engine::bundled_font_system;
 
 /// Builds a text object that shows `text` at 10 points.
@@ -33,6 +33,52 @@ fn sized_content_stream() -> ContentStream {
     }
     data.extend_from_slice(b" ET");
     parse(data)
+}
+
+/// Builds a text object that shows `text` at 10 points, filled with the shading pattern `P0`.
+fn shaded_content_stream(text: &[u8]) -> ContentStream {
+    let mut data = b"/Pattern cs /P0 scn BT /F1 10 Tf (".to_vec();
+    data.extend_from_slice(text);
+    data.extend_from_slice(b") Tj ET");
+    parse(data)
+}
+
+/// An axial shading pattern from red to blue across the first 100 units.
+fn shading_pattern() -> Pattern {
+    let number = |value: f64| ObjectVariant::Real(value);
+    let array = |values: Vec<ObjectVariant>| ObjectVariant::Array(values.into());
+    let function = Dictionary::from_entries([
+        (b"FunctionType".as_slice(), ObjectVariant::Integer(2)),
+        (b"Domain".as_slice(), array(vec![number(0.0), number(1.0)])),
+        (
+            b"C0".as_slice(),
+            array(vec![number(1.0), number(0.0), number(0.0)]),
+        ),
+        (
+            b"C1".as_slice(),
+            array(vec![number(0.0), number(0.0), number(1.0)]),
+        ),
+        (b"N".as_slice(), number(1.0)),
+    ]);
+    let shading = Dictionary::from_entries([
+        (b"ShadingType".as_slice(), ObjectVariant::Integer(2)),
+        (
+            b"ColorSpace".as_slice(),
+            PdfString::from(b"DeviceRGB", StringKind::Name),
+        ),
+        (
+            b"Coords".as_slice(),
+            array(vec![number(0.0), number(0.0), number(100.0), number(0.0)]),
+        ),
+        (b"Function".as_slice(), ObjectVariant::Dictionary(function)),
+    ]);
+    let pattern = Dictionary::from_entries([
+        (b"PatternType".as_slice(), ObjectVariant::Integer(2)),
+        (b"Shading".as_slice(), ObjectVariant::Dictionary(shading)),
+    ]);
+    pdf_object_reader::ObjectReader::new(EmptySource)
+        .read::<Pattern>(&ObjectVariant::Dictionary(pattern))
+        .expect("benchmark shading pattern should read")
 }
 
 fn parse(data: Vec<u8>) -> ContentStream {
@@ -67,6 +113,10 @@ fn benchmark(c: &mut Criterion) {
             }
             .into(),
         )]),
+        patterns: HashMap::from([(
+            PdfName::from(b"P0"),
+            Resource::Pattern(ObjectHandle::from(shading_pattern())),
+        )]),
         ..Default::default()
     });
     let page = PdfPage::default();
@@ -79,6 +129,7 @@ fn benchmark(c: &mut Criterion) {
         ("repeated", content_stream(&repeated)),
         ("mixed", content_stream(&mixed)),
         ("repeated_at_64_sizes", sized_content_stream()),
+        ("repeated_shaded", shaded_content_stream(&repeated)),
     ] {
         c.bench_function(
             &format!("text/render_{workload}_1024_real_glyphs"),
