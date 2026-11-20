@@ -257,7 +257,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             .map(Arc::clone)
             .ok_or(PdfCanvasError::CurrentFontRequired)?;
 
-        let style = state.text_state.style.clone();
+        let style = state.text_state.style;
         let rendering_mode = state.paint.rendering_mode;
         let mut base_transform = state.text_state.matrix;
         base_transform.concat(&state.transform);
