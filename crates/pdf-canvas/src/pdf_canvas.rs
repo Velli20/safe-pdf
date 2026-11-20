@@ -3,7 +3,8 @@ use pdf_color_space::color_space::ColorSpace;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::font_selection::FontSelection;
-use crate::shading::{shading_bbox_clip, with_clip};
+use crate::prepared_paint::{FillPaint, PreparedPaint, StrokePaint};
+use crate::shading::shading_bbox_clip;
 use crate::{
     CanvasPath,
     canvas_backend::{CanvasBackend, Shader},
@@ -607,55 +608,74 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         mode: PaintMode,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let fill = if matches!(mode, PaintMode::Fill | PaintMode::FillAndStroke) {
-            match self.compute_shader(false)? {
-                PatternPaint::Nothing => None,
-                pattern_paint => {
-                    let paint = &self.state.paint;
-                    Some((
-                        paint.fill_color,
-                        paint.blend_mode,
-                        pattern_paint.into_shader(),
-                        self.pattern_bbox_clip(false)?,
-                    ))
-                }
-            }
-        } else {
-            None
+        let paint = self.prepare_paint(mode)?;
+        self.paint_prepared(path, fill_type, &paint)
+    }
+
+    /// Works out the fill and stroke `mode` applies from the current graphics state.
+    ///
+    /// # Errors
+    /// Returns an error if pattern computation fails or the dash pattern is invalid.
+    pub(crate) fn prepare_paint(
+        &mut self,
+        mode: PaintMode,
+    ) -> Result<PreparedPaint, PdfCanvasError> {
+        let fill = match mode {
+            PaintMode::Fill | PaintMode::FillAndStroke => self.prepare_fill()?,
+            PaintMode::Stroke => None,
         };
-        let stroke = if matches!(mode, PaintMode::Stroke | PaintMode::FillAndStroke) {
-            match self.compute_shader(true)? {
-                PatternPaint::Nothing => None,
-                pattern_paint => {
-                    let scale = self.state.transform.area_scale();
-                    let dash_pattern = self.scaled_dash_pattern(scale)?;
-                    let state = &self.state;
-                    Some((
-                        state.paint.stroke_color,
-                        state.paint.blend_mode,
-                        state.paint.line_width * scale,
-                        StrokeStyle::new(&state.paint, &state.transform, dash_pattern),
-                        pattern_paint.into_shader(),
-                        self.pattern_bbox_clip(true)?,
-                    ))
-                }
-            }
-        } else {
-            None
+        let stroke = match mode {
+            PaintMode::Stroke | PaintMode::FillAndStroke => self.prepare_stroke()?,
+            PaintMode::Fill => None,
         };
-        self.with_soft_mask(|backend| {
-            if let Some((color, blend, shader, clip)) = fill {
-                with_clip(backend, clip.as_ref(), |backend| {
-                    backend.fill_path(path, fill_type, color, shader.as_ref(), blend)
-                })?;
-            }
-            if let Some((color, blend, width, style, shader, clip)) = stroke {
-                with_clip(backend, clip.as_ref(), |backend| {
-                    backend.stroke_path(path, color, width, &style, shader.as_ref(), blend)
-                })?;
-            }
-            Ok(())
-        })
+        Ok(PreparedPaint { fill, stroke })
+    }
+
+    /// Works out the current fill, or `None` when the fill pattern leaves no marks.
+    fn prepare_fill(&mut self) -> Result<Option<FillPaint>, PdfCanvasError> {
+        let shader = match self.compute_shader(false)? {
+            PatternPaint::Nothing => return Ok(None),
+            pattern_paint => pattern_paint.into_shader(),
+        };
+        let paint = &self.state.paint;
+        Ok(Some(FillPaint {
+            color: paint.fill_color,
+            blend_mode: paint.blend_mode,
+            shader,
+            clip: self.pattern_bbox_clip(false)?,
+        }))
+    }
+
+    /// Works out the current stroke, or `None` when the stroke pattern leaves no marks.
+    fn prepare_stroke(&mut self) -> Result<Option<StrokePaint>, PdfCanvasError> {
+        let shader = match self.compute_shader(true)? {
+            PatternPaint::Nothing => return Ok(None),
+            pattern_paint => pattern_paint.into_shader(),
+        };
+        let scale = self.state.transform.area_scale();
+        let dash_pattern = self.scaled_dash_pattern(scale)?;
+        let state = &self.state;
+        Ok(Some(StrokePaint {
+            color: state.paint.stroke_color,
+            blend_mode: state.paint.blend_mode,
+            line_width: state.paint.line_width * scale,
+            style: StrokeStyle::new(&state.paint, &state.transform, dash_pattern),
+            shader,
+            clip: self.pattern_bbox_clip(true)?,
+        }))
+    }
+
+    /// Paints `path` with `paint` through the current soft mask.
+    ///
+    /// # Errors
+    /// Propagates backend failures.
+    pub(crate) fn paint_prepared(
+        &mut self,
+        path: &CanvasPath<'_>,
+        fill_type: PathFillType,
+        paint: &PreparedPaint,
+    ) -> Result<(), PdfCanvasError> {
+        self.with_soft_mask(|backend| paint.paint(backend, path, fill_type))
     }
 
     /// Returns the current dash pattern scaled by `scale` into stroke space, or `None` for

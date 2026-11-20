@@ -2,6 +2,7 @@ use crate::CanvasPath;
 use crate::canvas_backend::CanvasBackend;
 use crate::error::PdfCanvasError;
 use crate::pdf_canvas::PdfCanvas;
+use crate::prepared_paint::PreparedPaint;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_graphics::pdf_path::PdfPath;
 use pdf_graphics::transform::Transform;
@@ -133,49 +134,46 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Paints or accumulates one scalable glyph outline.
     ///
     /// `outline` is expressed in font design coordinates. `transform` maps those coordinates into
-    /// the backend's device space. The backend must apply the fill, stroke, visibility, and
-    /// clipping behavior selected by [`CanvasPaint::rendering_mode`]. For a clip-capable mode,
-    /// the transformed outline is accumulated for the next [`Self::commit_text_clip`] call rather
-    /// than immediately changing the active clip.
+    /// the backend's device space. The fill, stroke and clipping follow
+    /// [`CanvasPaint::rendering_mode`]. For a clip-capable mode, the transformed outline is
+    /// accumulated for the text clip applied at `ET` rather than immediately changing the
+    /// active clip.
+    ///
+    /// `run_paint` holds the paint of the text run: it is worked out from the graphics state at
+    /// the first painted glyph and reused for the rest, since showing a run's glyphs leaves the
+    /// graphics state unchanged.
     ///
     /// # Errors
     ///
     /// Returns the backend error when transforming, painting, or accumulating the outline fails.
     fn paint_outline(
         &mut self,
-        path: &std::sync::Arc<PdfPath>,
+        path: &Arc<PdfPath>,
         transform: &Transform,
+        run_paint: &mut Option<PreparedPaint>,
     ) -> Result<(), PdfCanvasError> {
-        let mode = self.state.paint.rendering_mode;
-        if matches!(mode, TextRenderingMode::Invisible) {
-            return Ok(());
+        let (paint_mode, clips) = match self.state.paint.rendering_mode {
+            TextRenderingMode::Fill => (Some(PaintMode::Fill), false),
+            TextRenderingMode::Stroke => (Some(PaintMode::Stroke), false),
+            TextRenderingMode::FillAndStroke => (Some(PaintMode::FillAndStroke), false),
+            TextRenderingMode::Invisible => return Ok(()),
+            TextRenderingMode::FillAndClip => (Some(PaintMode::Fill), true),
+            TextRenderingMode::StrokeAndClip => (Some(PaintMode::Stroke), true),
+            TextRenderingMode::FillStrokeAndClip => (Some(PaintMode::FillAndStroke), true),
+            TextRenderingMode::Clip => (None, true),
+        };
+        let path = CanvasPath::shared(Arc::clone(path), *transform)?;
+        if let Some(paint_mode) = paint_mode {
+            let paint = match run_paint {
+                Some(paint) => paint,
+                None => run_paint.insert(self.prepare_paint(paint_mode)?),
+            };
+            self.paint_prepared(&path, PathFillType::Winding, paint)?;
         }
-        let path = CanvasPath::shared(std::sync::Arc::clone(path), *transform)?;
-        match mode {
-            TextRenderingMode::Fill => {
-                self.draw_path(&path, PaintMode::Fill, PathFillType::Winding)
-            }
-            TextRenderingMode::Stroke => {
-                self.draw_path(&path, PaintMode::Stroke, PathFillType::Winding)
-            }
-            TextRenderingMode::FillAndStroke => {
-                self.draw_path(&path, PaintMode::FillAndStroke, PathFillType::Winding)
-            }
-            TextRenderingMode::Invisible => Ok(()),
-            TextRenderingMode::FillAndClip => {
-                self.draw_path(&path, PaintMode::Fill, PathFillType::Winding)?;
-                self.add_to_text_clip(&path)
-            }
-            TextRenderingMode::StrokeAndClip => {
-                self.draw_path(&path, PaintMode::Stroke, PathFillType::Winding)?;
-                self.add_to_text_clip(&path)
-            }
-            TextRenderingMode::FillStrokeAndClip => {
-                self.draw_path(&path, PaintMode::FillAndStroke, PathFillType::Winding)?;
-                self.add_to_text_clip(&path)
-            }
-            TextRenderingMode::Clip => self.add_to_text_clip(&path),
+        if clips {
+            self.add_to_text_clip(&path)?;
         }
+        Ok(())
     }
 
     /// Executes one opaque PDF Type 3 character procedure.
@@ -263,6 +261,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         base_transform.concat(&state.transform);
         let font_system = std::sync::Arc::clone(&self.font_system);
         let type3 = font.spec().is_type3();
+        let mut run_paint = None;
         let advance = font_system.visit_pdf(
             &PdfTextRun {
                 font: &font,
@@ -277,7 +276,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                         self.paint_type3(glyph.glyph_id, &glyph_transform)?;
                     } else {
                         let outline = self.glyph_outline(face.as_ref(), glyph.glyph_id)?;
-                        self.paint_outline(&outline, &glyph_transform)?;
+                        self.paint_outline(&outline, &glyph_transform, &mut run_paint)?;
                     }
                 }
                 let hidden = self.content_hidden();
