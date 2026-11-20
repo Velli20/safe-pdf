@@ -39,6 +39,8 @@ mod path_geometry;
 pub use path_geometry::CanvasPath;
 /// PDF operator interpretation and painting orchestration.
 pub mod pdf_canvas;
+/// Fill and stroke paint prepared once for one or more paths.
+mod prepared_paint;
 /// Flat command recording and scoped replay.
 pub mod recording_canvas;
 /// Shading operators and shared paint preparation.
