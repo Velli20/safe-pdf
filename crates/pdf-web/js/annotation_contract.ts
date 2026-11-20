@@ -1842,7 +1842,8 @@ has_popup: boolean,
 control: WidgetControl | null,
 /**
  * Whether the host draws this entry's source appearance into the entry itself,
- * rendered on request for the entry's id, in place of a label.
+ * rendered on request for the entry's id, in place of a label or beneath a widget's
+ * transparent control.
  */
 artwork: boolean,
 /**

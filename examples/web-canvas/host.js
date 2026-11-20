@@ -287,27 +287,17 @@ class PdfViewer {
     else if (trigger === 'activate' && !entry.triggers.includes('activate')) this.elements.status.textContent = entry.text || '';
   }
 
-  // Repaints the page with the widget's down appearance while it is held.
+  // Selects the widget's down appearance while it is held; the layer redraws its artwork.
   pressAnnotation(entry, pressed) {
-    const page = this.pages.get(entry.page);
-    if (!page?.snapshot) return;
     try {
-      const snapshot = this.pdf.press(entry.page, page.canvas, pressed ? entry.id : undefined);
-      page.snapshot.free();
-      page.snapshot = snapshot;
-      this.updateAnnotations(page);
+      this.pdf.press(pressed ? String(entry.id) : undefined);
     } catch (error) { this.showError(error); }
   }
 
-  // Repaints the page with the edited text entry's value left to its control.
+  // Leaves the edited text entry's value to its control; the layer redraws its artwork.
   editAnnotation(entry, editing) {
-    const page = this.pages.get(entry.page);
-    if (!page?.snapshot) return;
     try {
-      const snapshot = this.pdf.edit(entry.page, page.canvas, editing ? String(entry.id) : undefined);
-      page.snapshot.free();
-      page.snapshot = snapshot;
-      this.updateAnnotations(page);
+      this.pdf.edit(editing ? String(entry.id) : undefined);
     } catch (error) { this.showError(error); }
   }
 
@@ -318,7 +308,7 @@ class PdfViewer {
       const page = this.pages.get(index);
       if (!page) continue;
       if (!page.snapshot) continue;
-      // Widget appearances are painted on the canvas, so committed state repaints it.
+      // Committed state can change appearances drawn on the canvas and every entry's artwork.
       const snapshot = this.pdf.repaint(index, page.canvas);
       page.snapshot.free();
       page.snapshot = snapshot;

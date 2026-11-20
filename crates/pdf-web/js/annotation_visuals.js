@@ -67,9 +67,11 @@ export class VisualComponent extends AnnotationComponent {
         node.rel = 'noopener noreferrer';
       } else node.removeAttribute('href');
       node.tabIndex = 0; node.classList.add('native-link');
+    } else if (entry.artwork) {
+      // A stamp, or a widget without a control, drawn from its appearance.
+      this.drawArtwork();
     } else if (kind === AnnotationKind.Stamp) {
-      if (entry.artwork) this.drawArtwork();
-      else { node.textContent = entry.label; node.classList.add('native-stamp'); this.signature = ''; }
+      node.textContent = entry.label; node.classList.add('native-stamp'); this.signature = '';
     } else if (this.signature !== entry.modified_revision) {
       node.replaceChildren(drawSvg(entry));
       this.signature = entry.modified_revision;

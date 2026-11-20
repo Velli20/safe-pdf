@@ -38,19 +38,25 @@ export class AnnotationComponent {
     node.addEventListener(name, callback, { signal: this.abort.signal });
   }
   /** Draws the source artwork into a canvas that moves with the node. Moves keep the
-   * drawing; a new size or viewport draws a fresh canvas before swapping it in. */
-  drawArtwork() {
-    const { entry, node, layer } = this;
+   * drawing; a new size, viewport or `state` draws a fresh canvas before swapping it in.
+   * @param {string} [state] the presented state the artwork depends on, beyond its size */
+  drawArtwork(state = '') {
+    const { entry, layer } = this;
     if (!layer) return;
-    const signature = `${entry.size.width}x${entry.size.height}@${layer.snapshot?.viewportRevision}`;
+    const signature = `${entry.size.width}x${entry.size.height}@${layer.snapshot?.viewportRevision}#${state}`;
     if (this.signature === signature) return;
     const canvas = element('canvas', { className: 'native-artwork' });
     try {
       layer.renderArtwork(entry, canvas);
     } catch (error) { layer.onError(error); return; }
-    node.classList.remove('native-stamp');
-    node.replaceChildren(canvas);
+    this.placeArtwork(canvas);
     this.signature = signature;
+  }
+  /** Shows drawn artwork as the node's content.
+   * @param {HTMLCanvasElement} canvas */
+  placeArtwork(canvas) {
+    this.node.classList.remove('native-stamp');
+    this.node.replaceChildren(canvas);
   }
   /** Subclasses reconcile their native control or visual from the current entry. */
   update() {}

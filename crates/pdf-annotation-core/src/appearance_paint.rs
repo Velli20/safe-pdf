@@ -41,7 +41,23 @@ pub struct PaintedAppearance {
 }
 
 impl PaintedAppearance {
-    /// The appearance of a displayed annotation painted on the canvas, or `None`.
+    /// The appearance of a displayed annotation drawn from its appearance, painted on the
+    /// page canvas: ink without strokes draws its source `/AS` state, and caret and unknown
+    /// subtypes their normal appearance. `None` for other annotations.
+    pub(crate) fn new(
+        annotation: &Annotation,
+        optional_content: &OptionalContentState,
+    ) -> Option<Self> {
+        if !annotation.is_displayed(optional_content) || !annotation.is_drawn_from_appearance() {
+            return None;
+        }
+        annotation
+            .source()
+            .and_then(|source| source.normal_appearance(source.rect?))
+    }
+
+    /// The appearance of a displayed widget, selected by its live state, for drawing into
+    /// the widget's own presentation; `None` for other annotations.
     ///
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
@@ -49,25 +65,15 @@ impl PaintedAppearance {
     /// editable combo boxes their normal appearance with the live value, drawn as it is
     /// while a text field's value is still its source `/V`. The widget
     /// `presentation` marks pressed draws its down appearance when it has one for that
-    /// state, and the text entry it marks editing draws without its value. Ink without
-    /// strokes draws its source `/AS` state.
+    /// state, and the text entry it marks editing draws without its value.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
-    pub(crate) fn new(
+    fn widget(
         annotation: &Annotation,
         view: &DocumentView<'_>,
-        optional_content: &OptionalContentState,
         presentation: PresentationState,
     ) -> AnnotationLayerResult<Option<Self>> {
-        if !annotation.is_displayed(optional_content) {
-            return Ok(None);
-        }
-        if annotation.is_drawn_from_appearance() {
-            return Ok(annotation
-                .source()
-                .and_then(|source| source.normal_appearance(source.rect?)));
-        }
         let Some(field) = annotation.widget_field(view)? else {
             return Ok(None);
         };
@@ -116,30 +122,45 @@ impl PaintedAppearance {
             .and_then(|field| annotation.text_entry_appearance(field)))
     }
 
-    /// The source artwork of a displayed stamp at its live bounds, of a displayed note
-    /// at its source rectangle, or of displayed free text at its live bounds while its
-    /// text is still the source `/Contents`; otherwise `None`.
+    /// The source artwork of a displayed annotation, drawn into the annotation's own
+    /// presentation rather than the page canvas: a stamp at its live bounds, a note at its
+    /// source rectangle, free text at its live bounds while its text is still the source
+    /// `/Contents`, and a widget's appearance selected by its live state and
+    /// `presentation`; otherwise `None`.
     ///
-    /// The host draws it into the annotation's own presentation rather than the page
-    /// canvas, so the artwork moves with the annotation while it is dragged. Edited
-    /// free text no longer matches its source appearance, so the host shows its text.
+    /// The artwork moves with the annotation while it is dragged, and widgets stack with
+    /// the other annotations instead of beneath them. Edited free text no longer matches
+    /// its source appearance, so the host shows its text.
+    ///
+    /// # Errors
+    /// Returns an error when a widget's bound field is missing.
     pub(crate) fn artwork(
         annotation: &Annotation,
+        view: &DocumentView<'_>,
         optional_content: &OptionalContentState,
-    ) -> Option<Self> {
-        let source = annotation.source()?;
+        presentation: PresentationState,
+    ) -> AnnotationLayerResult<Option<Self>> {
+        if !annotation.is_displayed(optional_content) {
+            return Ok(None);
+        }
+        let Some(source) = annotation.source() else {
+            return Ok(None);
+        };
         let rect = match &annotation.content {
             Kind::Stamp(stamp) => stamp.bounds,
-            Kind::TextNote(_) => source.rect?,
-            Kind::FreeText(free_text) if source.contents().ok()? == free_text.text => {
+            Kind::TextNote(_) => match source.rect {
+                Some(rect) => rect,
+                None => return Ok(None),
+            },
+            Kind::FreeText(free_text)
+                if source.contents().ok().as_ref() == Some(&free_text.text) =>
+            {
                 free_text.bounds
             }
-            _ => return None,
+            Kind::Widget(_) => return Self::widget(annotation, view, presentation),
+            _ => return Ok(None),
         };
-        if !annotation.is_displayed(optional_content) {
-            return None;
-        }
-        source.normal_appearance(rect)
+        Ok(source.normal_appearance(rect))
     }
 }
 
@@ -287,11 +308,20 @@ mod tests {
                 Some(&form_appearance),
             )
             .unwrap();
-            let appearances = overlay
-                .painted_appearances(0, PresentationState::default())
+            let page = Rect {
+                left: 0.0,
+                top: 0.0,
+                right: 612.0,
+                bottom: 842.0,
+            };
+            let viewport = PageViewport::new(page, 0, Size::new(612.0, 842.0)).unwrap();
+            let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+            let entry = prepared.entries().first().unwrap();
+            assert!(entry.artwork, "/Ff {flags}");
+            let painted = overlay
+                .artwork(entry.id, PresentationState::default())
+                .unwrap()
                 .unwrap();
-            let painted = appearances.first().unwrap();
-            assert_eq!(appearances.len(), 1, "/Ff {flags}");
             assert_eq!(Some(painted.rect), source.rect);
             assert_eq!(
                 painted.stream.value(),
@@ -300,22 +330,7 @@ mod tests {
             assert!(painted.text.is_none(), "/Ff {flags}");
             if flags == 4096 {
                 // An edited value is laid out in the form's `/DA` font instead.
-                let page = Rect {
-                    left: 0.0,
-                    top: 0.0,
-                    right: 612.0,
-                    bottom: 842.0,
-                };
-                let viewport = PageViewport::new(page, 0, Size::new(612.0, 842.0)).unwrap();
-                let prepared = overlay.prepare(0, &viewport, 0).unwrap();
-                let field = prepared
-                    .entries()
-                    .first()
-                    .unwrap()
-                    .control
-                    .as_ref()
-                    .unwrap()
-                    .field;
+                let field = entry.control.as_ref().unwrap().field;
                 let request = AnnotationCommandRequest {
                     target: None,
                     command: AnnotationCommand {
@@ -327,10 +342,11 @@ mod tests {
                     },
                 };
                 overlay.accept_event(request, None, None).unwrap();
-                let appearances = overlay
-                    .painted_appearances(0, PresentationState::default())
+                let painted = overlay
+                    .artwork(entry.id, PresentationState::default())
+                    .unwrap()
                     .unwrap();
-                let text = appearances.first().unwrap().text.as_ref().unwrap();
+                let text = painted.text.as_ref().unwrap();
                 assert_eq!(text.value, "Ipsum");
                 assert_eq!(text.font.as_ref(), b"Helv");
             }
@@ -372,11 +388,11 @@ mod tests {
         let entry = prepared.entries().first().unwrap();
         assert_eq!(entry.unsupported, None);
         assert!(entry.control.is_none());
-        let appearances = overlay
-            .painted_appearances(0, PresentationState::default())
+        assert!(entry.artwork);
+        let painted = overlay
+            .artwork(entry.id, PresentationState::default())
+            .unwrap()
             .unwrap();
-        let painted = appearances.first().unwrap();
-        assert_eq!(appearances.len(), 1);
         assert_eq!(Some(painted.rect), source.rect);
         assert_eq!(painted.stream.value(), &ObjectVariant::Stream(appearance));
     }
@@ -430,7 +446,10 @@ mod tests {
         let entry = prepared.entries().first().unwrap();
         assert!(entry.artwork);
         assert_eq!(entry.unsupported, None);
-        let artwork = overlay.artwork(entry.id).unwrap();
+        let artwork = overlay
+            .artwork(entry.id, PresentationState::default())
+            .unwrap()
+            .unwrap();
         assert_eq!(artwork.rect, rect.normalized());
     }
 
@@ -477,7 +496,74 @@ mod tests {
         let entry = prepared.entries().first().unwrap();
         assert!(entry.artwork);
         assert_eq!(entry.unsupported, None);
-        let artwork = overlay.artwork(entry.id).unwrap();
+        let artwork = overlay
+            .artwork(entry.id, PresentationState::default())
+            .unwrap()
+            .unwrap();
         assert_eq!(Some(artwork.rect), source.rect);
+    }
+
+    #[test]
+    fn widget_draws_as_artwork_above_an_earlier_listed_square() {
+        let name = |bytes: &[u8]| PdfString::from(bytes, StringKind::Name);
+        let rect = |values: [i64; 4]| {
+            ObjectVariant::Array(PdfArray::new(values.map(ObjectVariant::Integer)))
+        };
+        let off = StreamObject::new(2, 0, Dictionary::from_entries([]), b"0 g".to_vec());
+        let checkbox = ObjectVariant::Dictionary(Dictionary::from_entries([
+            (b"Subtype".as_slice(), name(b"Widget")),
+            (b"FT".as_slice(), name(b"Btn")),
+            (b"AS".as_slice(), name(b"Off")),
+            (b"Rect".as_slice(), rect([60, 744, 83, 766])),
+            (
+                b"AP".as_slice(),
+                ObjectVariant::Dictionary(Dictionary::from_entries([(
+                    b"N".as_slice(),
+                    ObjectVariant::Dictionary(Dictionary::from_entries([(
+                        b"Off".as_slice(),
+                        ObjectVariant::Stream(off.clone()),
+                    )])),
+                )])),
+            ),
+        ]));
+        let square = ObjectVariant::Dictionary(Dictionary::from_entries([
+            (b"Subtype".as_slice(), name(b"Square")),
+            (b"Rect".as_slice(), rect([49, 663, 328, 775])),
+            (
+                b"IC".as_slice(),
+                ObjectVariant::Array(PdfArray::new([0, 0, 0].map(ObjectVariant::Integer))),
+            ),
+        ]));
+        let reader = ObjectReader::new(EmptySource);
+        let sources: [SourceAnnotation; 2] = [
+            reader.read(&checkbox).unwrap(),
+            reader.read(&square).unwrap(),
+        ];
+        let mut overlay = AnnotationOverlay::new([sources.as_slice()], None, None).unwrap();
+        let page = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 612.0,
+            bottom: 792.0,
+        };
+        let viewport = PageViewport::new(page, 0, Size::new(612.0, 792.0)).unwrap();
+        let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+        let subtypes = prepared
+            .entries()
+            .iter()
+            .map(|entry| entry.subtype.as_str())
+            .collect::<Vec<_>>();
+        // Form fields are drawn above other annotations, whatever their `/Annots` order.
+        assert_eq!(subtypes, ["Square", "Widget"]);
+        let widget = prepared.entries().last().unwrap();
+        assert!(widget.artwork);
+        // The widget is drawn into its own presentation, not under the Square on the canvas.
+        assert!(overlay.painted_appearances(0).unwrap().is_empty());
+        let artwork = overlay
+            .artwork(widget.id, PresentationState::default())
+            .unwrap()
+            .unwrap();
+        assert_eq!(artwork.stream.value(), &ObjectVariant::Stream(off));
+        assert_eq!(Some(artwork.rect), sources.first().unwrap().rect);
     }
 }

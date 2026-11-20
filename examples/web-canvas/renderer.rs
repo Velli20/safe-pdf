@@ -5,7 +5,7 @@ use pdf_graphics::{size::Size, transform::Transform};
 use pdf_graphics_web::{WebCanvasBackend, WebCanvasOptions};
 use pdf_renderer::{DocumentTextSelection, PdfRenderer};
 use pdf_web::{
-    FieldFont, WebAnnotationOverlay, WebPageRenderer, WebViewport,
+    ArtworkLayout, FieldFont, WebAnnotationOverlay, WebPageRenderer, WebViewport,
     interop::{
         WebAnnotationEvent, WebAnnotationSnapshot, WebSelectionBatch, WebSelectionController,
     },
@@ -109,8 +109,8 @@ impl WebDocument {
         self.render_viewport(page_index, canvas, viewport)
     }
 
-    /// Renders the page again through its mounted viewport, so canvas-painted widget
-    /// appearances follow committed edits. Keeps the viewport revision, leaving drafts
+    /// Renders the page again through its mounted viewport, so appearances painted on the
+    /// canvas and the annotation snapshot follow committed edits. Keeps the viewport revision, leaving drafts
     /// in other controls current.
     pub fn repaint(
         &mut self,
@@ -125,20 +125,15 @@ impl WebDocument {
         self.render_viewport(page_index, canvas, viewport)
     }
 
-    /// Paints the widget `annotation` (a decimal Core id) held down, or releases the
-    /// pressed widget when `None`, and repaints `page_index`.
-    pub fn press(
-        &mut self,
-        page_index: u32,
-        canvas: web_sys::HtmlCanvasElement,
-        annotation: Option<String>,
-    ) -> Result<WebAnnotationSnapshot, JsValue> {
+    /// Marks the widget `annotation` (a decimal Core id) held down, or releases the
+    /// pressed widget when `None`; its artwork then draws its down appearance.
+    pub fn press(&mut self, annotation: Option<String>) -> Result<(), JsValue> {
         let pressed = annotation
             .map(|id| id.parse().map(AnnotationId))
             .transpose()
             .map_err(error)?;
         self.overlay.set_pressed(pressed);
-        self.repaint(page_index, canvas)
+        Ok(())
     }
 
     /// Returns the font the text entry `annotation` (a decimal Core id) on `page_index`
@@ -157,26 +152,22 @@ impl WebDocument {
     }
 
     /// Marks the text entry `annotation` (a decimal Core id) as being edited, or ends
-    /// editing when `None`, and repaints `page_index`: the edited entry is painted
-    /// without its value, which its control shows instead.
-    pub fn edit(
-        &mut self,
-        page_index: u32,
-        canvas: web_sys::HtmlCanvasElement,
-        annotation: Option<String>,
-    ) -> Result<WebAnnotationSnapshot, JsValue> {
+    /// editing when `None`: the edited entry's artwork is drawn without its value, which
+    /// its control shows instead.
+    pub fn edit(&mut self, annotation: Option<String>) -> Result<(), JsValue> {
         let editing = annotation
             .map(|id| id.parse().map(AnnotationId))
             .transpose()
             .map_err(error)?;
         self.overlay.set_editing(editing);
-        self.repaint(page_index, canvas)
+        Ok(())
     }
 
     /// Draws the source artwork of `annotation` (a decimal Core id) into `canvas`, sized
-    /// to the annotation's local box at its mounted page's pixel density. The host shows
-    /// the canvas inside the annotation, so the artwork moves with it while dragged.
-    /// Leaves `canvas` untouched when the annotation has no artwork.
+    /// to the annotation's local box at its mounted page's pixel density, and places the
+    /// canvas over that box, grown to the page's pixel grid. The host shows the canvas
+    /// inside the annotation, so the artwork moves with it while dragged. Leaves `canvas`
+    /// untouched when the annotation has no artwork.
     pub fn render_artwork(
         &self,
         page_index: u32,
@@ -184,15 +175,33 @@ impl WebDocument {
         canvas: web_sys::HtmlCanvasElement,
     ) -> Result<(), JsValue> {
         let id = AnnotationId(annotation.parse().map_err(error)?);
-        let Some(artwork) = self.overlay.artwork(id) else {
+        let Some(artwork) = self.overlay.artwork(id).map_err(error)? else {
             return Ok(());
         };
-        let viewport = self
+        let ArtworkLayout { viewport, bounds } = self
             .viewports
             .get(&page_index)
             .ok_or_else(|| error("unmounted page"))?
             .for_artwork(&artwork.rect)
             .map_err(error)?;
+        // Browsers snap a box's position and size to whole local pixels, which would move
+        // the canvas off the page's pixel grid, so the canvas is laid out at its whole
+        // bitmap size and placed by a transform, which is not snapped.
+        let backing = viewport.canvas().backing_size();
+        let (width, height) = (f64::from(backing.width), f64::from(backing.height));
+        let style = canvas.style();
+        style.set_property("width", &format!("{width}px"))?;
+        style.set_property("height", &format!("{height}px"))?;
+        style.set_property(
+            "transform",
+            &format!(
+                "translate({}px, {}px) scale({}, {})",
+                bounds.left,
+                bounds.top,
+                f64::from(bounds.width()) / width,
+                f64::from(bounds.height()) / height,
+            ),
+        )?;
         let mut backend =
             WebCanvasBackend::new(canvas, *viewport.canvas(), WebCanvasOptions::default())
                 .map_err(error)?;

@@ -39,7 +39,7 @@ impl WebAnnotationEntry {
         let css = WebCss {
             transform: css_matrix(&entry, device_to_css),
             color: css_color(Some(entry.style.color)),
-            background: if painted_on_canvas(&entry) {
+            background: if drawn_from_appearance(&entry) {
                 css_color(None)
             } else {
                 css_color(entry.style.background)
@@ -67,26 +67,26 @@ fn drawn_from_shapes(kind: &Kind) -> bool {
     )
 }
 
-/// Whether `entry` is painted from its appearance on the page canvas, which already draws
-/// any border and background: supported caret and unknown entries, and widgets without a
-/// control or placeholder.
-fn painted_on_canvas(entry: &AnnotationEntry) -> bool {
+/// Whether `entry` is drawn from its appearance, on the page canvas or as its own
+/// artwork, which already draws any border and background: supported caret and unknown
+/// entries, entries with artwork, and widgets without a control.
+fn drawn_from_appearance(entry: &AnnotationEntry) -> bool {
     entry.unsupported.is_none()
         && match entry.content {
             Kind::Caret(_) | Kind::Unknown(_) => true,
-            Kind::Widget(_) => entry.control.is_none(),
-            _ => false,
+            Kind::Widget(_) => entry.control.is_none() || entry.artwork,
+            _ => entry.artwork,
         }
 }
 
 /// The CSS border for `entry`, or empty when nothing draws one: a link is only an
-/// interaction region, canvas-painted or shape-drawn kinds carry their own outline, and
+/// interaction region, appearance-drawn or shape-drawn kinds carry their own outline, and
 /// a widget draws a border only in its `/MK /BC` color.
 fn css_border(entry: &AnnotationEntry) -> String {
     let style = &entry.style;
     if matches!(entry.content, Kind::Link(_))
         || matches!(entry.content, Kind::Widget(_)) && style.border_color.is_none()
-        || painted_on_canvas(entry)
+        || drawn_from_appearance(entry)
         || drawn_from_shapes(&entry.content)
         || style.border_width <= 0.0
     {

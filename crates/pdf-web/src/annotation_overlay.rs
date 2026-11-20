@@ -166,19 +166,24 @@ impl WebAnnotationOverlay {
         Ok(self.overlay.perform_action(id, trigger)?)
     }
 
-    /// Returns the widget appearances painted on `page`'s canvas under live field state,
-    /// with the pressed widget's down appearance and the edited text entry without its value.
+    /// Returns the appearances of `page`'s annotations drawn from their appearance, painted
+    /// on the page canvas.
     ///
     /// # Errors
-    /// Propagates annotation layer errors for absent pages or unbound widgets.
+    /// Propagates annotation layer errors for absent pages.
     pub fn painted_appearances(&self, page: u32) -> WebResult<Vec<PaintedAppearance>> {
-        Ok(self.overlay.painted_appearances(page, self.presentation)?)
+        Ok(self.overlay.painted_appearances(page)?)
     }
 
-    /// Returns the source artwork of the displayed stamp or note `id`, drawn into the
-    /// annotation's own presentation; `None` for other annotations.
-    pub fn artwork(&self, id: AnnotationId) -> Option<PaintedAppearance> {
-        self.overlay.artwork(id)
+    /// Returns the source artwork of the displayed stamp, note, free text or widget `id`,
+    /// drawn into the annotation's own presentation, with the pressed widget's down
+    /// appearance and the edited text entry without its value; `None` for other
+    /// annotations.
+    ///
+    /// # Errors
+    /// Rejects a widget whose bound field is missing.
+    pub fn artwork(&self, id: AnnotationId) -> WebResult<Option<PaintedAppearance>> {
+        Ok(self.overlay.artwork(id, self.presentation)?)
     }
 
     /// Returns the painted appearance of the displayed text entry `id` with its live value;
@@ -190,12 +195,12 @@ impl WebAnnotationOverlay {
         Ok(self.overlay.text_entry(id)?)
     }
 
-    /// Marks the widget the pointer holds down, or none; the host repaints its page.
+    /// Marks the widget the pointer holds down, or none; the host redraws its artwork.
     pub fn set_pressed(&mut self, pressed: Option<AnnotationId>) {
         self.presentation.pressed = pressed;
     }
 
-    /// Marks the text entry the host is editing, or none; the host repaints its page so
+    /// Marks the text entry the host is editing, or none; the host redraws its artwork so
     /// only the control shows the value being edited.
     pub fn set_editing(&mut self, editing: Option<AnnotationId>) {
         self.presentation.editing = editing;

@@ -1,6 +1,6 @@
 //! Project borrowed Core values into viewport entries without touching PDF objects.
 use crate::{
-    appearance_paint::PaintedAppearance,
+    appearance_paint::{PaintedAppearance, PresentationState},
     engine::DocumentView,
     entry::AnnotationEntry,
     fields::{Field, FieldKind},
@@ -14,8 +14,8 @@ use pdf_graphics::{point::Point, viewport::PageViewport};
 use pdf_optional_content::OptionalContentState;
 
 /// Why the host should show a placeholder: the payload's reason, else unsupported field
-/// semantics. A widget of an unsupported field that has a normal appearance is painted on
-/// the page canvas from that appearance, so it needs no placeholder.
+/// semantics. A widget of an unsupported field that has a normal appearance is drawn from
+/// that appearance, so it needs no placeholder.
 fn unsupported_reason(annotation: &Annotation, field: Option<&Field>) -> Option<String> {
     annotation
         .content
@@ -45,7 +45,13 @@ pub(crate) fn project(
     let style = annotation.style()?;
     let action = annotation.action();
     let visible = annotation.is_displayed(optional_content);
-    let artwork = PaintedAppearance::artwork(annotation, optional_content).is_some();
+    let artwork = PaintedAppearance::artwork(
+        annotation,
+        view,
+        optional_content,
+        PresentationState::default(),
+    )?
+    .is_some();
     Ok(AnnotationEntry {
         id: annotation.id,
         page: annotation.page.0,

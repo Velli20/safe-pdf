@@ -54,8 +54,9 @@ impl WebPageRenderer {
     }
 
     /// Renders page content via PdfRenderer, collects its existing TextGlyph output,
-    /// paints the appearances of widgets whose native controls are transparent, and
-    /// prepares annotations separately through the supplied overlay layer.
+    /// paints the appearances of annotations drawn from their appearance, and prepares
+    /// annotations separately through the supplied overlay layer. Widgets and other
+    /// artwork are drawn into their own presentation by [`Self::render_artwork`].
     ///
     /// Uses the shared content-and-text pass; annotation preparation produces native
     /// models only. All passes use the supplied viewport.

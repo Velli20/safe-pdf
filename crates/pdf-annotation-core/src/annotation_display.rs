@@ -41,6 +41,7 @@ impl Annotation {
 #[cfg(test)]
 mod tests {
     use crate::{AnnotationOverlay, PresentationState, pdf_data::SourceAnnotation};
+    use pdf_graphics::{rect::Rect, size::Size, viewport::PageViewport};
     use pdf_object_reader::{
         Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
         pdf_array::PdfArray, pdf_string::PdfString, string_kind::StringKind,
@@ -70,10 +71,23 @@ mod tests {
             ),
         ]));
         let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
-        let overlay = AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
-        let appearances = overlay
-            .painted_appearances(0, PresentationState::default())
-            .unwrap();
-        assert_eq!(appearances.len(), 1);
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
+        let page = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 612.0,
+            bottom: 792.0,
+        };
+        let viewport = PageViewport::new(page, 0, Size::new(612.0, 792.0)).unwrap();
+        let id = overlay
+            .prepare(0, &viewport, 0)
+            .unwrap()
+            .entries()
+            .first()
+            .unwrap()
+            .id;
+        let artwork = overlay.artwork(id, PresentationState::default()).unwrap();
+        assert!(artwork.is_some());
     }
 }
