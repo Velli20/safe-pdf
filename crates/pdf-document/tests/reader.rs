@@ -943,7 +943,7 @@ trailer\n<</Root 1 0 R/Size 5>>\nstartxref\n";
         .expect("issue6069 should contain one page");
     let contents = report
         .document()
-        .content_stream(page)
+        .parse_content_stream(page)
         .expect("the recovered page content stream should parse")
         .expect("the recovered page content stream should remain available");
 
@@ -960,7 +960,7 @@ fn test_xref_backed_zero_length_filtered_stream_recovers() {
         .get_page(0)
         .expect("the page should remain available");
     let contents = document
-        .content_stream(page)
+        .parse_content_stream(page)
         .expect("the recovered and decoded content stream should parse")
         .expect("the recovered and decoded content stream should remain available");
 
