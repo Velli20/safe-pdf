@@ -276,13 +276,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                     if type3 {
                         self.paint_type3(glyph.glyph_id, &glyph_transform)?;
                     } else {
-                        let pixels_per_em = glyph
-                            .local_transform
-                            .sx
-                            .abs()
-                            .max(glyph.local_transform.sy.abs());
-                        let outline =
-                            self.glyph_outline(face.as_ref(), glyph.glyph_id, pixels_per_em)?;
+                        let outline = self.glyph_outline(face.as_ref(), glyph.glyph_id)?;
                         self.paint_outline(&outline, &glyph_transform)?;
                     }
                 }

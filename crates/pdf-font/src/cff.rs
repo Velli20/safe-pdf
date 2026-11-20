@@ -304,11 +304,7 @@ impl FontFace for CffFontFace {
     }
 
     /// Evaluates one charstring into a backend-neutral scalable outline.
-    fn glyph_geometry(
-        &self,
-        glyph: GlyphId,
-        _pixels_per_em: f32,
-    ) -> Result<Option<GlyphGeometry>, FontError> {
+    fn glyph_geometry(&self, glyph: GlyphId) -> Result<Option<GlyphGeometry>, FontError> {
         if self.check_glyph(glyph).is_err() {
             return Ok(None);
         }
@@ -348,7 +344,7 @@ mod tests {
         let glyph = face.glyph_for_char('A').unwrap();
 
         assert!(matches!(
-            face.glyph_geometry(glyph, 12.0),
+            face.glyph_geometry(glyph),
             Ok(Some(GlyphGeometry::Outline(outline))) if !outline.verbs.is_empty()
         ));
     }

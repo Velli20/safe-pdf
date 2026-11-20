@@ -15,10 +15,27 @@ use pdf_object_reader::{
 use pdf_resources::{resource::Resource, resources::Resources};
 use pdf_text_engine::bundled_font_system;
 
+/// Builds a text object that shows `text` at 10 points.
 fn content_stream(text: &[u8]) -> ContentStream {
     let mut data = b"BT /F1 10 Tf (".to_vec();
     data.extend_from_slice(text);
     data.extend_from_slice(b") Tj ET");
+    parse(data)
+}
+
+/// Builds a text object that shows 16 `A` glyphs at each size from 1 to 64 points.
+fn sized_content_stream() -> ContentStream {
+    let mut data = b"BT".to_vec();
+    for size in 1..=64 {
+        data.extend_from_slice(format!(" /F1 {size} Tf (").as_bytes());
+        data.extend_from_slice(&[b'A'; 16]);
+        data.extend_from_slice(b") Tj");
+    }
+    data.extend_from_slice(b" ET");
+    parse(data)
+}
+
+fn parse(data: Vec<u8>) -> ContentStream {
     let stream = StreamObject::new(1, 0, Dictionary::default(), data);
     pdf_object_reader::ObjectReader::new(EmptySource)
         .read::<ContentStream>(&ObjectVariant::Stream(stream))
@@ -58,8 +75,11 @@ fn benchmark(c: &mut Criterion) {
         .map(|index| b'A' + u8::try_from(index % 26).expect("alphabet index should fit"))
         .collect::<Vec<_>>();
 
-    for (workload, text) in [("repeated", repeated), ("mixed", mixed)] {
-        let stream = content_stream(&text);
+    for (workload, stream) in [
+        ("repeated", content_stream(&repeated)),
+        ("mixed", content_stream(&mixed)),
+        ("repeated_at_64_sizes", sized_content_stream()),
+    ] {
         c.bench_function(
             &format!("text/render_{workload}_1024_real_glyphs"),
             |bencher| {

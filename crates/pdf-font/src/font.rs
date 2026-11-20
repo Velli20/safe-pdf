@@ -295,12 +295,8 @@ pub trait FontFace: Send + Sync {
     /// faces continue to use widths from the PDF font dictionary.
     fn horizontal_advance(&self, glyph: GlyphId) -> Result<Option<f32>, FontError>;
 
-    /// Returns renderable geometry for one glyph at the requested pixel size.
-    fn glyph_geometry(
-        &self,
-        glyph: GlyphId,
-        pixels_per_em: f32,
-    ) -> Result<Option<GlyphGeometry>, FontError>;
+    /// Returns renderable geometry for one glyph, in font design units.
+    fn glyph_geometry(&self, glyph: GlyphId) -> Result<Option<GlyphGeometry>, FontError>;
 }
 
 /// Format-specific loader that turns font sources into immutable faces.

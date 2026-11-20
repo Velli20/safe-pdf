@@ -236,13 +236,7 @@ impl FontFace for Type1FontFace {
     ///
     /// The Type 1 parser applies the font matrix while drawing, so the returned
     /// path is already in the face's normalized design coordinate system.
-    fn glyph_geometry(
-        &self,
-        glyph: GlyphId,
-        _pixels_per_em: f32,
-    ) -> Result<Option<GlyphGeometry>, FontError> {
-        // A scalable Type 1 outline is independent of requested pixel size;
-        // the renderer applies the eventual text/device scale.
+    fn glyph_geometry(&self, glyph: GlyphId) -> Result<Option<GlyphGeometry>, FontError> {
         let raw_glyph = skrifa::GlyphId::new(glyph.0);
         if raw_glyph.to_u32() >= self.font.num_glyphs() {
             return Ok(None);

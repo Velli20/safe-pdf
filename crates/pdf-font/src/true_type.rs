@@ -301,11 +301,7 @@ impl FontFace for TrueTypeFontFace {
             .advance_width(self.skrifa_glyph_id(glyph)))
     }
 
-    fn glyph_geometry(
-        &self,
-        glyph: GlyphId,
-        _pixels_per_em: f32,
-    ) -> Result<Option<GlyphGeometry>, FontError> {
+    fn glyph_geometry(&self, glyph: GlyphId) -> Result<Option<GlyphGeometry>, FontError> {
         let Some(outline) = self
             .program
             .borrow_dependent()
@@ -316,8 +312,7 @@ impl FontFace for TrueTypeFontFace {
         };
 
         let mut pen = PdfPathPen::default();
-        // Vector geometry stays in design coordinates. `pixels_per_em` is
-        // relevant to bitmap strikes, not to this scalable outline path.
+        // Vector geometry stays in design coordinates.
         outline
             .draw(
                 DrawSettings::from((Size::unscaled(), LocationRef::default())),
