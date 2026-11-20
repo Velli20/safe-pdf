@@ -1,4 +1,4 @@
-use pdf_content_stream::ContentStream;
+use pdf_content_stream::{ContentStream, ContentStreamSource};
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{ObjectReader, ReadResult};
 use pdf_optional_content::OptionalContentProperties;
@@ -58,6 +58,18 @@ impl PdfDocument {
         page.contents
             .as_ref()
             .map(|contents| contents.parse(&self.objects))
+            .transpose()
+    }
+
+    /// Reads the bytes of `page`'s content stream without parsing its operators, or returns
+    /// `None` when the page has no `/Contents`.
+    ///
+    /// Drawing the source parses its operators as it goes, so a page drawn once never
+    /// holds all of them.
+    pub fn content_source(&self, page: &PdfPage) -> ReadResult<Option<ContentStreamSource>> {
+        page.contents
+            .as_ref()
+            .map(|contents| contents.source(&self.objects))
             .transpose()
     }
 

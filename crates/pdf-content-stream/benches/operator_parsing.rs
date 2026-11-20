@@ -3,7 +3,7 @@
 use std::{convert::Infallible, hint::black_box};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use pdf_content_stream::ContentStream;
+use pdf_content_stream::{ContentStream, ContentStreamSource};
 use pdf_object_reader::{
     EmptySource, ObjectReader, ObjectSource, dictionary::Dictionary, object_id::ObjectId,
     object_variant::ObjectVariant, pdf_object::PdfObject, stream::StreamObject,
@@ -64,6 +64,22 @@ fn benchmark_stream(
             black_box(parsed);
         });
     });
+    group.bench_function("stream", |bencher| {
+        bencher.iter(|| {
+            let reader = pdf_object_reader::ObjectReader::new(EmptySource);
+            let source = reader
+                .read::<ContentStreamSource>(black_box(&stream))
+                .expect("benchmark content stream should read");
+            let mut count = 0;
+            source
+                .for_each_batch(|operators| {
+                    count += black_box(operators).len();
+                    Ok::<(), Infallible>(())
+                })
+                .expect("benchmark content stream should parse");
+            assert_eq!(count, expected_operators);
+        });
+    });
     group.finish();
 }
 
@@ -109,6 +125,22 @@ fn benchmark_stream_array(
                 .expect("benchmark content stream should parse");
             assert_eq!(parsed.operators.len(), expected_operators);
             black_box(parsed);
+        });
+    });
+    group.bench_function("stream", |bencher| {
+        bencher.iter(|| {
+            let reader = ObjectReader::new(&source);
+            let source = reader
+                .read::<ContentStreamSource>(black_box(&contents))
+                .expect("benchmark content stream should read");
+            let mut count = 0;
+            source
+                .for_each_batch(|operators| {
+                    count += black_box(operators).len();
+                    Ok::<(), Infallible>(())
+                })
+                .expect("benchmark content stream should parse");
+            assert_eq!(count, expected_operators);
         });
     });
     group.finish();

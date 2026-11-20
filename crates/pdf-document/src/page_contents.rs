@@ -1,4 +1,4 @@
-use pdf_content_stream::ContentStream;
+use pdf_content_stream::{ContentStream, ContentStreamSource};
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, object_kind::ObjectKind,
@@ -31,5 +31,16 @@ impl PageContents {
     /// Each call parses anew and allocates a new content-stream ID.
     pub fn parse(&self, objects: &ObjectReader<ObjectCollection>) -> ReadResult<ContentStream> {
         objects.read::<ContentStream>(&self.0)
+    }
+
+    /// Reads the content stream's bytes, resolving its streams through `objects`, without
+    /// parsing its operators.
+    ///
+    /// Each call allocates a new content-stream ID.
+    pub fn source(
+        &self,
+        objects: &ObjectReader<ObjectCollection>,
+    ) -> ReadResult<ContentStreamSource> {
+        objects.read::<ContentStreamSource>(&self.0)
     }
 }
