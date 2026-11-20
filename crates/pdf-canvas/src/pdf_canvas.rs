@@ -802,9 +802,14 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
         let mut path = std::mem::take(&mut self.current_path);
         // Hidden optional content paints nothing, so skip preparing its paint.
-        if let Some((mode, fill_type)) = paint
-            && !self.content_hidden()
+        let paint = paint.filter(|_| !self.content_hidden());
+        if pending_clip.is_none()
+            && self.canvas.keeps_paths()
+            && let Some((mode, fill_type)) = paint
         {
+            return self.paint_kept_path(path, mode, fill_type);
+        }
+        if let Some((mode, fill_type)) = paint {
             let device_path = CanvasPath::transformed(&path, self.state.transform)?;
             self.draw_path(&device_path, mode, fill_type)?;
         }
@@ -816,6 +821,27 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 Ok(())
             }
         }
+    }
+
+    /// Paints `path`, which ends without becoming a clip, on a backend that keeps painted
+    /// paths.
+    ///
+    /// The backend takes the path instead of copying it, so the next path starts in a new
+    /// buffer sized like this one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if drawing fails.
+    fn paint_kept_path(
+        &mut self,
+        path: PdfPath,
+        mode: PaintMode,
+        fill_type: PathFillType,
+    ) -> Result<(), PdfCanvasError> {
+        self.current_path.verbs.reserve(path.verbs.len());
+        let paint = self.prepare_paint(mode)?;
+        let device_path = CanvasPath::owned(path, self.state.transform)?;
+        self.with_soft_mask(|backend| paint.paint_owned(backend, device_path, fill_type))
     }
 
     /// Sets the clipping path for subsequent drawing operations.

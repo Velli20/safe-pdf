@@ -58,28 +58,109 @@ impl PreparedPaint {
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
         if let Some(fill) = &self.fill {
-            with_clip(backend, fill.clip.as_ref(), |backend| {
-                backend.fill_path(
-                    path,
-                    fill_type,
-                    fill.color,
-                    fill.shader.as_ref(),
-                    fill.blend_mode,
-                )
-            })?;
+            fill.paint(backend, path, fill_type)?;
         }
         if let Some(stroke) = &self.stroke {
-            with_clip(backend, stroke.clip.as_ref(), |backend| {
-                backend.stroke_path(
-                    path,
-                    stroke.color,
-                    stroke.line_width,
-                    &stroke.style,
-                    stroke.shader.as_ref(),
-                    stroke.blend_mode,
-                )
-            })?;
+            stroke.paint(backend, path)?;
         }
         Ok(())
+    }
+
+    /// Fills, then strokes, `path` on `backend`, handing the path to the last of them.
+    ///
+    /// # Errors
+    /// Propagates backend failures.
+    pub(crate) fn paint_owned<B: CanvasBackend + ?Sized>(
+        &self,
+        backend: &mut B,
+        path: CanvasPath<'static>,
+        fill_type: PathFillType,
+    ) -> Result<(), PdfCanvasError> {
+        match (&self.fill, &self.stroke) {
+            (Some(fill), None) => fill.paint_owned(backend, path, fill_type),
+            (fill, Some(stroke)) => {
+                if let Some(fill) = fill {
+                    fill.paint(backend, &path, fill_type)?;
+                }
+                stroke.paint_owned(backend, path)
+            }
+            (None, None) => Ok(()),
+        }
+    }
+}
+
+impl FillPaint {
+    /// Fills `path` on `backend`.
+    fn paint<B: CanvasBackend + ?Sized>(
+        &self,
+        backend: &mut B,
+        path: &CanvasPath<'_>,
+        fill_type: PathFillType,
+    ) -> Result<(), PdfCanvasError> {
+        with_clip(backend, self.clip.as_ref(), |backend| {
+            backend.fill_path(
+                path,
+                fill_type,
+                self.color,
+                self.shader.as_ref(),
+                self.blend_mode,
+            )
+        })
+    }
+
+    /// Fills `path` on `backend`, handing the path over.
+    fn paint_owned<B: CanvasBackend + ?Sized>(
+        &self,
+        backend: &mut B,
+        path: CanvasPath<'static>,
+        fill_type: PathFillType,
+    ) -> Result<(), PdfCanvasError> {
+        with_clip(backend, self.clip.as_ref(), |backend| {
+            backend.fill_owned_path(
+                path,
+                fill_type,
+                self.color,
+                self.shader.as_ref(),
+                self.blend_mode,
+            )
+        })
+    }
+}
+
+impl StrokePaint {
+    /// Strokes `path` on `backend`.
+    fn paint<B: CanvasBackend + ?Sized>(
+        &self,
+        backend: &mut B,
+        path: &CanvasPath<'_>,
+    ) -> Result<(), PdfCanvasError> {
+        with_clip(backend, self.clip.as_ref(), |backend| {
+            backend.stroke_path(
+                path,
+                self.color,
+                self.line_width,
+                &self.style,
+                self.shader.as_ref(),
+                self.blend_mode,
+            )
+        })
+    }
+
+    /// Strokes `path` on `backend`, handing the path over.
+    fn paint_owned<B: CanvasBackend + ?Sized>(
+        &self,
+        backend: &mut B,
+        path: CanvasPath<'static>,
+    ) -> Result<(), PdfCanvasError> {
+        with_clip(backend, self.clip.as_ref(), |backend| {
+            backend.stroke_owned_path(
+                path,
+                self.color,
+                self.line_width,
+                &self.style,
+                self.shader.as_ref(),
+                self.blend_mode,
+            )
+        })
     }
 }

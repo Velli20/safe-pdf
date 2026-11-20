@@ -62,6 +62,44 @@ pub trait CanvasBackend {
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError>;
 
+    /// Returns whether this backend keeps the paths it paints, as a recording does.
+    ///
+    /// A backend that keeps them is handed paths it may take with
+    /// [`Self::fill_owned_path`] and [`Self::stroke_owned_path`]. Other backends are handed
+    /// borrowed paths, so the canvas can reuse their buffers.
+    fn keeps_paths(&self) -> bool {
+        false
+    }
+
+    /// Fills `path` as [`Self::fill_path`] does, taking ownership of it.
+    ///
+    /// A backend that keeps painted paths stores it without copying; the default borrows it.
+    fn fill_owned_path(
+        &mut self,
+        path: CanvasPath<'static>,
+        fill_type: PathFillType,
+        color: Color,
+        shader: Option<&Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        self.fill_path(&path, fill_type, color, shader, blend_mode)
+    }
+
+    /// Strokes `path` as [`Self::stroke_path`] does, taking ownership of it.
+    ///
+    /// A backend that keeps painted paths stores it without copying; the default borrows it.
+    fn stroke_owned_path(
+        &mut self,
+        path: CanvasPath<'static>,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: Option<&Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        self.stroke_path(&path, color, line_width, stroke_style, shader, blend_mode)
+    }
+
     /// Sets the clipping region by intersecting the current clip path with the given path.
     ///
     /// All subsequent drawing operations will be constrained to this new region.

@@ -57,6 +57,25 @@ fn dashed_stroke_stream(count: usize) -> ContentStream {
     parse(data)
 }
 
+/// Builds a stream that fills, then strokes, `count` paths of 100 line segments each.
+fn long_path_stream(count: usize) -> ContentStream {
+    let mut data = String::new();
+    for index in 0..count {
+        let y = index % 1000;
+        write!(data, "0 {y} m").expect("writing to a string should succeed");
+        for x in 1..=100 {
+            write!(data, " {x} {} l", y + x % 7).expect("writing to a string should succeed");
+        }
+        data.push_str(" f\n");
+        write!(data, "0 {y} m").expect("writing to a string should succeed");
+        for x in 1..=100 {
+            write!(data, " {x} {} l", y + x % 5).expect("writing to a string should succeed");
+        }
+        data.push_str(" S\n");
+    }
+    parse(data)
+}
+
 /// Builds a stream that selects the tiling pattern `P0`, then fills `count` rectangles with it.
 fn tiling_fill_stream(count: usize) -> ContentStream {
     let mut data = String::from("/Pattern cs /P0 scn\n");
@@ -115,6 +134,7 @@ fn benchmark(c: &mut Criterion) {
             dashed_stroke_stream(5_000),
             None,
         ),
+        ("dispatch/long_paths_1000", long_path_stream(1_000), None),
         (
             "dispatch/tiling_fills_5000",
             tiling_fill_stream(5_000),
