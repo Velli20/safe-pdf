@@ -1,7 +1,7 @@
 //! PDF text-state values that affect text layout.
 
 /// Style and PDF text-state values that affect layout.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextStyle {
     /// Font size in text-space units.
     pub font_size: f32,
