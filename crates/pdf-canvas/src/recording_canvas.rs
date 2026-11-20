@@ -328,11 +328,29 @@ impl CanvasBackend for RecordingCanvas {
         shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
+        self.fill_owned_path(
+            path.clone().into_owned(),
+            fill_type,
+            color,
+            shader,
+            blend_mode,
+        )
+    }
+
+    /// Records a fill of `path`, keeping the path itself.
+    fn fill_owned_path(
+        &mut self,
+        path: CanvasPath<'static>,
+        fill_type: PathFillType,
+        color: Color,
+        shader: Option<&Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
         if let Some(Shader::TilingPatternImage(pattern)) = shader {
             self.nest(pattern.recording(), pattern.replay_cost());
         }
         self.commands.push(RecordingCommand::FillPath {
-            path: path.clone().into_owned(),
+            path,
             fill_type,
             color,
             shader: shader.cloned(),
@@ -351,11 +369,31 @@ impl CanvasBackend for RecordingCanvas {
         shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
+        self.stroke_owned_path(
+            path.clone().into_owned(),
+            color,
+            line_width,
+            stroke_style,
+            shader,
+            blend_mode,
+        )
+    }
+
+    /// Records a stroke of `path`, keeping the path itself.
+    fn stroke_owned_path(
+        &mut self,
+        path: CanvasPath<'static>,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: Option<&Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
         if let Some(Shader::TilingPatternImage(pattern)) = shader {
             self.nest(pattern.recording(), pattern.replay_cost());
         }
         self.commands.push(RecordingCommand::StrokePath {
-            path: path.clone().into_owned(),
+            path,
             color,
             line_width,
             stroke_style: stroke_style.clone(),
@@ -386,6 +424,11 @@ impl CanvasBackend for RecordingCanvas {
     /// Returns the logical canvas height used by PDF painting.
     fn height(&self) -> f32 {
         self.height
+    }
+
+    /// Keeps every painted path in its commands.
+    fn keeps_paths(&self) -> bool {
+        true
     }
 
     /// Saves the current clipping and drawing state for a matching restore.

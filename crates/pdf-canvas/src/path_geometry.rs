@@ -202,6 +202,16 @@ impl<'a> CanvasPath<'a> {
 }
 
 impl CanvasPath<'static> {
+    /// Owns geometry with a source-to-device mapping.
+    /// Rejects nonfinite matrices; coordinates are validated when verbs are consumed.
+    pub fn owned(path: PdfPath, transform: Transform) -> Result<Self, TransformError> {
+        transform.validate()?;
+        Ok(Self {
+            geometry: Geometry::Owned(path),
+            transform: Some(transform),
+        })
+    }
+
     /// Retains shared geometry with a source-to-device mapping.
     /// Rejects nonfinite matrices; coordinates are validated when verbs are consumed.
     pub fn shared(path: Arc<PdfPath>, transform: Transform) -> Result<Self, TransformError> {
