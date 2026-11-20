@@ -1,13 +1,20 @@
 #![allow(clippy::arithmetic_side_effects, clippy::expect_used)]
 
-use std::{fmt::Write, sync::Arc};
+use std::{collections::HashMap, fmt::Write, sync::Arc};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use pdf_canvas::{pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
 use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
+use pdf_graphics::rect::Rect;
 use pdf_object_reader::{
-    EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
+    EmptySource, ObjectHandle, dictionary::Dictionary, object_variant::ObjectVariant,
+    pdf_name::PdfName, stream::StreamObject,
+};
+use pdf_resources::{
+    pattern::{PaintType, Pattern, TilingType},
+    resource::Resource,
+    resources::Resources,
 };
 use pdf_text_engine::bundled_font_system;
 
@@ -50,6 +57,38 @@ fn dashed_stroke_stream(count: usize) -> ContentStream {
     parse(data)
 }
 
+/// Builds a stream that selects the tiling pattern `P0`, then fills `count` rectangles with it.
+fn tiling_fill_stream(count: usize) -> ContentStream {
+    let mut data = String::from("/Pattern cs /P0 scn\n");
+    for index in 0..count {
+        let x = index % 100;
+        let y = index / 100;
+        writeln!(data, "{x} {y} 4 4 re f").expect("writing to a string should succeed");
+    }
+    parse(data)
+}
+
+/// Resources holding a colored tiling pattern `P0` whose cell draws two squares.
+fn tiling_resources() -> Arc<Resources> {
+    let pattern = Pattern::Tiling {
+        paint_type: PaintType::Colored,
+        tiling_type: TilingType::ConstantSpacing,
+        bbox: Rect::new(4.0, 4.0),
+        x_step: 4.0,
+        y_step: 4.0,
+        matrix: None,
+        resources: ObjectHandle::from(Resources::default()),
+        content_stream: parse(String::from("1 0 0 rg 0 0 2 2 re f 2 2 2 2 re f")),
+    };
+    Arc::new(Resources {
+        patterns: HashMap::from([(
+            PdfName::from(b"P0"),
+            Resource::Pattern(ObjectHandle::from(pattern)),
+        )]),
+        ..Default::default()
+    })
+}
+
 fn parse(data: String) -> ContentStream {
     let stream = StreamObject::new(1, 0, Dictionary::default(), data.into_bytes());
     pdf_object_reader::ObjectReader::new(EmptySource)
@@ -60,13 +99,27 @@ fn parse(data: String) -> ContentStream {
 fn benchmark(c: &mut Criterion) {
     let font_system = bundled_font_system();
     let page = PdfPage::default();
-    for (name, stream) in [
-        ("dispatch/render_5000_colored_paths", path_stream(5_000)),
+    for (name, stream, resources) in [
+        (
+            "dispatch/render_5000_colored_paths",
+            path_stream(5_000),
+            None,
+        ),
         (
             "dispatch/save_restore_5000_with_font_and_dash",
             save_restore_stream(5_000),
+            None,
         ),
-        ("dispatch/dashed_strokes_5000", dashed_stroke_stream(5_000)),
+        (
+            "dispatch/dashed_strokes_5000",
+            dashed_stroke_stream(5_000),
+            None,
+        ),
+        (
+            "dispatch/tiling_fills_5000",
+            tiling_fill_stream(5_000),
+            Some(tiling_resources()),
+        ),
     ] {
         c.bench_function(name, |bencher| {
             bencher.iter(|| {
@@ -75,7 +128,7 @@ fn benchmark(c: &mut Criterion) {
                     PdfCanvas::new(&mut recording, &page, None, Arc::clone(&font_system))
                         .expect("canvas should initialize");
                 canvas
-                    .render_content_stream(&stream, None, None, None, None)
+                    .render_content_stream(&stream, None, None, resources.clone(), None)
                     .expect("stream should render");
             });
         });

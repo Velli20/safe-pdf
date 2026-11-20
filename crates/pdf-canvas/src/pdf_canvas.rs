@@ -91,6 +91,11 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The last shading-pattern shader, reused while the same pattern fills at the same
     /// transform, such as across the glyphs of one text run.
     pattern_shading_cache: Option<(Arc<Pattern>, Transform, Shader)>,
+    /// The last tiling-pattern shader, with the pattern, pattern transform and cell color it
+    /// was recorded for, reused while fills or strokes keep all three.
+    ///
+    /// Holding the pattern keeps its address unique, so pointer equality identifies it.
+    tiling_shader_cache: Option<(Arc<Pattern>, Transform, Option<Color>, TilingShader)>,
     /// The last dash pattern scaled into stroke space: the paint's pattern, the scale, and
     /// the scaled result, reused while strokes keep the same dash at the same scale.
     ///
@@ -175,6 +180,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             image_cache: Arc::default(),
             glyph_cache: HashMap::new(),
             pattern_shading_cache: None,
+            tiling_shader_cache: None,
             scaled_dash_cache: None,
             state,
             saved_states: Vec::new(),
@@ -338,6 +344,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             image_cache: Arc::clone(&self.image_cache),
             glyph_cache: std::mem::take(&mut self.glyph_cache),
             pattern_shading_cache: None,
+            tiling_shader_cache: None,
             scaled_dash_cache: None,
             state: initial_state,
             saved_states: Vec::new(),
@@ -542,15 +549,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     return Ok(PatternPaint::Color);
                 }
 
-                // Uncolored patterns use the current color from the graphics state,
-                // so we filter out color-setting operators from the content stream.
-                let mut uncolored_filter = PdfOperatorVariant::sets_color;
-
-                let filter: Option<&mut dyn FnMut(&PdfOperatorVariant) -> bool> = match paint_type {
-                    PaintType::Colored => None,
-                    PaintType::Uncolored => Some(&mut uncolored_filter),
-                };
-
                 // The cell of an uncolored pattern is painted in the color selected
                 // together with the pattern.
                 let paint = &self.state.paint;
@@ -560,35 +558,74 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     PaintType::Uncolored => Some(paint.fill_color),
                 };
 
-                // Render the tiling content into a temporary canvas.
-                let recording_canvas = self.record_content_stream(
+                if let Some((cached, cached_transform, cached_color, shader)) =
+                    &self.tiling_shader_cache
+                    && Arc::ptr_eq(cached, &pattern)
+                    && *cached_transform == transform
+                    && *cached_color == cell_color
+                {
+                    return Ok(PatternPaint::Shader(Shader::TilingPatternImage(
+                        shader.clone(),
+                    )));
+                }
+                let shader = self.record_tiling_shader(
                     content_stream,
-                    None,
-                    &bbox,
-                    Some(resources.get()?),
-                    filter,
-                    cell_color,
-                )?;
-
-                let shader = match TilingShader::new(
-                    Arc::new(recording_canvas),
-                    Some(transform),
+                    resources.get()?,
                     bbox,
                     step,
-                ) {
-                    // A cell too costly to replay, such as one built from deeply
-                    // nested patterns, paints nothing instead of failing the page.
-                    Err(TilingShaderError::ReplayLimitExceeded) => TilingShader::new(
-                        Arc::new(RecordingCanvas::new(bbox.width(), bbox.height())),
-                        Some(transform),
-                        bbox,
-                        step,
-                    )?,
-                    shader => shader?,
-                };
+                    transform,
+                    cell_color,
+                )?;
+                self.tiling_shader_cache =
+                    Some((Arc::clone(&pattern), transform, cell_color, shader.clone()));
                 Ok(PatternPaint::Shader(Shader::TilingPatternImage(shader)))
             }
         }
+    }
+
+    /// Records a tiling pattern's cell and prepares the shader that repeats it.
+    ///
+    /// A `cell_color` marks an uncolored pattern: the cell is painted in that color, and
+    /// the cell's own color operators are skipped.
+    ///
+    /// # Errors
+    /// Returns an error if recording the cell fails or the tiling geometry is invalid.
+    fn record_tiling_shader(
+        &mut self,
+        content_stream: &ContentStream,
+        resources: Arc<Resources>,
+        bbox: Rect,
+        step: [f32; 2],
+        transform: Transform,
+        cell_color: Option<Color>,
+    ) -> Result<TilingShader, PdfCanvasError> {
+        let mut uncolored_filter = PdfOperatorVariant::sets_color;
+        let filter: Option<&mut dyn FnMut(&PdfOperatorVariant) -> bool> = match cell_color {
+            Some(_) => Some(&mut uncolored_filter),
+            None => None,
+        };
+        let recording_canvas = self.record_content_stream(
+            content_stream,
+            None,
+            &bbox,
+            Some(resources),
+            filter,
+            cell_color,
+        )?;
+
+        Ok(
+            match TilingShader::new(Arc::new(recording_canvas), Some(transform), bbox, step) {
+                // A cell too costly to replay, such as one built from deeply
+                // nested patterns, paints nothing instead of failing the page.
+                Err(TilingShaderError::ReplayLimitExceeded) => TilingShader::new(
+                    Arc::new(RecordingCanvas::new(bbox.width(), bbox.height())),
+                    Some(transform),
+                    bbox,
+                    step,
+                )?,
+                shader => shader?,
+            },
+        )
     }
 
     /// Draws a path using the specified paint mode and fill type, applying any active shader or pattern.
