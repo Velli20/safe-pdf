@@ -153,8 +153,8 @@ impl PdfRenderer {
                 PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?
                     .with_image_cache(Arc::clone(&self.image_cache))
                     .with_optional_content(&optional_content);
-            if let Some(cs) = self.document.content_stream(page)? {
-                canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
+            if let Some(cs) = self.document.content_source(page)? {
+                canvas.render_content_source(&cs, page.resources.clone())?;
             }
         }
         Ok(())
@@ -181,8 +181,8 @@ impl PdfRenderer {
         .with_image_cache(Arc::clone(&self.image_cache))
         .with_text_recording()
         .with_optional_content(optional_content);
-        if let Some(cs) = self.document.content_stream(page)? {
-            canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
+        if let Some(cs) = self.document.content_source(page)? {
+            canvas.render_content_source(&cs, page.resources.clone())?;
         }
         Ok(PageTextLayout::new(canvas.take_text_glyphs()))
     }
@@ -206,8 +206,8 @@ impl PdfRenderer {
                     .with_image_cache(Arc::clone(&self.image_cache))
                     .with_text_recording()
                     .with_optional_content(&optional_content);
-            if let Some(cs) = self.document.content_stream(page)? {
-                canvas.render_content_stream(&cs, None, None, page.resources.clone(), None)?;
+            if let Some(cs) = self.document.content_source(page)? {
+                canvas.render_content_source(&cs, page.resources.clone())?;
             }
             canvas.take_text_glyphs()
         };

@@ -15,6 +15,7 @@ pdf-image = { path = "../pdf-image" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }
 thiserror = "2.0.12"
+bytes = "1.10.1"
 num-traits = "0.2.19"
 
 [dev-dependencies]
