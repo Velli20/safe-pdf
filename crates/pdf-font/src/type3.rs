@@ -134,11 +134,7 @@ impl FontFace for Type3FontFace {
     }
 
     /// Returns an opaque Type 3 handle after validating that it belongs to this face.
-    fn glyph_geometry(
-        &self,
-        glyph: GlyphId,
-        _pixels_per_em: f32,
-    ) -> Result<Option<GlyphGeometry>, FontError> {
+    fn glyph_geometry(&self, glyph: GlyphId) -> Result<Option<GlyphGeometry>, FontError> {
         Ok(self
             .glyph_ids
             .contains(&glyph)

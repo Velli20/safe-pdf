@@ -84,11 +84,7 @@ impl FontFace for OpenTypeType0FontFace {
     }
 
     /// Draws an unscaled OpenType/CFF outline into backend-neutral geometry.
-    fn glyph_geometry(
-        &self,
-        glyph: GlyphId,
-        _pixels_per_em: f32,
-    ) -> Result<Option<GlyphGeometry>, FontError> {
+    fn glyph_geometry(&self, glyph: GlyphId) -> Result<Option<GlyphGeometry>, FontError> {
         let program = self.program.borrow_dependent();
         // A CID outside the charset has no charstring, so it draws nothing.
         let Ok(cff_glyph) = cff_glyph_id(&program.glyphs, self.id(), glyph) else {

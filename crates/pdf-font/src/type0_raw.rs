@@ -165,11 +165,7 @@ impl FontFace for RawType0FontFace {
     }
 
     /// Evaluates a CID into an unscaled backend-neutral outline.
-    fn glyph_geometry(
-        &self,
-        glyph: GlyphId,
-        _pixels_per_em: f32,
-    ) -> Result<Option<GlyphGeometry>, FontError> {
+    fn glyph_geometry(&self, glyph: GlyphId) -> Result<Option<GlyphGeometry>, FontError> {
         let program = self.program.borrow_dependent();
         // A CID outside the charset has no charstring, so it draws nothing.
         let Ok(cff_glyph) = cff_glyph_id(&program.glyphs, self.id(), glyph) else {
@@ -278,9 +274,9 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            face.glyph_geometry(GlyphId(0), 12.0),
+            face.glyph_geometry(GlyphId(0)),
             Ok(Some(GlyphGeometry::Outline(_)))
         ));
-        assert!(matches!(face.glyph_geometry(GlyphId(121), 12.0), Ok(None)));
+        assert!(matches!(face.glyph_geometry(GlyphId(121)), Ok(None)));
     }
 }

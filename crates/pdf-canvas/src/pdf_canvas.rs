@@ -87,7 +87,7 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// [`Self::with_image_cache`], with other renders.
     image_cache: Arc<ImageCache>,
     /// Scalable outlines reused by repeated glyphs during this page render.
-    glyph_cache: HashMap<(FontFaceId, GlyphId, u32), Arc<PdfPath>>,
+    glyph_cache: HashMap<(FontFaceId, GlyphId), Arc<PdfPath>>,
     /// The last shading-pattern shader, reused while the same pattern fills at the same
     /// transform, such as across the glyphs of one text run.
     pattern_shading_cache: Option<(Arc<Pattern>, Transform, Shader)>,
@@ -423,13 +423,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         &mut self,
         face: &dyn pdf_font::FontFace,
         glyph: GlyphId,
-        pixels_per_em: f32,
     ) -> Result<Arc<PdfPath>, PdfCanvasError> {
-        let key = (face.id(), glyph, pixels_per_em.to_bits());
+        let key = (face.id(), glyph);
         if let Some(outline) = self.glyph_cache.get(&key) {
             return Ok(Arc::clone(outline));
         }
-        let geometry = match face.glyph_geometry(glyph, pixels_per_em) {
+        let geometry = match face.glyph_geometry(glyph) {
             Ok(geometry) => geometry,
             Err(FontError::InvalidProgram { .. }) => None,
             Err(error) => return Err(error.into()),
