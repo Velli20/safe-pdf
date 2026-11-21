@@ -239,17 +239,26 @@ impl CanvasBackend for WebCanvasBackend {
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        match style.stroke_space_path(path, width)? {
-            Some(stroke_space) => PreparedPath::new(
-                self,
-                &stroke_space,
-                color,
-                shader,
-                mode,
-                Some(style.transform),
-            )?,
-            None => PreparedPath::new(self, path, color, shader, mode, None)?,
-        }
+        self.prepared_stroke(path, color, width, style, shader, mode)?
+            .stroke(width, style)
+            .map_err(Into::into)
+    }
+
+    fn erase_stroke(
+        &mut self,
+        path: &CanvasPath<'_>,
+        width: f32,
+        style: &StrokeStyle,
+    ) -> Result<(), PdfCanvasError> {
+        self.prepared_stroke(
+            path,
+            Color::from_rgb(0.0, 0.0, 0.0),
+            width,
+            style,
+            None,
+            None,
+        )?
+        .erasing()
         .stroke(width, style)
         .map_err(Into::into)
     }
@@ -314,6 +323,32 @@ impl CanvasBackend for WebCanvasBackend {
     }
 }
 
+impl WebCanvasBackend {
+    /// Prepares `path` for stroking, in the style's stroke space when the CTM scales
+    /// unevenly or shears.
+    fn prepared_stroke(
+        &self,
+        path: &CanvasPath<'_>,
+        color: Color,
+        width: f32,
+        style: &StrokeStyle,
+        shader: Option<&Shader>,
+        mode: Option<BlendMode>,
+    ) -> Result<PreparedPath<'_>, PdfCanvasError> {
+        Ok(match style.stroke_space_path(path, width)? {
+            Some(stroke_space) => PreparedPath::new(
+                self,
+                &stroke_space,
+                color,
+                shader,
+                mode,
+                Some(style.transform),
+            )?,
+            None => PreparedPath::new(self, path, color, shader, mode, None)?,
+        })
+    }
+}
+
 /// A local browser save, separate from the PDF save/clip stack.
 ///
 /// Declare the guard after paint resources: restoration releases Canvas's
@@ -366,6 +401,12 @@ impl<'a> PreparedPath<'a> {
             paint,
             transform,
         })
+    }
+
+    /// Makes the prepared paint clear the destination wherever it would cover it.
+    fn erasing(mut self) -> Self {
+        self.paint.composite = "destination-out";
+        self
     }
 
     fn fill(self, rule: PathFillType) -> WebResult<()> {

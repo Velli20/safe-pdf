@@ -62,6 +62,29 @@ pub trait CanvasBackend {
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError>;
 
+    /// Clears the destination under the stroke of `path`, leaving it transparent.
+    ///
+    /// Painting a fill and a translucent stroke as one object erases the fill under the
+    /// stroke inside a group layer, so the stroke composites with the backdrop alone.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: The path whose stroke is erased. Its verbs resolve to logical device coordinates.
+    /// - `line_width`: The width of the stroke in device units.
+    /// - `stroke_style`: Stroke metadata such as dash pattern.
+    ///
+    /// The default implementation erases nothing, for backends without group layers,
+    /// where erasing would remove the backdrop as well.
+    fn erase_stroke(
+        &mut self,
+        path: &CanvasPath<'_>,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+    ) -> Result<(), PdfCanvasError> {
+        let _ = (path, line_width, stroke_style);
+        Ok(())
+    }
+
     /// Sets the clipping region by intersecting the current clip path with the given path.
     ///
     /// All subsequent drawing operations will be constrained to this new region.
