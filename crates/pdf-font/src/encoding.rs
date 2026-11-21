@@ -1,7 +1,7 @@
 //! Simple-font encoding tables, PDF differences, and WinAnsi text conversion.
 
 use crate::{font::GlyphName, pdf::SimpleEncoding};
-use std::convert::TryFrom;
+use std::{collections::BTreeMap, convert::TryFrom};
 
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, inline_bytes::InlineBytes,
@@ -10,56 +10,63 @@ use pdf_object_reader::{
 
 use crate::{base_encoding::BaseEncoding, error::FontError, standard14::Standard14Font};
 
-/// Glyph names indexed by character code after applying encoding differences.
+/// A simple font's `/Encoding`: a base glyph-name table and the `/Differences` laid over it.
 #[derive(Debug)]
 pub struct Encoding {
-    /// The base encoding table with any PDF Differences applied.
-    pub names: Vec<InlineBytes>,
+    /// Glyph names indexed by character code, or `None` when an encoding dictionary names no
+    /// `/BaseEncoding` and the font decides its implicit base. An empty table defers every code
+    /// to the font program's built-in encoding.
+    pub base: Option<&'static [&'static [u8]]>,
+    /// Glyph names replacing base entries, keyed by character code.
+    pub differences: BTreeMap<u8, InlineBytes>,
 }
 
 impl Default for Encoding {
     fn default() -> Self {
-        let names = names_from_base(&STANDARD_NAMES);
-        Self { names }
+        Self::from_table(&STANDARD_NAMES)
     }
 }
 
 impl Encoding {
     /// Returns the built-in WinAnsi glyph-name table.
     pub fn win_ansi() -> Self {
-        Self {
-            names: names_from_base(&WIN_ANSI_NAMES),
-        }
+        Self::from_table(&WIN_ANSI_NAMES)
     }
 
     /// Returns the built-in encoding of a Standard 14 symbol font, or `None` for the Latin
     /// fonts, whose built-in encoding is the standard one.
     pub(crate) fn standard14_built_in(font: Standard14Font) -> Option<Self> {
-        let base = match font {
+        let base: &'static [&'static [u8]] = match font {
             Standard14Font::Symbol => &SYMBOL_NAMES,
             Standard14Font::ZapfDingbats => &ZAPF_DINGBATS_NAMES,
             _ => return None,
         };
-        Some(Self {
-            names: names_from_base(base),
-        })
+        Some(Self::from_table(base))
     }
 
     /// Builds a base table, leaving built-in font encodings empty.
     pub(crate) fn from_base_encoding(encoding: BaseEncoding) -> Result<Self, FontError> {
-        let names = match encoding {
-            BaseEncoding::Standard => names_from_base(&STANDARD_NAMES),
-            BaseEncoding::WinAnsi => names_from_base(&WIN_ANSI_NAMES),
-            BaseEncoding::MacRoman => names_from_base(&MAC_ROMAN_NAMES),
-            BaseEncoding::MacExpert => names_from_base(&MAC_EXPERT_NAMES),
+        let base: &'static [&'static [u8]] = match encoding {
+            BaseEncoding::Standard => &STANDARD_NAMES,
+            BaseEncoding::WinAnsi => &WIN_ANSI_NAMES,
+            BaseEncoding::MacRoman => &MAC_ROMAN_NAMES,
+            BaseEncoding::MacExpert => &MAC_EXPERT_NAMES,
             BaseEncoding::Unknown(name) => {
                 return Err(FontError::UnsupportedBaseEncoding(
                     String::from_utf8_lossy(&name).into_owned(),
                 ));
             }
-            BaseEncoding::BuiltIn => Vec::new(),
+            BaseEncoding::BuiltIn => &[],
         };
-        Ok(Self { names })
+        Ok(Self::from_table(base))
+    }
+
+    /// An encoding that is exactly `base`, without differences.
+    const fn from_table(base: &'static [&'static [u8]]) -> Self {
+        Self {
+            base: Some(base),
+            differences: BTreeMap::new(),
+        }
     }
 }
 
@@ -80,28 +87,25 @@ impl FromPdfObject for Encoding {
             return Ok(Self::try_from(BaseEncoding::from(name.as_ref()))?);
         }
         let mut context = context.dictionary()?;
-        let mut encoding = match context.optional::<InlineBytes>(b"BaseEncoding")? {
-            Some(name) => Self::try_from(BaseEncoding::from(name.as_ref()))?,
-            None => Self::default(),
+        let base = match context.optional::<InlineBytes>(b"BaseEncoding")? {
+            Some(name) => Self::try_from(BaseEncoding::from(name.as_ref()))?.base,
+            None => None,
         };
-        if let Some(differences) = context.optional::<EncodingDifferences>(b"Differences")? {
-            for (code, name) in differences.0 {
-                if let Some(slot) = encoding.names.get_mut(usize::from(code)) {
-                    *slot = name;
-                }
-            }
-        }
-        Ok(encoding)
+        let differences = context
+            .optional::<EncodingDifferences>(b"Differences")?
+            .map(|differences| differences.0)
+            .unwrap_or_default();
+        Ok(Self { base, differences })
     }
 }
 
 /// Valid one-byte replacements, retaining the last name assigned to each code.
-struct EncodingDifferences(std::collections::BTreeMap<u8, InlineBytes>);
+struct EncodingDifferences(BTreeMap<u8, InlineBytes>);
 
 impl FromPdfObject for EncodingDifferences {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.array()?;
-        let mut names = std::collections::BTreeMap::new();
+        let mut names = BTreeMap::new();
         let mut code = 0_usize;
         for index in 0..context.array().len() {
             if matches!(context.array().get(index), Some(ObjectVariant::Integer(_))) {
@@ -119,34 +123,39 @@ impl FromPdfObject for EncodingDifferences {
 }
 
 impl SimpleEncoding {
-    /// Normalizes a font's `/Encoding`, leaving symbolic fonts without one to use their
-    /// built-in names.
-    pub(crate) fn new(encoding: Option<Encoding>, symbolic: bool) -> Self {
-        let encoding = encoding.unwrap_or_else(|| {
-            if symbolic {
-                Encoding { names: Vec::new() }
-            } else {
-                Encoding::default()
+    /// Normalizes a font's `/Encoding` into code-to-name selectors.
+    ///
+    /// A font without `/Encoding` uses its built-in names when `symbolic`, and StandardEncoding
+    /// otherwise. An encoding dictionary without `/BaseEncoding` differs from the embedded
+    /// program's built-in encoding when `built_in_base`, and from StandardEncoding otherwise.
+    /// Codes the result leaves unnamed defer to the font program.
+    pub(crate) fn new(encoding: Option<Encoding>, symbolic: bool, built_in_base: bool) -> Self {
+        let implicit = |built_in: bool| -> &'static [&'static [u8]] {
+            if built_in { &[] } else { &STANDARD_NAMES }
+        };
+        let (base, differences) = match encoding {
+            Some(Encoding { base, differences }) => {
+                (base.unwrap_or_else(|| implicit(built_in_base)), differences)
             }
+            None => (implicit(symbolic), BTreeMap::new()),
+        };
+        let base = base.iter().enumerate().filter_map(|(index, name)| {
+            let code = u8::try_from(index).ok()?;
+            Some((code, GlyphName(InlineBytes::from_bytes(name))))
         });
-        let differences = encoding
-            .names
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, name)| {
-                u8::try_from(index).ok().map(|code| (code, GlyphName(name)))
-            })
+        // Collecting the differences after the base lets each replace its base entry.
+        let differences = base
+            .chain(
+                differences
+                    .into_iter()
+                    .map(|(code, name)| (code, GlyphName(name))),
+            )
             .collect();
         Self {
             base: BaseEncoding::BuiltIn,
             differences,
         }
     }
-}
-
-/// Copies static glyph names into a table that PDF differences can replace.
-fn names_from_base(base: &[&'static [u8]]) -> Vec<InlineBytes> {
-    base.iter().map(InlineBytes::from_bytes).collect()
 }
 
 /// Encodes a Unicode character as a WinAnsi byte, rejecting unsupported characters.
