@@ -1505,7 +1505,9 @@ subtype: Array<number>,
 /**
  * The optional annotation rectangle from `/Rect`, in PDF page user space
  * where `top` is the lower `y` edge. Edges keep their source values and
- * order, so inverted rectangles are preserved rather than normalized.
+ * order, so inverted rectangles are preserved rather than normalized. A Text note
+ * without a normal appearance takes the generated icon's square at its lower-left
+ * corner instead.
  */
 rect: Rect | null,
 /**
