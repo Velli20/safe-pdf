@@ -25,7 +25,7 @@ pub use bounds_accumulator::BoundsAccumulator;
 pub use canvas_paint::CanvasPaint;
 pub use dash_pattern::DashPattern;
 pub use geometry::{Bounds, Translate};
-pub use image::Image;
+pub use image::{Image, ImageError};
 pub use interval::Interval;
 pub use mask_mode::MaskMode;
 use num_derive::FromPrimitive;
@@ -106,4 +106,14 @@ pub enum PixelFormat {
     Gray8,
     /// Coverage of an image mask with 8 bits per pixel, painted in the current fill color.
     Alpha8,
+}
+
+impl PixelFormat {
+    /// Returns the number of bytes one packed pixel occupies.
+    pub fn bytes_per_pixel(self) -> usize {
+        match self {
+            Self::RGBA8888 => 4,
+            Self::Gray8 | Self::Alpha8 => 1,
+        }
+    }
 }

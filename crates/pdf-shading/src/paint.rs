@@ -6,7 +6,7 @@ use bytes::Bytes;
 use num_traits::ToPrimitive;
 use pdf_graphics::{Image, PixelFormat, color::Color, rect::Rect, transform::Transform};
 
-use pdf_image::{ImageRasterError, raster};
+use pdf_image::ImageRasterError;
 
 use crate::{
     color_stops::validate_stops,
@@ -177,9 +177,9 @@ impl ShadingPaint {
     /// # Errors
     ///
     /// Returns [`ImageRasterError::InvalidInput`] for degenerate or nonfinite gradient
-    /// geometry, invalid stops, empty raster dimensions, mismatched RGBA8 data length,
-    /// or invalid raster bounds. Returns [`ImageRasterError::ResourceLimit`] if the
-    /// expected raster buffer length overflows.
+    /// geometry, invalid stops, or a non-RGBA8 raster; [`ImageRasterError::Image`] for
+    /// a malformed raster; and [`ImageRasterError::Transform`] for a nonfinite or
+    /// singular transform.
     pub fn validate(&self) -> Result<(), ImageRasterError> {
         match self {
             Self::LinearGradient {
@@ -225,7 +225,7 @@ impl ShadingPaint {
                 validate_stops(positions, colors)?;
             }
             Self::RasterImage { image, .. } => {
-                raster::validate_image(image)?;
+                image.validate()?;
                 if image.pixel_format != PixelFormat::RGBA8888 {
                     return Err(ImageRasterError::InvalidInput("raster image format"));
                 }

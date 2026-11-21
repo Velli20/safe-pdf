@@ -1,4 +1,4 @@
-//! Portable processing of render-ready Gray8 and straight-alpha RGBA images.
+//! Portable processing of render-ready Gray8, Alpha8 and straight-alpha RGBA images.
 //!
 //! PDF sample decoding remains separate: four source components may represent
 //! CMYK, whereas four-byte pixels here are already converted RGBA. Callers own
@@ -9,44 +9,24 @@ use pdf_graphics::{Image, PixelFormat};
 
 use crate::ImageRasterError;
 
-/// Validates dimensions and the exact packed byte length of a render-ready image.
-///
-/// Unlike decoded PDF samples, render-ready buffers must not contain trailing
-/// bytes. Gray8 images must also have a representable RGBA output byte count.
+/// Reserves an empty buffer for exactly `width` × `height` pixels of
+/// `bytes_per_pixel` bytes each.
 ///
 /// # Errors
 ///
-/// Returns an invalid-input error for empty dimensions or a mismatched buffer
-/// length, or a resource-limit error if the RGBA byte count overflows.
-pub fn validate_image(image: &Image) -> Result<(), ImageRasterError> {
-    if image.width == 0 || image.height == 0 {
-        return Err(ImageRasterError::InvalidInput("image dimensions"));
-    }
-    let bytes = image
-        .rgba_byte_size()
-        .ok_or(ImageRasterError::ResourceLimit)?;
-    let expected = match image.pixel_format {
-        PixelFormat::RGBA8888 => bytes,
-        PixelFormat::Gray8 | PixelFormat::Alpha8 => bytes / 4,
-    };
-    if image.data.len() != expected {
-        return Err(ImageRasterError::InvalidInput("image byte length"));
-    }
-    Ok(())
-}
-
-/// Reserves an empty buffer for exactly `width` × `height` packed RGBA8 pixels.
-///
-/// # Errors
-///
-/// Returns a resource-limit error if the byte count overflows or the allocation fails.
-pub fn rgba_buffer(width: usize, height: usize) -> Result<Vec<u8>, ImageRasterError> {
-    let bytes = width
+/// Returns a resource-limit error if the byte count overflows, or an allocation
+/// error if the reservation fails.
+pub fn pixel_buffer(
+    width: usize,
+    height: usize,
+    bytes_per_pixel: usize,
+) -> Result<Vec<u8>, ImageRasterError> {
+    let len = width
         .checked_mul(height)
-        .and_then(|pixels| pixels.checked_mul(4))
+        .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
         .ok_or(ImageRasterError::ResourceLimit)?;
     let mut data = Vec::new();
-    data.try_reserve_exact(bytes)?;
+    data.try_reserve_exact(len)?;
     Ok(data)
 }
 
@@ -71,7 +51,7 @@ pub fn pixel_centers(start: f32, extent: f32, count: u32) -> Result<Vec<f32>, Im
 
 /// Reads the pixel containing `(x, y)` in source-pixel coordinates as straight RGBA.
 ///
-/// Returns `None` outside the image's half-open bounds. Gray8 expands to opaque RGB.
+/// Returns `None` outside the image's half-open bounds.
 pub fn nearest_pixel(image: &Image, x: f32, y: f32) -> Option<[u8; 4]> {
     let column = x
         .floor()
@@ -84,51 +64,122 @@ pub fn nearest_pixel(image: &Image, x: f32, y: f32) -> Option<[u8; 4]> {
     ))
 }
 
-/// Iterates complete pixels as straight RGBA, expanding Gray8 with opaque alpha
-/// and Alpha8 as black with its coverage as alpha.
+/// Expands one packed pixel to straight RGBA: Gray8 to opaque gray, Alpha8 to
+/// black with its coverage as alpha, and RGBA unchanged.
+///
+/// Returns `None` if `pixel` is not exactly one pixel long.
+fn expand(format: PixelFormat, pixel: &[u8]) -> Option<[u8; 4]> {
+    match (format, pixel) {
+        (PixelFormat::Gray8, &[gray]) => Some([gray, gray, gray, 255]),
+        (PixelFormat::Alpha8, &[alpha]) => Some([0, 0, 0, alpha]),
+        (PixelFormat::RGBA8888, &[r, g, b, a]) => Some([r, g, b, a]),
+        _ => None,
+    }
+}
+
+/// Iterates complete pixels as straight RGBA, see [`expand`].
 ///
 /// This iterator borrows the buffer without validating declared dimensions.
 /// Decoder soft masks intentionally accept short buffers and ignore incomplete
 /// trailing RGBA pixels; public raster operations validate before using it.
 pub(crate) fn rgba_pixels(image: &Image) -> impl Iterator<Item = [u8; 4]> + '_ {
     let format = image.pixel_format;
-    let stride = match format {
-        PixelFormat::Gray8 | PixelFormat::Alpha8 => 1,
-        PixelFormat::RGBA8888 => 4,
-    };
     image
         .data
-        .chunks_exact(stride)
-        .filter_map(move |pixel| match (format, pixel) {
-            (PixelFormat::Alpha8, [alpha]) => Some([0, 0, 0, *alpha]),
-            (_, [gray]) => Some([*gray, *gray, *gray, 255]),
-            (_, [r, g, b, a]) => Some([*r, *g, *b, *a]),
-            _ => None,
-        })
+        .chunks_exact(format.bytes_per_pixel())
+        .filter_map(move |pixel| expand(format, pixel))
+}
+
+/// Reads the pixel at `index` as straight RGBA, see [`expand`].
+///
+/// A pixel beyond the end of the buffer reads as zero.
+fn pixel_at(image: &Image, index: usize) -> [u8; 4] {
+    let format = image.pixel_format;
+    let start = index.saturating_mul(format.bytes_per_pixel());
+    image
+        .data
+        .get(start..start.saturating_add(format.bytes_per_pixel()))
+        .and_then(|pixel| expand(format, pixel))
+        .unwrap_or([0; 4])
 }
 
 /// Copies an image into an owned, packed straight-alpha RGBA8 buffer.
 ///
-/// Gray8 pixels expand to opaque RGB and Alpha8 pixels to black with their
-/// coverage as alpha. Existing RGBA bytes, including color
-/// channels beneath transparent pixels, remain unchanged.
+/// Existing RGBA bytes, including color channels beneath transparent pixels,
+/// remain unchanged.
 ///
 /// # Errors
 ///
-/// Returns validation errors from [`validate_image`] or a resource-limit error
-/// if the output allocation fails.
+/// Returns validation errors from [`Image::validate`] or allocation failures.
 pub fn rgba(image: &Image) -> Result<Vec<u8>, ImageRasterError> {
-    validate_image(image)?;
-    let mut data = rgba_buffer(image.width, image.height)?;
     match image.pixel_format {
-        PixelFormat::RGBA8888 => data.extend_from_slice(&image.data),
+        PixelFormat::RGBA8888 => {
+            image.validate()?;
+            let mut data = pixel_buffer(image.width, image.height, 4)?;
+            data.extend_from_slice(&image.data);
+            Ok(data)
+        }
         PixelFormat::Gray8 | PixelFormat::Alpha8 => {
-            for pixel in rgba_pixels(image) {
-                data.extend_from_slice(&pixel);
-            }
+            Ok(map_pixels(image, |pixel| pixel)?.data.into())
         }
     }
-    Ok(data)
+}
+
+/// Builds a same-sized RGBA image by mapping each straight RGBA source pixel.
+///
+/// Validates before iterating and allocates only the output buffer.
+///
+/// # Errors
+///
+/// Returns validation errors from [`Image::validate`] or allocation failures.
+pub fn map_pixels(
+    image: &Image,
+    mut map: impl FnMut([u8; 4]) -> [u8; 4],
+) -> Result<Image, ImageRasterError> {
+    image.validate()?;
+    let mut data = pixel_buffer(image.width, image.height, 4)?;
+    for pixel in rgba_pixels(image) {
+        data.extend_from_slice(&map(pixel));
+    }
+    Ok(Image {
+        data: data.into(),
+        width: image.width,
+        height: image.height,
+        pixel_format: PixelFormat::RGBA8888,
+        interpolate: image.interpolate,
+    })
+}
+
+/// Maps each pixel's red, green and blue through a transfer function's tables,
+/// keeping alpha.
+///
+/// Gray8 pixels expand to RGB, since each component may map differently.
+///
+/// # Errors
+///
+/// Returns validation errors or allocation failures.
+pub fn transfer_colors(image: &Image, tables: &[[u8; 256]; 3]) -> Result<Image, ImageRasterError> {
+    let [red, green, blue] = tables;
+    map_pixels(image, |[r, g, b, a]| {
+        [lookup(red, r), lookup(green, g), lookup(blue, b), a]
+    })
+}
+
+/// Paints a stencil mask's coverage in a solid color.
+///
+/// Each output pixel takes `color` with the mask's coverage as its alpha, so samples
+/// the mask leaves unpainted become transparent.
+///
+/// # Errors
+///
+/// Returns validation errors or allocation failures.
+pub fn stencil_image(coverage: &Image, [r, g, b]: [u8; 3]) -> Result<Image, ImageRasterError> {
+    map_pixels(coverage, |[_, _, _, alpha]| [r, g, b, alpha])
+}
+
+/// Looks up a byte in a 256-entry table.
+fn lookup(table: &[u8; 256], value: u8) -> u8 {
+    table.get(usize::from(value)).copied().unwrap_or(value)
 }
 
 /// Combines an image with a soft mask of a different size into `width` ×
@@ -145,15 +196,15 @@ pub fn rgba(image: &Image) -> Result<Vec<u8>, ImageRasterError> {
 ///
 /// # Errors
 ///
-/// Returns a resource-limit error if the output byte count overflows or its
-/// allocation fails.
+/// Returns a resource-limit error if the output byte count overflows, or an
+/// allocation error if its reservation fails.
 pub(crate) fn resample_with_soft_mask(
     image: &Image,
     mask: &Image,
     width: usize,
     height: usize,
 ) -> Result<Vec<u8>, ImageRasterError> {
-    let mut data = rgba_buffer(width, height)?;
+    let mut data = pixel_buffer(width, height, 4)?;
     let columns: Vec<_> = (0..width)
         .map(|x| {
             let [image_column, _] = sample_positions(x, image.width, width);
@@ -168,8 +219,7 @@ pub(crate) fn resample_with_soft_mask(
         for (image_column, mask_columns) in &columns {
             let [r, g, b, alpha] = pixel_at(image, image_row_start.saturating_add(*image_column));
             let coverage = average_coverage(mask, mask_row_starts, mask_columns);
-            let alpha = u16::from(alpha).saturating_mul(u16::from(coverage)) / 255;
-            data.extend_from_slice(&[r, g, b, u8::try_from(alpha).unwrap_or(u8::MAX)]);
+            data.extend_from_slice(&[r, g, b, multiply_alpha(alpha, coverage)]);
         }
     }
     Ok(data)
@@ -178,13 +228,15 @@ pub(crate) fn resample_with_soft_mask(
 /// Averages the soft-mask coverage of the mask pixels at each pair of a row
 /// start and a column.
 fn average_coverage(mask: &Image, row_starts: [usize; 2], columns: &[usize; 2]) -> u8 {
-    let mut total = 0_u16;
-    for row_start in row_starts {
-        for &column in columns {
-            let coverage = soft_mask_coverage(pixel_at(mask, row_start.saturating_add(column)));
-            total = total.saturating_add(u16::from(coverage));
-        }
-    }
+    let total: u16 = row_starts
+        .iter()
+        .flat_map(|row_start| {
+            columns
+                .iter()
+                .map(move |column| row_start.saturating_add(*column))
+        })
+        .map(|index| u16::from(soft_mask_coverage(pixel_at(mask, index))))
+        .sum();
     u8::try_from(total / 4).unwrap_or(u8::MAX)
 }
 
@@ -193,8 +245,12 @@ fn average_coverage(mask: &Image, row_starts: [usize; 2], columns: &[usize; 2]) 
 /// Expanded Gray8 has alpha 255, so this is its original sample. RGBA masks
 /// keep integer truncation rather than luminosity weighting.
 pub(crate) fn soft_mask_coverage([gray, _, _, alpha]: [u8; 4]) -> u8 {
-    let coverage = u16::from(gray).saturating_mul(u16::from(alpha)) / 255;
-    u8::try_from(coverage).unwrap_or(u8::MAX)
+    multiply_alpha(gray, alpha)
+}
+
+/// Multiplies two 8-bit fractions of 255, truncating.
+pub(crate) fn multiply_alpha(a: u8, b: u8) -> u8 {
+    u8::try_from(u16::from(a).saturating_mul(u16::from(b)) / 255).unwrap_or(u8::MAX)
 }
 
 /// Returns two source rows or columns spread over the span that output row or
@@ -211,129 +267,6 @@ fn sample_positions(index: usize, source_len: usize, len: usize) -> [usize; 2] {
     let start = scale(index);
     let span = scale(index.saturating_add(1)).saturating_sub(start);
     [span / 4, span.saturating_mul(3) / 4].map(|offset| start.saturating_add(offset))
-}
-
-/// Reads one pixel as straight RGBA, expanding Gray8 to opaque RGB and Alpha8
-/// to black with its coverage as alpha.
-///
-/// A pixel beyond the end of the buffer reads as zero.
-fn pixel_at(image: &Image, index: usize) -> [u8; 4] {
-    match image.pixel_format {
-        PixelFormat::Gray8 => image
-            .data
-            .get(index)
-            .map_or([0; 4], |&gray| [gray, gray, gray, 255]),
-        PixelFormat::Alpha8 => image
-            .data
-            .get(index)
-            .map_or([0; 4], |&alpha| [0, 0, 0, alpha]),
-        PixelFormat::RGBA8888 => {
-            let start = index.saturating_mul(4);
-            image
-                .data
-                .get(start..start.saturating_add(4))
-                .and_then(|pixel| <[u8; 4]>::try_from(pixel).ok())
-                .unwrap_or([0; 4])
-        }
-    }
-}
-
-/// Creates a white RGBA mask whose alpha is the source's luminosity over a black backdrop.
-///
-/// Scales the luminosity of straight RGB by source alpha, expanding Gray8 first.
-/// The weighted `f32` result is clamped and truncated to a byte.
-///
-/// # Errors
-///
-/// Returns validation errors, a resource-limit error on allocation failure, or
-/// an invalid-input error if luminosity cannot be converted to a byte.
-pub fn luminosity_mask(image: &Image) -> Result<Image, ImageRasterError> {
-    alpha_mask(image, [255; 3], |[r, g, b, alpha]| {
-        // Preserve operation order and truncation, even for expanded gray:
-        // simplifying to the gray byte or rounding can change the resulting alpha.
-        let luminosity = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
-        // The group composites over a black backdrop, so only its opacity contributes.
-        // Dividing first leaves opaque pixels exactly as they are.
-        (luminosity * (f32::from(alpha) / 255.0))
-            .clamp(0.0, 255.0)
-            .to_u8()
-            .ok_or(ImageRasterError::InvalidInput("luminosity"))
-    })
-}
-
-/// Creates a white mask by mapping source alpha through a soft-mask transfer table.
-///
-/// # Errors
-/// Returns image validation errors or allocation failures.
-pub fn transfer_mask(image: &Image, transfer: &[u8; 256]) -> Result<Image, ImageRasterError> {
-    alpha_mask(image, [255; 3], |[_, _, _, alpha]| {
-        transfer
-            .get(usize::from(alpha))
-            .copied()
-            .ok_or(ImageRasterError::InvalidInput("mask transfer"))
-    })
-}
-
-/// Maps each pixel's red, green and blue through a transfer function's tables,
-/// keeping alpha.
-///
-/// Gray8 pixels expand to RGB, since each component may map differently.
-///
-/// # Errors
-/// Returns image validation errors or allocation failures.
-pub fn transfer_colors(image: &Image, tables: &[[u8; 256]; 3]) -> Result<Image, ImageRasterError> {
-    validate_image(image)?;
-    let [red, green, blue] = tables;
-    let mut data = rgba_buffer(image.width, image.height)?;
-    for [r, g, b, a] in rgba_pixels(image) {
-        data.extend_from_slice(&[
-            red.get(usize::from(r)).copied().unwrap_or(r),
-            green.get(usize::from(g)).copied().unwrap_or(g),
-            blue.get(usize::from(b)).copied().unwrap_or(b),
-            a,
-        ]);
-    }
-    Ok(Image {
-        data: data.into(),
-        width: image.width,
-        height: image.height,
-        pixel_format: PixelFormat::RGBA8888,
-        interpolate: image.interpolate,
-    })
-}
-
-/// Paints a stencil mask's coverage in a solid color.
-///
-/// Each output pixel takes `color` with the mask's coverage as its alpha, so samples
-/// the mask leaves unpainted become transparent.
-///
-/// # Errors
-/// Returns image validation errors or allocation failures.
-pub fn stencil_image(coverage: &Image, color: [u8; 3]) -> Result<Image, ImageRasterError> {
-    alpha_mask(coverage, color, |[_, _, _, alpha]| Ok(alpha))
-}
-
-/// Builds a same-sized RGBA image of one color with alpha computed from each source pixel.
-///
-/// Validates before iterating and allocates only the final output buffer.
-/// Validation, allocation, and alpha-calculation failures propagate to the caller.
-fn alpha_mask(
-    image: &Image,
-    [r, g, b]: [u8; 3],
-    mut alpha: impl FnMut([u8; 4]) -> Result<u8, ImageRasterError>,
-) -> Result<Image, ImageRasterError> {
-    validate_image(image)?;
-    let mut data = rgba_buffer(image.width, image.height)?;
-    for pixel in rgba_pixels(image) {
-        data.extend_from_slice(&[r, g, b, alpha(pixel)?]);
-    }
-    Ok(Image {
-        width: image.width,
-        height: image.height,
-        pixel_format: PixelFormat::RGBA8888,
-        interpolate: image.interpolate,
-        data: data.into(),
-    })
 }
 
 #[cfg(test)]
@@ -370,36 +303,5 @@ mod tests {
             data: vec![0].into(),
         };
         assert!(rgba(&image).is_err());
-    }
-    /// Checks that luminosity is taken after compositing over a black backdrop.
-    #[test]
-    fn luminosity_composites_over_black() {
-        let image = Image {
-            width: 1,
-            height: 1,
-            data: vec![255, 0, 0, 64].into(),
-            pixel_format: PixelFormat::RGBA8888,
-            interpolate: false,
-        };
-        assert_eq!(
-            luminosity_mask(&image).unwrap().data.as_ref(),
-            &[255, 255, 255, 19]
-        );
-    }
-    /// Checks grayscale luminosity output format, dimensions, and pixels.
-    #[test]
-    fn luminosity_expands_gray_to_rgba() {
-        let image = Image {
-            width: 2,
-            height: 1,
-            data: vec![0, 255].into(),
-            pixel_format: PixelFormat::Gray8,
-            interpolate: false,
-        };
-        let mask = luminosity_mask(&image).unwrap();
-        assert_eq!(mask.pixel_format, PixelFormat::RGBA8888);
-        validate_image(&mask).unwrap();
-        assert_eq!([mask.width, mask.height], [2, 1]);
-        assert_eq!(mask.data.as_ref(), &[255, 255, 255, 0, 255, 255, 255, 255]);
     }
 }

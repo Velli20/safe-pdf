@@ -113,7 +113,7 @@ impl SurfacePool {
     pub(crate) fn upload(&self, image: &Image) -> WebResult<Surface> {
         let [w, h] = image.dimensions().ok_or(Error::ResourceLimit)?;
         let size = Size::new(w, h);
-        pdf_image::raster::validate_image(image)?;
+        image.validate()?;
 
         // Account for the browser ImageData copy, and the Rust conversion buffer of
         // non-RGBA pixels, before allocating either; retain it until upload completes.

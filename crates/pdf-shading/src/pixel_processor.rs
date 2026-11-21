@@ -26,10 +26,11 @@ use pdf_image::{ImageRasterError as Error, raster};
 /// # Errors
 ///
 /// Returns [`Error::InvalidInput`] for invalid paint data, nonpositive or nonfinite
-/// output bounds, zero output dimensions, or transforms and mapped points that
-/// cannot be represented with finite coordinates. Singular transforms are rejected.
-/// Returns [`Error::ResourceLimit`] if dimensions or buffer offsets overflow, or
-/// allocation fails. No fixed resolution or memory cap is imposed by this function.
+/// output bounds, zero output dimensions, or mapped points that cannot be represented
+/// with finite coordinates, and [`Error::Transform`] for singular or nonfinite
+/// transforms. Returns [`Error::ResourceLimit`] if the buffer size overflows and
+/// [`Error::Allocation`] if allocation fails. No fixed resolution or memory cap is
+/// imposed by this function.
 pub fn rasterize_shading(
     paint: &ShadingPaint,
     bounds: &Rect,
@@ -45,7 +46,7 @@ pub fn rasterize_shading(
     }
     let (width, height) = (usize::try_from(w)?, usize::try_from(h)?);
     // Reserve the output before the per-axis centers so oversized requests fail first.
-    let mut data = raster::rgba_buffer(width, height)?;
+    let mut data = raster::pixel_buffer(width, height, 4)?;
     let columns = raster::pixel_centers(bounds.left, bounds.width(), w)?;
     let rows = raster::pixel_centers(bounds.top, bounds.height(), h)?;
     // Invert once per image: paint transforms map out of shading space, while
@@ -323,7 +324,7 @@ mod tests {
                     &Rect::UNIT_RECT,
                     [1, 1]
                 ),
-                Err(Error::InvalidInput(_))
+                Err(Error::Transform(_))
             ));
         }
         let mut paint = linear(None);

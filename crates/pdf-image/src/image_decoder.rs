@@ -191,8 +191,7 @@ fn image_from_rgba(
             .iter_mut()
             .zip(soft_mask_alphas(mask))
         {
-            let combined = u16::from(*alpha).saturating_mul(u16::from(mask_alpha)) / 255;
-            *alpha = u8::try_from(combined).unwrap_or(u8::MAX);
+            *alpha = raster::multiply_alpha(*alpha, mask_alpha);
         }
     }
     Image {

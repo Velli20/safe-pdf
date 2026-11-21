@@ -13,6 +13,7 @@ use pdf_graphics::{Image, PixelFormat, rect::Rect};
 use crate::decoded_samples::DecodedSamples;
 use crate::error::{ImageRasterError, PdfImageError};
 use crate::image_metadata::ImageMetadata;
+use crate::raster;
 
 /// Limits on the pixels an image is held at once decoded.
 pub(crate) struct PixelBudget {
@@ -119,14 +120,7 @@ impl BoxReduction {
 
     /// Allocates the buffer for `height` reduced rows.
     fn buffer(&self, height: usize) -> Result<Vec<u8>, ImageRasterError> {
-        let byte_len = self
-            .output_width()
-            .checked_mul(height)
-            .and_then(|pixels| pixels.checked_mul(self.layout.bytes_per_pixel()))
-            .ok_or(ImageRasterError::ResourceLimit)?;
-        let mut data = Vec::new();
-        data.try_reserve_exact(byte_len)?;
-        Ok(data)
+        raster::pixel_buffer(self.output_width(), height, self.layout.bytes_per_pixel())
     }
 }
 

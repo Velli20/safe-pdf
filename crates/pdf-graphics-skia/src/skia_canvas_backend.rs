@@ -805,19 +805,14 @@ impl CoverageTarget for MaskRaster {
             usize::try_from(width).map_err(SkiaCanvasBackendError::from)?,
             usize::try_from(height).map_err(SkiaCanvasBackendError::from)?,
         );
-        let size = w
-            .checked_mul(h)
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or(pdf_image::ImageRasterError::ResourceLimit)?;
         let rgba_info = skia_safe::ImageInfo::new(
             (width, height),
             skia_safe::ColorType::RGBA8888,
             skia_safe::AlphaType::Unpremul,
             None,
         );
-        let mut pixels = Vec::new();
-        pixels.try_reserve_exact(size)?;
-        pixels.resize(size, 0);
+        let mut pixels = pdf_image::raster::pixel_buffer(w, h, 4)?;
+        pixels.resize(rgba_info.compute_min_byte_size(), 0);
         if !raster.read_pixels(
             &rgba_info,
             &mut pixels,

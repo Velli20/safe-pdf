@@ -8,9 +8,10 @@ use pdf_decode::{
 };
 use pdf_filter::image_payload::ImagePayload;
 
-use crate::error::{ImageRasterError, PdfImageError};
+use crate::error::PdfImageError;
 use crate::image_metadata::ImageMetadata;
 use crate::jpx_image::{JpxDisplay, JpxImage};
+use crate::raster;
 
 /// Stores decoded sample bytes before the final pixel format conversion.
 #[derive(Debug, Clone)]
@@ -458,10 +459,7 @@ impl<'a> ComponentDomain<'a> {
     ) -> Result<Vec<u8>, PdfImageError> {
         let components = color_space.num_color_components().max(1);
         let pixels = samples.len().checked_div(components).unwrap_or(0);
-        let mut image_data = Vec::new();
-        image_data
-            .try_reserve_exact(pixels.saturating_mul(4))
-            .map_err(|_| PdfImageError::Raster(ImageRasterError::ResourceLimit))?;
+        let mut image_data = raster::pixel_buffer(pixels, 1, 4)?;
         let mut pixel = vec![0.0; components];
         for (index, samples) in samples.chunks_exact(components).enumerate() {
             self.read(samples, sample_max, &mut pixel);
