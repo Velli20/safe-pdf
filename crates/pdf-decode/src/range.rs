@@ -57,4 +57,18 @@ impl DecodeRange {
         let normalized = f32::from(sample) / sample_max;
         self.min + normalized * (self.max - self.min)
     }
+
+    /// Maps a packed `bits`-wide sample code into this range.
+    ///
+    /// Code `0` maps onto the minimum and the largest `bits`-wide code onto the maximum.
+    pub fn map_code(&self, code: u32, bits: u8) -> Result<f32, DecodeError> {
+        let code_max = u32::MAX
+            .checked_shr(u32::from(32_u8.saturating_sub(bits)))
+            .ok_or_else(|| DecodeError::InvalidBitsPerSample {
+                bits_per_sample: usize::from(bits),
+            })?;
+        let code = code.to_f32().ok_or(DecodeError::InvalidSampleData)?;
+        let code_max = code_max.to_f32().ok_or(DecodeError::InvalidSampleData)?;
+        Ok(self.min + (code / code_max) * (self.max - self.min))
+    }
 }

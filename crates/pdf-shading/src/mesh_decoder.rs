@@ -1,7 +1,7 @@
-//! Decoding of coordinates and colors from packed mesh samples.
+//! Decoding of coordinates, colors, and flags from packed mesh samples.
 
-use num_traits::ToPrimitive;
 use pdf_color_space::color_space::ColorSpace;
+use pdf_decode::DecodeRange;
 use pdf_function::function::Function;
 use pdf_graphics::{color::Color, point::Point};
 use pdf_utils::BitReader;
@@ -34,38 +34,26 @@ pub enum MeshDecoderError {
     /// A shading function did not produce its required color component.
     #[error("mesh shading function did not return a color component")]
     MissingFunctionColorComponent,
-    /// A requested packed field width cannot be read by the mesh decoder.
-    #[error("invalid mesh bit-field width {width}; expected 1..=32")]
-    InvalidBitFieldWidth { width: usize },
     /// The stream ended after only part of a packed sample was available.
     #[error("mesh stream ended in the middle of a sample")]
     TruncatedSample,
     /// The stream ended before a required sample began.
     #[error("mesh stream ended unexpectedly")]
     UnexpectedEndOfStream,
-    /// A `/Decode` range does not include its minimum value.
-    #[error("Decode array is missing {label} minimum")]
-    MissingDecodeMinimum { label: &'static str },
-    /// A `/Decode` range does not include its maximum value.
-    #[error("Decode array is missing {label} maximum")]
-    MissingDecodeMaximum { label: &'static str },
-    /// A sample value cannot be represented by the decoder's floating-point type.
-    #[error("mesh sample is not representable as f32")]
-    SampleNotRepresentable,
-    /// A sample's maximum encoded value cannot be represented by the decoder's floating-point type.
-    #[error("mesh sample range is not representable as f32")]
-    SampleRangeNotRepresentable,
 }
 
-/// Decodes mesh coordinates and color inputs according to a `/Decode` array.
+/// Decodes the packed records of a mesh stream according to its `/Decode` array.
 ///
-/// A decoder borrows the parsed dictionary data while a mesh parser owns the
-/// stream cursor. Keeping these responsibilities separate makes record
-/// reconstruction independent from bit and color decoding.
+/// The decoder owns the stream cursor and turns packed fields into flags,
+/// points, and colors; the mesh parsers only reconstruct triangles and
+/// patches from those values.
 pub(crate) struct MeshDecoder<'a> {
+    reader: MeshBitReader<'a>,
     widths: MeshBitWidths,
-    decode: &'a [f32],
-    color_input_count: usize,
+    x: DecodeRange,
+    y: DecodeRange,
+    /// One range per color component, or a single range for the function input.
+    components: Vec<DecodeRange>,
     functions: &'a [Function],
     color_space: &'a ColorSpace,
 }
@@ -73,8 +61,9 @@ pub(crate) struct MeshDecoder<'a> {
 impl<'a> MeshDecoder<'a> {
     /// Creates a decoder after validating `/Decode` against the color inputs.
     pub(crate) fn new(
+        data: &'a [u8],
         widths: MeshBitWidths,
-        decode: &'a [f32],
+        decode: &[f32],
         functions: &'a [Function],
         color_space: &'a ColorSpace,
         mesh_name: &'static str,
@@ -88,80 +77,71 @@ impl<'a> MeshDecoder<'a> {
             return Err(MeshDecoderError::MissingColorComponents { mesh: mesh_name }.into());
         }
 
-        let expected_values = color_input_count.saturating_add(2).saturating_mul(2);
-        if decode.len() != expected_values {
-            return Err(MeshDecoderError::InvalidDecodeLength {
-                mesh: mesh_name,
-                expected: expected_values,
-                actual: decode.len(),
+        let (x, y, components) = match decode.as_chunks::<2>() {
+            ([x, y, components @ ..], []) if components.len() == color_input_count => {
+                (x, y, components)
             }
-            .into());
-        }
+            _ => {
+                return Err(MeshDecoderError::InvalidDecodeLength {
+                    mesh: mesh_name,
+                    expected: color_input_count.saturating_add(2).saturating_mul(2),
+                    actual: decode.len(),
+                }
+                .into());
+            }
+        };
+        let range = |&[min, max]: &[f32; 2]| DecodeRange::new(min, max);
 
         Ok(Self {
+            reader: MeshBitReader(BitReader::new(data)),
             widths,
-            decode,
-            color_input_count,
+            x: range(x)?,
+            y: range(y)?,
+            components: components.iter().map(range).collect::<Result<_, _>>()?,
             functions,
             color_space,
         })
     }
 
+    /// Reads the next record's flag, or `None` when the stream ends cleanly.
+    ///
+    /// Only the two low bits carry meaning; the PDF format ignores the rest.
+    pub(crate) fn read_flag(&mut self) -> Result<Option<u8>, PdfShadingError> {
+        let flag = self.reader.read_field(self.widths.flag)?;
+        Ok(flag.map(|value| {
+            let [low, ..] = value.to_le_bytes();
+            low & 0b11
+        }))
+    }
+
     /// Reads and decodes one `(x, y)` coordinate pair.
-    pub(crate) fn read_point(&self, reader: &mut BitReader<'_>) -> Result<Point, PdfShadingError> {
-        let (x_min, x_max) = decode_pair(self.decode, 0, "X")?;
-        let (y_min, y_max) = decode_pair(self.decode, 1, "Y")?;
-        let x = self.read_sample(reader, self.widths.coordinate(), x_min, x_max)?;
-        let y = self.read_sample(reader, self.widths.coordinate(), y_min, y_max)?;
+    pub(crate) fn read_point(&mut self) -> Result<Point, PdfShadingError> {
+        let width = self.widths.coordinate;
+        let x = self.reader.read_sample(width, self.x)?;
+        let y = self.reader.read_sample(width, self.y)?;
         Ok(Point::new(x, y))
     }
 
     /// Reads mesh color inputs, applies optional functions, and converts them
     /// into the shading color space.
-    pub(crate) fn read_color(&self, reader: &mut BitReader<'_>) -> Result<Color, PdfShadingError> {
-        let inputs = (0..self.color_input_count)
-            .map(|component| {
-                let (min, max) =
-                    decode_pair(self.decode, component.saturating_add(2), "component")?;
-                self.read_sample(reader, self.widths.component(), min, max)
-            })
-            .collect::<Result<Vec<_>, PdfShadingError>>()?;
+    pub(crate) fn read_color(&mut self) -> Result<Color, PdfShadingError> {
+        let width = self.widths.component;
+        let inputs = self
+            .components
+            .iter()
+            .map(|&range| self.reader.read_sample(width, range))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let components = self.apply_functions(&inputs)?;
         Ok(self.color_space.apply(&components)?)
     }
 
-    /// Reads a required packed sample and maps it into the supplied decode range.
-    ///
-    /// The encoded integer is scaled linearly from the range representable by
-    /// `width` bits into `min..=max`. An error is returned when the stream ends
-    /// before the sample, contains only part of it, uses an unsupported width,
-    /// or the encoded value or its range cannot be represented as `f32`.
-    fn read_sample(
-        &self,
-        reader: &mut BitReader<'_>,
-        width: usize,
-        min: f32,
-        max: f32,
-    ) -> Result<f32, PdfShadingError> {
-        let code = read_mesh_bits(reader, width)?
-            .ok_or_else(|| PdfShadingError::from(MeshDecoderError::UnexpectedEndOfStream))?;
-        let shift = u32::try_from(width)
-            .map_err(|_| PdfShadingError::from(MeshDecoderError::InvalidBitFieldWidth { width }))?;
-        let code_max = 1_u64
-            .checked_shl(shift)
-            .ok_or_else(|| PdfShadingError::from(MeshDecoderError::InvalidBitFieldWidth { width }))?
-            .saturating_sub(1);
-        let code = u64::from(code)
-            .to_f32()
-            .ok_or_else(|| PdfShadingError::from(MeshDecoderError::SampleNotRepresentable))?;
-        let code_max = code_max
-            .to_f32()
-            .ok_or_else(|| PdfShadingError::from(MeshDecoderError::SampleRangeNotRepresentable))?;
-
-        Ok(min + (code / code_max) * (max - min))
+    /// Skips the padding that ends a byte-aligned record.
+    pub(crate) fn align_to_byte(&mut self) {
+        self.reader.0.align_to_byte_boundary();
     }
 
+    /// Maps decoded inputs to color components through the shading functions.
     fn apply_functions(&self, inputs: &[f32]) -> Result<Vec<f32>, PdfShadingError> {
         match self.functions {
             [] => Ok(inputs.to_vec()),
@@ -169,51 +149,38 @@ impl<'a> MeshDecoder<'a> {
             functions => functions
                 .iter()
                 .map(|function| {
-                    function.apply(inputs)?.first().copied().ok_or_else(|| {
-                        PdfShadingError::from(MeshDecoderError::MissingFunctionColorComponent)
-                    })
+                    let output = function.apply(inputs)?;
+                    Ok(*output
+                        .first()
+                        .ok_or(MeshDecoderError::MissingFunctionColorComponent)?)
                 })
                 .collect(),
         }
     }
 }
 
-/// Reads an optional mesh field while distinguishing clean EOF from truncation.
-pub(crate) fn read_mesh_bits(
-    reader: &mut BitReader<'_>,
-    width: usize,
-) -> Result<Option<u32>, PdfShadingError> {
-    if !(1..=32).contains(&width) {
-        return Err(MeshDecoderError::InvalidBitFieldWidth { width }.into());
-    }
-    let width = u8::try_from(width)
-        .map_err(|_| PdfShadingError::from(MeshDecoderError::InvalidBitFieldWidth { width }))?;
-    if reader.exhausted() {
-        return Ok(None);
+/// Reads fixed-width fields from a packed mesh stream.
+struct MeshBitReader<'a>(BitReader<'a>);
+
+impl MeshBitReader<'_> {
+    /// Reads a field, distinguishing a clean end of stream from truncation.
+    fn read_field(&mut self, width: u8) -> Result<Option<u32>, MeshDecoderError> {
+        if self.0.exhausted() {
+            return Ok(None);
+        }
+        self.0
+            .read_bits_u32(width)
+            .map(Some)
+            .ok_or(MeshDecoderError::TruncatedSample)
     }
 
-    reader
-        .read_bits_u32(width)
-        .map(Some)
-        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::TruncatedSample))
-}
-
-fn decode_pair(
-    decode: &[f32],
-    pair_index: usize,
-    label: &'static str,
-) -> Result<(f32, f32), PdfShadingError> {
-    let first_index = pair_index.saturating_mul(2);
-    let second_index = first_index.saturating_add(1);
-    let min = decode
-        .get(first_index)
-        .copied()
-        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::MissingDecodeMinimum { label }))?;
-    let max = decode
-        .get(second_index)
-        .copied()
-        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::MissingDecodeMaximum { label }))?;
-    Ok((min, max))
+    /// Reads a required field and maps it into `range`.
+    fn read_sample(&mut self, width: u8, range: DecodeRange) -> Result<f32, PdfShadingError> {
+        let code = self
+            .read_field(width)?
+            .ok_or(MeshDecoderError::UnexpectedEndOfStream)?;
+        Ok(range.map_code(code, width)?)
+    }
 }
 
 #[cfg(test)]

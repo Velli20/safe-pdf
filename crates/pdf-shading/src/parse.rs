@@ -10,6 +10,7 @@ use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use crate::{
     mesh_config::MeshConfig,
     model::{Shading, ShadingType},
+    patch_mesh_kind::PatchKind,
 };
 
 impl FromPdfObject for Shading {
@@ -29,11 +30,12 @@ impl FromPdfObject for Shading {
             ShadingType::FreeFormTriangleMesh => context
                 .read::<MeshConfig>(object)?
                 .free_form_triangle_mesh()?,
-            shading_type @ (ShadingType::CoonsPatchMesh | ShadingType::TensorProductPatchMesh) => {
-                context
-                    .read::<MeshConfig>(object)?
-                    .patch_mesh(shading_type)?
-            }
+            ShadingType::CoonsPatchMesh => context
+                .read::<MeshConfig>(object)?
+                .patch_mesh(PatchKind::Coons)?,
+            ShadingType::TensorProductPatchMesh => context
+                .read::<MeshConfig>(object)?
+                .patch_mesh(PatchKind::Tensor)?,
             unsupported @ ShadingType::LatticeFormTriangleMesh => Shading::Unsupported {
                 name: unsupported.to_string(),
             },
