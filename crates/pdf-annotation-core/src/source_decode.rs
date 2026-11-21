@@ -9,7 +9,8 @@ use crate::pdf_data::{
     AppearanceStreams, BorderEffect, BorderEffectStyle, BorderStyle, BorderStyleName,
     NativeAnnotation, PageAnnotations, SourceAnnotation,
 };
-use pdf_graphics::{AlphaConstant, DashPattern};
+use crate::source_note_appearance::NoteIconPlacement;
+use pdf_graphics::{AlphaConstant, DashPattern, rect::Rect};
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
@@ -36,6 +37,25 @@ impl FromPdfObject for SourceAnnotation {
             .into());
         }
 
+        // The source edges are kept as-is so inverted rectangles survive decoding.
+        let rect: Option<Rect> = dictionary.optional(b"Rect")?;
+        let appearance: Option<AppearanceDictionary> = dictionary.optional(b"AP")?;
+        let kind: NativeAnnotation = dictionary.read(object)?;
+        // Like PDFium, a note without a normal appearance is drawn with a generated icon
+        // placed at its rectangle's lower-left corner, whatever the rectangle's size.
+        let (rect, appearance) = match (&kind, rect, appearance) {
+            (NativeAnnotation::Text(_), Some(rect), appearance)
+                if appearance.as_ref().is_none_or(|ap| ap.normal.is_none()) =>
+            {
+                (
+                    Some(rect.note_icon_rect()),
+                    Some(AppearanceDictionary::note_icon(
+                        appearance.and_then(|ap| ap.down),
+                    )),
+                )
+            }
+            (_, rect, appearance) => (rect, appearance),
+        };
         Ok(Self {
             id: 0,
             object_number: None,
@@ -45,8 +65,7 @@ impl FromPdfObject for SourceAnnotation {
                 .value(),
             // `/Subtype` identifies the concrete annotation kind.
             subtype: dictionary.required(b"Subtype")?,
-            // The source edges are kept as-is so inverted rectangles survive decoding.
-            rect: dictionary.optional(b"Rect")?,
+            rect,
             // `/Contents` is descriptive text only; like PDFium, a malformed value (e.g. an
             // integer) is treated as absent rather than rejecting the annotation.
             contents: dictionary.lenient(b"Contents"),
@@ -54,7 +73,7 @@ impl FromPdfObject for SourceAnnotation {
             flags: dictionary
                 .optional::<i32>(b"F")?
                 .map(AnnotationFlags::from_bits_retain),
-            appearance: dictionary.optional(b"AP")?,
+            appearance,
             appearance_state: dictionary.optional(b"AS")?,
             // A malformed `/Border` (e.g. an empty array) is treated as absent, so the
             // default border applies, as in PDFium.
@@ -62,7 +81,7 @@ impl FromPdfObject for SourceAnnotation {
             color: dictionary.optional(b"C")?,
             struct_parent: dictionary.optional(b"StructParent")?,
             optional_content: dictionary.optional::<OptionalContentMembership>(b"OC")?,
-            kind: dictionary.read(object)?,
+            kind,
         })
     }
 }

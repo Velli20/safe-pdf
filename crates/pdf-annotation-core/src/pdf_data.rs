@@ -928,7 +928,9 @@ pub struct SourceAnnotation {
     pub subtype: Arc<[u8]>,
     /// The optional annotation rectangle from `/Rect`, in PDF page user space
     /// where `top` is the lower `y` edge. Edges keep their source values and
-    /// order, so inverted rectangles are preserved rather than normalized.
+    /// order, so inverted rectangles are preserved rather than normalized. A Text note
+    /// without a normal appearance takes the generated icon's square at its lower-left
+    /// corner instead.
     pub rect: Option<Rect>,
     /// The optional annotation contents.
     pub contents: Option<Arc<[u8]>>,
@@ -937,7 +939,8 @@ pub struct SourceAnnotation {
     /// The optional annotation flags from `/F`.
     #[cfg_attr(feature = "typescript", ts(type = "number | null"))]
     pub flags: Option<AnnotationFlags>,
-    /// The optional appearance dictionary from `/AP`. Not serialized.
+    /// The optional appearance dictionary from `/AP`; a Text note without a normal
+    /// appearance gets a generated note icon. Not serialized.
     #[serde(skip)]
     #[cfg_attr(feature = "typescript", ts(skip))]
     pub appearance: Option<AppearanceDictionary>,
