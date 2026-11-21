@@ -2,6 +2,25 @@ use bytes::Bytes;
 
 use crate::{PixelFormat, Size, color::Color, transform::Transform};
 
+/// Reasons a render-ready image is malformed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ImageError {
+    /// The width or height is zero.
+    #[error("image has empty dimensions")]
+    EmptyDimensions,
+    /// The packed byte count of the dimensions overflows `usize`.
+    #[error("image byte count overflows")]
+    SizeOverflow,
+    /// The pixel data is not exactly as long as the dimensions declare.
+    #[error("image has {actual} bytes of pixel data, expected {expected}")]
+    ByteLength {
+        /// Bytes the dimensions and pixel format require.
+        expected: usize,
+        /// Bytes present.
+        actual: usize,
+    },
+}
+
 /// Represents render-ready raster image pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Image {
@@ -18,14 +37,30 @@ pub struct Image {
 }
 
 impl Image {
-    /// Returns the packed RGBA8 byte count for this image's dimensions.
+    /// Checks that the image has nonempty dimensions and exactly the packed byte
+    /// length they declare.
     ///
-    /// Returns `None` for empty dimensions or if the byte count overflows `usize`.
-    pub fn rgba_byte_size(&self) -> Option<usize> {
+    /// Unlike decoded PDF samples, render-ready buffers must not contain trailing bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`ImageError`] describing the first check that fails.
+    pub fn validate(&self) -> Result<(), ImageError> {
         if self.width == 0 || self.height == 0 {
-            return None;
+            return Err(ImageError::EmptyDimensions);
         }
-        self.width.checked_mul(self.height)?.checked_mul(4)
+        let expected = self
+            .width
+            .checked_mul(self.height)
+            .and_then(|pixels| pixels.checked_mul(self.pixel_format.bytes_per_pixel()))
+            .ok_or(ImageError::SizeOverflow)?;
+        if self.data.len() != expected {
+            return Err(ImageError::ByteLength {
+                expected,
+                actual: self.data.len(),
+            });
+        }
+        Ok(())
     }
 
     /// Returns the image dimensions.

@@ -1,7 +1,7 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_decode::DecodeError;
 use pdf_filter::error::FilterError;
-use pdf_graphics::transform::TransformError;
+use pdf_graphics::{ImageError, transform::TransformError};
 use pdf_jpeg2000::Jpeg2000Error;
 use pdf_object_reader::ObjectReadError;
 use thiserror::Error;
@@ -136,32 +136,22 @@ impl From<DecodeError> for PdfImageError {
 /// Failures while validating or processing render-ready image pixels.
 #[derive(Debug, Error)]
 pub enum ImageRasterError {
-    /// Dimensions, packed pixel data, or computed alpha are invalid.
+    /// Dimensions, packed pixel data, or computed values are invalid.
     #[error("invalid image raster input: {0}")]
     InvalidInput(&'static str),
-    /// The requested buffer size overflows or its allocation fails.
+    /// The requested buffer size overflows.
     #[error("image raster allocation limit exceeded")]
     ResourceLimit,
-}
-
-impl From<std::collections::TryReserveError> for ImageRasterError {
-    fn from(_: std::collections::TryReserveError) -> Self {
-        Self::ResourceLimit
-    }
-}
-
-impl From<std::num::TryFromIntError> for ImageRasterError {
-    /// A dimension that does not fit the target integer type exceeds the raster's limits.
-    fn from(_: std::num::TryFromIntError) -> Self {
-        Self::ResourceLimit
-    }
-}
-
-impl From<TransformError> for ImageRasterError {
-    fn from(error: TransformError) -> Self {
-        match error {
-            TransformError::NonFinite => Self::InvalidInput("nonfinite transform"),
-            TransformError::Singular => Self::InvalidInput("singular transform"),
-        }
-    }
+    /// A pixel buffer could not be allocated.
+    #[error(transparent)]
+    Allocation(#[from] std::collections::TryReserveError),
+    /// A dimension does not fit the target integer type.
+    #[error(transparent)]
+    Dimension(#[from] std::num::TryFromIntError),
+    /// A render-ready image is malformed.
+    #[error(transparent)]
+    Image(#[from] ImageError),
+    /// A paint or sampling transform is nonfinite or singular.
+    #[error(transparent)]
+    Transform(#[from] TransformError),
 }

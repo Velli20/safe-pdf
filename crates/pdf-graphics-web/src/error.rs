@@ -26,6 +26,15 @@ pub enum WebCanvasBackendError {
     /// A bitmap viewport has invalid geometry.
     #[error(transparent)]
     Viewport(#[from] pdf_canvas::ViewportError),
+    /// A transform is nonfinite or singular.
+    #[error(transparent)]
+    Transform(#[from] pdf_graphics::transform::TransformError),
+    /// A render-ready image is malformed.
+    #[error(transparent)]
+    Image(#[from] pdf_graphics::ImageError),
+    /// Portable pixel preparation failed.
+    #[error(transparent)]
+    Raster(#[from] pdf_image::ImageRasterError),
 }
 
 impl From<WebCanvasBackendError> for PdfCanvasError {
@@ -42,31 +51,8 @@ impl From<WebCanvasBackendError> for PdfCanvasError {
 /// Result for web-specific APIs; the existing CanvasBackend methods use PdfCanvasError.
 pub type WebResult<T> = Result<T, WebCanvasBackendError>;
 
-impl From<pdf_graphics::transform::TransformError> for WebCanvasBackendError {
-    fn from(error: pdf_graphics::transform::TransformError) -> Self {
-        match error {
-            pdf_graphics::transform::TransformError::NonFinite => {
-                Self::InvalidInput("nonfinite transform")
-            }
-            pdf_graphics::transform::TransformError::Singular => {
-                Self::InvalidInput("singular transform")
-            }
-        }
-    }
-}
-
 impl From<wasm_bindgen::JsValue> for WebCanvasBackendError {
     fn from(value: wasm_bindgen::JsValue) -> Self {
         Self::Browser(value)
-    }
-}
-
-impl From<pdf_image::ImageRasterError> for WebCanvasBackendError {
-    /// Preserves raster validation and allocation error categories at the web boundary.
-    fn from(error: pdf_image::ImageRasterError) -> Self {
-        match error {
-            pdf_image::ImageRasterError::InvalidInput(message) => Self::InvalidInput(message),
-            pdf_image::ImageRasterError::ResourceLimit => Self::ResourceLimit,
-        }
     }
 }

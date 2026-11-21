@@ -5,6 +5,7 @@ use crate::{
     error::PdfCanvasError,
     recording_canvas::{MAX_NESTING, RecordingCanvas},
 };
+use num_traits::ToPrimitive;
 use pdf_graphics::{Image, MaskMode, transform::Transform};
 use std::sync::Arc;
 
@@ -144,8 +145,10 @@ impl MaskLayer {
         target.upload(&coverage)
     }
 
-    /// Prepares coverage from straight-alpha pixels, applying luminosity before transfer.
+    /// Prepares coverage from straight-alpha pixels as a white RGBA mask, applying
+    /// luminosity before transfer.
     ///
+    /// Alpha masks without a transfer table return the validated pixels unchanged.
     /// Callers enforce budgets and transformed bounds; pixels outside the mask bounds must
     /// remain excluded even if the transfer table maps zero to nonzero.
     pub fn prepare_coverage(&self, image: &Image) -> Result<Image, pdf_image::ImageRasterError> {
@@ -154,17 +157,34 @@ impl MaskLayer {
                 "pass-through mask has no coverage",
             ));
         }
-        pdf_image::raster::validate_image(image)?;
-        let coverage = if self.mode == MaskMode::Luminosity {
-            pdf_image::raster::luminosity_mask(image)?
-        } else {
-            image.clone()
+        if !self.needs_processing() {
+            image.validate()?;
+            return Ok(image.clone());
+        }
+        pdf_image::raster::map_pixels(image, |pixel| [255, 255, 255, self.coverage(pixel)])
+    }
+
+    /// Returns the coverage one straight RGBA pixel gives: its luminosity over a black
+    /// backdrop for luminosity masks, otherwise its alpha, then mapped through the
+    /// transfer table.
+    fn coverage(&self, [r, g, b, alpha]: [u8; 4]) -> u8 {
+        let coverage = match self.mode {
+            MaskMode::Luminosity => {
+                // Preserve operation order and truncation, even for expanded gray:
+                // simplifying to the gray byte or rounding can change the resulting alpha.
+                let luminosity = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+                // The group composites over a black backdrop, so only its opacity
+                // contributes. Dividing first leaves opaque pixels exactly as they are.
+                (luminosity * (f32::from(alpha) / 255.0))
+                    .clamp(0.0, 255.0)
+                    .to_u8()
+                    .unwrap_or(u8::MAX)
+            }
+            _ => alpha,
         };
-        Ok(if let Some(table) = self.transfer() {
-            pdf_image::raster::transfer_mask(&coverage, table)?
-        } else {
-            coverage
-        })
+        self.transfer()
+            .and_then(|table| table.get(usize::from(coverage)).copied())
+            .unwrap_or(coverage)
     }
 }
 
@@ -277,5 +297,27 @@ mod tests {
         );
         let malformed = Image { width: 3, ..image };
         assert!(alpha.prepare_coverage(&malformed).is_err());
+    }
+    /// Checks grayscale luminosity output format, dimensions, and pixels.
+    #[test]
+    fn luminosity_expands_gray_to_rgba() {
+        let image = Image {
+            width: 2,
+            height: 1,
+            data: vec![0, 255].into(),
+            pixel_format: PixelFormat::Gray8,
+            interpolate: false,
+        };
+        let luma = MaskLayer::new(
+            Arc::new(RecordingCanvas::new(2.0, 1.0)),
+            Transform::identity(),
+            MaskMode::Luminosity,
+            None,
+        )
+        .unwrap();
+        let mask = luma.prepare_coverage(&image).unwrap();
+        assert_eq!(mask.pixel_format, PixelFormat::RGBA8888);
+        assert_eq!([mask.width, mask.height], [2, 1]);
+        assert_eq!(mask.data.as_ref(), &[255, 255, 255, 0, 255, 255, 255, 255]);
     }
 }
