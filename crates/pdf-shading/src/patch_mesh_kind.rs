@@ -11,23 +11,36 @@ use crate::{
 const COONS_CONTROL_POINT_COUNT: usize = 12;
 const TENSOR_CONTROL_POINT_COUNT: usize = 16;
 
-/// Geometry layout selected by a patch mesh's `/ShadingType`.
+/// Geometry layout of a Type 6 or Type 7 patch mesh.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PatchKind {
     Coons,
     Tensor,
 }
 
+/// The boundary side of the preceding patch that a continuation patch starts from.
+///
+/// A patch boundary runs through four sides; the first side of a continuation
+/// patch is always the second, third, or fourth side of its predecessor.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SharedEdge {
+    /// Flag 1: the side from corner 1 to corner 2.
+    Second,
+    /// Flag 2: the side from corner 2 to corner 3.
+    Third,
+    /// Flag 3: the side from corner 3 back to corner 0.
+    Fourth,
+}
+
 impl PatchKind {
     /// Every PDF patch assigns a decoded color to each of its four corners.
     pub(crate) const CORNER_COLOR_COUNT: usize = 4;
 
-    /// Converts a shading type into its corresponding patch layout.
-    pub(crate) fn from_shading_type(shading_type: ShadingType) -> Result<Self, PdfShadingError> {
-        match shading_type {
-            ShadingType::CoonsPatchMesh => Ok(Self::Coons),
-            ShadingType::TensorProductPatchMesh => Ok(Self::Tensor),
-            _ => Err(PatchMeshError::UnsupportedShadingType { shading_type }.into()),
+    /// Returns the `/ShadingType` that selects this layout.
+    pub(crate) const fn shading_type(self) -> ShadingType {
+        match self {
+            Self::Coons => ShadingType::CoonsPatchMesh,
+            Self::Tensor => ShadingType::TensorProductPatchMesh,
         }
     }
 
@@ -41,36 +54,55 @@ impl PatchKind {
 
     /// Returns the control points inherited from the preceding patch.
     ///
-    /// Flag zero starts an independent patch. Flags one through three select a
-    /// boundary of the preceding patch, preserving the point order required for
-    /// the new patch's first edge.
+    /// An independent patch inherits nothing. A continuation inherits the four
+    /// points of the shared edge, ordered as the new patch's first side.
     pub(crate) fn initial_control_points(
         self,
-        flag: u8,
+        edge: Option<SharedEdge>,
         previous: Option<&MeshPatch>,
     ) -> Result<Vec<Point>, PdfShadingError> {
-        if flag == 0 {
+        let Some(edge) = edge else {
             return Ok(Vec::with_capacity(self.control_point_count()));
-        }
-
-        match self {
-            Self::Coons => coons_shared_points(flag, previous),
-            Self::Tensor => tensor_shared_points(flag, previous),
-        }
+        };
+        let shared = match (self, previous) {
+            (Self::Coons, Some(MeshPatch::Coons { control_points, .. })) => {
+                edge.coons_points(control_points)
+            }
+            (Self::Tensor, Some(MeshPatch::Tensor { control_points, .. })) => {
+                edge.tensor_points(control_points)
+            }
+            _ => {
+                return Err(PatchMeshError::ContinuationWithoutPreviousPatch {
+                    kind: self.name(),
+                    flag: edge.flag(),
+                }
+                .into());
+            }
+        };
+        Ok(Vec::from(shared))
     }
 
     /// Returns the two corner colors inherited with a shared edge.
     pub(crate) fn initial_corner_colors(
         self,
-        flag: u8,
+        edge: Option<SharedEdge>,
         previous: Option<&MeshPatch>,
     ) -> Result<Vec<Color>, PdfShadingError> {
-        if flag == 0 {
+        let Some(edge) = edge else {
             return Ok(Vec::with_capacity(Self::CORNER_COLOR_COUNT));
-        }
-
-        let colors = self.previous_corner_colors(flag, previous)?;
-        Ok(Vec::from(shared_colors(flag, *colors, self.name())?))
+        };
+        let colors = match (self, previous) {
+            (Self::Coons, Some(MeshPatch::Coons { corner_colors, .. }))
+            | (Self::Tensor, Some(MeshPatch::Tensor { corner_colors, .. })) => corner_colors,
+            _ => {
+                return Err(PatchMeshError::ContinuationWithoutPreviousPatch {
+                    kind: self.name(),
+                    flag: edge.flag(),
+                }
+                .into());
+            }
+        };
+        Ok(Vec::from(edge.colors(*colors)))
     }
 
     /// Converts decoded vectors into the fixed-size public patch model.
@@ -118,23 +150,6 @@ impl PatchKind {
         }
     }
 
-    /// Finds corner colors on a compatible preceding patch.
-    fn previous_corner_colors(
-        self,
-        flag: u8,
-        previous: Option<&MeshPatch>,
-    ) -> Result<&[Color; Self::CORNER_COLOR_COUNT], PdfShadingError> {
-        match (self, previous) {
-            (Self::Coons, Some(MeshPatch::Coons { corner_colors, .. }))
-            | (Self::Tensor, Some(MeshPatch::Tensor { corner_colors, .. })) => Ok(corner_colors),
-            _ => Err(PatchMeshError::ContinuationWithoutPreviousPatch {
-                kind: self.name(),
-                flag,
-            }
-            .into()),
-        }
-    }
-
     /// Returns the human-readable patch name used in parser errors.
     const fn name(self) -> &'static str {
         match self {
@@ -144,90 +159,72 @@ impl PatchKind {
     }
 }
 
-/// Selects a shared Coons boundary from its twelve perimeter control points.
-fn coons_shared_points(
-    flag: u8,
-    previous: Option<&MeshPatch>,
-) -> Result<Vec<Point>, PdfShadingError> {
-    let Some(MeshPatch::Coons { control_points, .. }) = previous else {
-        return Err(PatchMeshError::ContinuationWithoutPreviousPatch {
-            kind: "Coons",
-            flag,
+impl SharedEdge {
+    /// Decodes a patch flag; flag 0 starts an independent patch.
+    ///
+    /// Only the two low bits of a flag carry meaning.
+    pub(crate) const fn from_flag(flag: u8) -> Option<Self> {
+        match flag & 0b11 {
+            0 => None,
+            1 => Some(Self::Second),
+            2 => Some(Self::Third),
+            _ => Some(Self::Fourth),
         }
-        .into());
-    };
-    let &[p0, _p1, _p2, p3, p4, p5, p6, p7, p8, p9, p10, p11] = control_points;
-    let shared = match flag {
-        1 => [p3, p4, p5, p6],
-        2 => [p6, p7, p8, p9],
-        3 => [p9, p10, p11, p0],
-        _ => {
-            return Err(PatchMeshError::InvalidContinuationFlag {
-                kind: "Coons",
-                flag,
-            }
-            .into());
-        }
-    };
-    Ok(Vec::from(shared))
-}
+    }
 
-/// Selects a shared tensor boundary from its 4x4 control-point grid.
-fn tensor_shared_points(
-    flag: u8,
-    previous: Option<&MeshPatch>,
-) -> Result<Vec<Point>, PdfShadingError> {
-    let Some(MeshPatch::Tensor { control_points, .. }) = previous else {
-        return Err(PatchMeshError::ContinuationWithoutPreviousPatch {
-            kind: "Tensor",
-            flag,
+    /// Returns the flag that selects this edge.
+    const fn flag(self) -> u8 {
+        match self {
+            Self::Second => 1,
+            Self::Third => 2,
+            Self::Fourth => 3,
         }
-        .into());
-    };
-    let &[
-        p0,
-        _p1,
-        _p2,
-        p3,
-        p4,
-        _p5,
-        _p6,
-        p7,
-        p8,
-        _p9,
-        _p10,
-        p11,
-        p12,
-        p13,
-        p14,
-        p15,
-    ] = control_points;
-    let shared = match flag {
-        1 => [p3, p7, p11, p15],
-        2 => [p15, p14, p13, p12],
-        3 => [p12, p8, p4, p0],
-        _ => {
-            return Err(PatchMeshError::InvalidContinuationFlag {
-                kind: "Tensor",
-                flag,
-            }
-            .into());
-        }
-    };
-    Ok(Vec::from(shared))
-}
+    }
 
-/// Maps a shared edge to the corresponding pair of corner colors.
-fn shared_colors(
-    flag: u8,
-    [c0, c1, c2, c3]: [Color; PatchKind::CORNER_COLOR_COUNT],
-    kind: &'static str,
-) -> Result<[Color; 2], PdfShadingError> {
-    match flag {
-        1 => Ok([c1, c2]),
-        2 => Ok([c2, c3]),
-        3 => Ok([c3, c0]),
-        _ => Err(PatchMeshError::InvalidContinuationFlag { kind, flag }.into()),
+    /// Selects this edge from the twelve perimeter points of a Coons patch.
+    fn coons_points(self, points: &[Point; COONS_CONTROL_POINT_COUNT]) -> [Point; 4] {
+        let &[p0, _p1, _p2, p3, p4, p5, p6, p7, p8, p9, p10, p11] = points;
+        match self {
+            Self::Second => [p3, p4, p5, p6],
+            Self::Third => [p6, p7, p8, p9],
+            Self::Fourth => [p9, p10, p11, p0],
+        }
+    }
+
+    /// Selects this edge from the row-major 4x4 net of a tensor patch.
+    fn tensor_points(self, points: &[Point; TENSOR_CONTROL_POINT_COUNT]) -> [Point; 4] {
+        let &[
+            p0,
+            _p1,
+            _p2,
+            p3,
+            p4,
+            _p5,
+            _p6,
+            p7,
+            p8,
+            _p9,
+            _p10,
+            p11,
+            p12,
+            p13,
+            p14,
+            p15,
+        ] = points;
+        match self {
+            Self::Second => [p3, p7, p11, p15],
+            Self::Third => [p15, p14, p13, p12],
+            Self::Fourth => [p12, p8, p4, p0],
+        }
+    }
+
+    /// Selects the two corner colors at the ends of this edge.
+    fn colors(self, [c0, c1, c2, c3]: [Color; PatchKind::CORNER_COLOR_COUNT]) -> [Color; 2] {
+        match self {
+            Self::Second => [c1, c2],
+            Self::Third => [c2, c3],
+            Self::Fourth => [c3, c0],
+        }
     }
 }
 
@@ -236,16 +233,16 @@ fn try_array<T, const N: usize>(
     values: Vec<T>,
     expected: &'static str,
 ) -> Result<[T; N], PdfShadingError> {
-    values
+    Ok(values
         .try_into()
-        .map_err(|_| PdfShadingError::from(PatchMeshError::IncompletePatch { expected }))
+        .map_err(|_| PatchMeshError::IncompletePatch { expected })?)
 }
 
 #[cfg(test)]
 mod tests {
     use pdf_graphics::{color::Color, point::Point};
 
-    use super::PatchKind;
+    use super::{PatchKind, SharedEdge};
     use crate::model::MeshPatch;
 
     #[test]
@@ -256,13 +253,22 @@ mod tests {
             corner_colors: corner_colors(),
         };
 
-        for (flag, expected) in [
-            (1, [points[3], points[4], points[5], points[6]]),
-            (2, [points[6], points[7], points[8], points[9]]),
-            (3, [points[9], points[10], points[11], points[0]]),
+        for (edge, expected) in [
+            (
+                SharedEdge::Second,
+                [points[3], points[4], points[5], points[6]],
+            ),
+            (
+                SharedEdge::Third,
+                [points[6], points[7], points[8], points[9]],
+            ),
+            (
+                SharedEdge::Fourth,
+                [points[9], points[10], points[11], points[0]],
+            ),
         ] {
             let actual = PatchKind::Coons
-                .initial_control_points(flag, Some(&patch))
+                .initial_control_points(Some(edge), Some(&patch))
                 .expect("valid Coons continuation should be reconstructed");
             assert_eq!(actual, expected);
         }
@@ -276,13 +282,22 @@ mod tests {
             corner_colors: corner_colors(),
         };
 
-        for (flag, expected) in [
-            (1, [points[3], points[7], points[11], points[15]]),
-            (2, [points[15], points[14], points[13], points[12]]),
-            (3, [points[12], points[8], points[4], points[0]]),
+        for (edge, expected) in [
+            (
+                SharedEdge::Second,
+                [points[3], points[7], points[11], points[15]],
+            ),
+            (
+                SharedEdge::Third,
+                [points[15], points[14], points[13], points[12]],
+            ),
+            (
+                SharedEdge::Fourth,
+                [points[12], points[8], points[4], points[0]],
+            ),
         ] {
             let actual = PatchKind::Tensor
-                .initial_control_points(flag, Some(&patch))
+                .initial_control_points(Some(edge), Some(&patch))
                 .expect("valid tensor continuation should be reconstructed");
             assert_eq!(actual, expected);
         }
@@ -315,13 +330,13 @@ mod tests {
             corner_colors: colors,
         };
 
-        for (flag, expected) in [
-            (1, [colors[1], colors[2]]),
-            (2, [colors[2], colors[3]]),
-            (3, [colors[3], colors[0]]),
+        for (edge, expected) in [
+            (SharedEdge::Second, [colors[1], colors[2]]),
+            (SharedEdge::Third, [colors[2], colors[3]]),
+            (SharedEdge::Fourth, [colors[3], colors[0]]),
         ] {
             let actual = PatchKind::Coons
-                .initial_corner_colors(flag, Some(&patch))
+                .initial_corner_colors(Some(edge), Some(&patch))
                 .expect("valid continuation colors should be reconstructed");
             assert_eq!(actual, expected);
         }

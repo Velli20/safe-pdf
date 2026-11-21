@@ -51,22 +51,18 @@ impl FromPdfObject for MeshConfig {
 }
 
 impl MeshConfig {
-    /// Creates a sample decoder borrowing this configuration.
+    /// Creates a decoder over this stream's packed records.
     pub(crate) fn decoder(
         &self,
         mesh_name: &'static str,
     ) -> Result<MeshDecoder<'_>, PdfShadingError> {
         MeshDecoder::new(
+            &self.data,
             self.widths,
             &self.decode,
             &self.functions,
             &self.color_space,
             mesh_name,
         )
-    }
-
-    /// Returns the encoded width of each vertex or patch flag.
-    pub(crate) fn flag_width(&self) -> usize {
-        self.widths.flag()
     }
 }

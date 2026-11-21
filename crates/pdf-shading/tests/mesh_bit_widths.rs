@@ -35,9 +35,9 @@ fn mesh_widths_dictionary(coordinate: i64, component: i64, flag: i64) -> Diction
 fn validates_pdf_mesh_bit_widths() {
     let valid = mesh_widths_dictionary(12, 4, 2);
     let widths = read_widths(valid).expect("valid widths should parse");
-    assert_eq!(widths.coordinate(), 12);
-    assert_eq!(widths.component(), 4);
-    assert_eq!(widths.flag(), 2);
+    assert_eq!(widths.coordinate, 12);
+    assert_eq!(widths.component, 4);
+    assert_eq!(widths.flag, 2);
 
     let invalid_coordinate = mesh_widths_dictionary(3, 4, 2);
     assert_eq!(
