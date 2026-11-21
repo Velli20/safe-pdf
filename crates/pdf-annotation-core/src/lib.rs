@@ -50,6 +50,7 @@ mod source_decode_widget;
 /// Shared fields normalized from the widget records that display them.
 pub mod source_fields;
 mod source_kind;
+mod source_note_appearance;
 mod source_properties;
 
 mod wire;
