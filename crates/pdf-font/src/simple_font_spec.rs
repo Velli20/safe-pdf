@@ -80,7 +80,16 @@ impl FromPdfObject for SimpleFontSpec {
                 .filter(|_| subtype.as_ref() == b"Type1" && program.is_none())
                 .and_then(Encoding::standard14_built_in)
         });
-        let encoding = SimpleEncoding::new(encoding, symbolic);
+        // An encoding dictionary without `/BaseEncoding` differs from the built-in encoding of
+        // an embedded Type 1 or CFF program, and from StandardEncoding for any other font.
+        let built_in_base = matches!(
+            program,
+            Some(FontSource::Memory {
+                format: FontProgramFormat::Type1 | FontProgramFormat::Cff,
+                ..
+            })
+        );
+        let encoding = SimpleEncoding::new(encoding, symbolic, built_in_base);
         let mut metrics: PdfMetrics = context.read(value)?;
         if let Some(font) = standard14
             && program.is_none()

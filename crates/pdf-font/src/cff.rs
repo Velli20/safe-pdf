@@ -78,6 +78,20 @@ impl<'a> CffProgramRef<'a> {
         })
     }
 
+    /// Maps a one-byte character code through the program's built-in encoding.
+    ///
+    /// A CID-keyed program has no encoding, and codes the encoding leaves at `.notdef` return
+    /// `None`.
+    fn glyph_for_code(&self, code: u8) -> Option<read_fonts::types::GlyphId> {
+        if self.font.is_cid() {
+            return None;
+        }
+        self.font
+            .encoding()?
+            .map(code)
+            .filter(|glyph| *glyph != read_fonts::types::GlyphId::NOTDEF)
+    }
+
     /// Computes face-wide design metrics from the font matrix and bounding box.
     fn metrics(&self) -> Option<FontMetrics> {
         // `upem` comes from the top-level FontMatrix and is normally 1000. Reject a
@@ -290,6 +304,16 @@ impl FontFace for CffFontFace {
         self.resolve_glyph_name(name)
     }
 
+    /// Resolves a one-byte character code through the program's built-in encoding.
+    ///
+    /// Codes the encoding leaves at `.notdef` return `None` so callers can try Unicode.
+    fn glyph_for_code(&self, code: u8) -> Option<GlyphId> {
+        self.program
+            .borrow_dependent()
+            .glyph_for_code(code)
+            .map(|glyph| GlyphId(glyph.to_u32()))
+    }
+
     /// Evaluates a charstring without retaining its outline.
     fn horizontal_advance(&self, glyph: GlyphId) -> Result<Option<f32>, FontError> {
         if let Some(advance) = self.advances.get(&glyph) {
@@ -319,7 +343,9 @@ impl FontFace for CffFontFace {
 mod tests {
     use std::sync::Arc;
 
-    use crate::font::{FontMetadata, FontProgramFormat, FontSource, GlyphGeometry};
+    use pdf_object_reader::inline_bytes::InlineBytes;
+
+    use crate::font::{FontMetadata, FontProgramFormat, FontSource, GlyphGeometry, GlyphName};
     use crate::font_registry::FontRegistry;
     use crate::standard14::{Standard14Font, fallback_font_bytes};
     use crate::type0::Type0FontDriver;
@@ -347,5 +373,27 @@ mod tests {
             face.glyph_geometry(glyph),
             Ok(Some(GlyphGeometry::Outline(outline))) if !outline.verbs.is_empty()
         ));
+    }
+
+    #[test]
+    fn code_resolves_through_built_in_encoding() {
+        let mut registry = FontRegistry::new();
+        registry.register(Arc::new(CffFontDriver::new()));
+        let face = registry
+            .load(
+                FontSource::Memory {
+                    data: bytes::Bytes::from_static(fallback_font_bytes(Standard14Font::Helvetica)),
+                    format: FontProgramFormat::Cff,
+                    face_index: 0,
+                },
+                FontMetadata::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            face.glyph_for_code(b'A'),
+            face.glyph_for_name(&GlyphName(InlineBytes::from_bytes(b"A")))
+        );
+        assert!(face.glyph_for_code(b'A').is_some());
     }
 }

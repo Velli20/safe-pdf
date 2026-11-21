@@ -83,7 +83,7 @@ impl FromPdfObject for Type3FontSpec {
         let mut context = context.dictionary()?;
         let font_matrix = context.required(b"FontMatrix")?;
         let bounds = context.required(b"FontBBox")?;
-        let encoding = SimpleEncoding::new(context.optional(b"Encoding")?, false);
+        let encoding = SimpleEncoding::new(context.optional(b"Encoding")?, false, false);
         let metrics: PdfMetrics = context.read(value)?;
         Ok(Self {
             base_font: context.lenient(b"BaseFont").unwrap_or_default(),
