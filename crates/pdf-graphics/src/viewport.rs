@@ -202,11 +202,6 @@ impl CanvasViewport {
     pub fn device_to_backing(&self) -> &Transform {
         &self.device_to_backing
     }
-
-    /// Returns the logical device width of one backing pixel along the denser axis.
-    pub fn hairline_width(&self) -> f32 {
-        1.0 / self.device_to_backing.max_scale()
-    }
 }
 
 /// Rounds a positive finite raster extent up to a representable pixel dimension.
