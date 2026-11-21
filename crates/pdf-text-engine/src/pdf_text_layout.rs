@@ -366,10 +366,12 @@ fn fallback_fit(
 /// Selects a glyph already available in `face` without consulting fallback services.
 ///
 /// Whole-font substitutes prefer Unicode because embedded glyph IDs, names, and CIDs generally do
-/// not address the substitute's glyph space. Native faces try their explicit PDF selector first,
-/// then use the first Unicode scalar as a recovery path. Without an explicit selector, a one-byte
-/// code is looked up in the face's code-keyed cmap subtables: before Unicode for a symbolic font,
-/// whose codes address those subtables directly, and after it otherwise.
+/// not address the substitute's glyph space. A substitute lacking a mapped character therefore
+/// leaves it to fallback rather than drawing whatever glyph its CID or glyph ID indexes. Native
+/// faces try their explicit PDF selector first, then use the first Unicode scalar as a recovery
+/// path. Without an explicit selector, a one-byte code is looked up in the face's code-keyed cmap
+/// subtables: before Unicode for a symbolic font, whose codes address those subtables directly,
+/// and after it otherwise.
 fn select_glyph(
     face: &dyn FontFace,
     decoded: &DecodedGlyph<'_>,
@@ -386,6 +388,11 @@ fn select_glyph(
         return Some(glyph);
     }
     let selected = match &decoded.selector {
+        GlyphSelector::GlyphId(_) | GlyphSelector::Cid(_)
+            if prefer_unicode && !decoded.unicode.as_slice().is_empty() =>
+        {
+            None
+        }
         GlyphSelector::GlyphId(glyph) => Some(*glyph),
         GlyphSelector::GlyphName(name) => face.glyph_for_name(name),
         GlyphSelector::Cid(Cid(cid)) => Some(GlyphId(*cid)),

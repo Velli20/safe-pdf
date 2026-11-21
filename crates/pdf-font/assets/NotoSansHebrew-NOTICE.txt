@@ -1,0 +1,9 @@
+Noto Sans Hebrew Regular
+
+Source: https://github.com/notofonts/hebrew
+File: fonts/NotoSansHebrew/unhinted/otf/NotoSansHebrew-Regular.otf
+      (as published at https://github.com/notofonts/notofonts.github.io)
+License: SIL Open Font License, Version 1.1
+
+This font is bundled as the deterministic fallback for Hebrew characters that
+the substituted Latin faces do not cover.

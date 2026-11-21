@@ -149,3 +149,7 @@ See `crates/pdf-font/assets/LICENSE_FOXIT`.
 Glyphs those fonts lack fall back to Noto Sans CJK Japanese Regular, under the
 SIL Open Font License 1.1. See `crates/pdf-font/assets/NotoSansCJK-OFL.txt` and
 `crates/pdf-font/assets/NotoSansCJK-NOTICE.txt`.
+
+Hebrew glyphs fall back to Noto Sans Hebrew Regular, also under the SIL Open
+Font License 1.1. See `crates/pdf-font/assets/NotoSansHebrew-OFL.txt` and
+`crates/pdf-font/assets/NotoSansHebrew-NOTICE.txt`.

@@ -24,6 +24,8 @@ use pdf_cmap::WritingMode;
 
 const NOTO_SANS_CJK_JP_REGULAR: &[u8] =
     include_bytes!("../../pdf-font/assets/NotoSansCJKjp-Regular.otf");
+const NOTO_SANS_HEBREW_REGULAR: &[u8] =
+    include_bytes!("../../pdf-font/assets/NotoSansHebrew-Regular.otf");
 
 /// Complete normalized representation of a PDF font resource.
 #[derive(Clone)]
@@ -201,6 +203,14 @@ impl FallbackProvider for BundledFallbackProvider {
         // Western Latin substitutes lack.
         if !pdf_font.is_cjk_spec() {
             candidates.push(cjk_candidate(request.requested));
+        }
+        // Neither the Latin substitutes nor the CJK face cover Hebrew.
+        if matches!(request.character, '\u{0590}'..='\u{05FF}' | '\u{FB1D}'..='\u{FB4F}') {
+            candidates.push(memory_candidate(
+                Bytes::from_static(NOTO_SANS_HEBREW_REGULAR),
+                FontProgramFormat::OpenTypeCff,
+                request.requested,
+            ));
         }
         Ok(candidates)
     }

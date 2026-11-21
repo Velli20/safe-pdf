@@ -2,6 +2,7 @@ pub mod base_encoding;
 pub mod cff;
 mod cid_metric_runs;
 pub mod cid_vertical_metrics;
+mod core_font_glyph_order;
 pub mod encoding;
 pub mod error;
 pub mod fallback;

@@ -2,6 +2,7 @@
 
 use crate::{
     cid_vertical_metrics::CidVerticalMetrics,
+    core_font_glyph_order::CORE_FONT_GLYPH_RUNS,
     error::FontError,
     font::{FontSource, GlyphId},
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
@@ -87,12 +88,13 @@ impl CidToGidMap {
 pub enum CidToUnicode {
     /// Inverted predefined Unicode CMap of a CJK character collection.
     Collection(Arc<HashMap<u16, char>>),
-    /// CIDs are glyph indices in the standard Macintosh glyph order.
+    /// CIDs are glyph indices in the glyph order the TrueType core fonts share.
     ///
-    /// TrueType core fonts such as Arial, Times New Roman, and Courier New keep this order for
-    /// their first 258 glyphs. A non-embedded Identity CIDFontType2 font naming one of them
-    /// selects glyphs of that font by index, so its CIDs follow this order.
-    StandardGlyphOrder,
+    /// Arial, Times New Roman, Courier New, and Tahoma keep the standard Macintosh order for
+    /// their first 258 glyphs and continue with the same glyphs after it. A non-embedded
+    /// Identity CIDFontType2 font naming one of them selects glyphs of that font by index, so
+    /// its CIDs follow this order.
+    CoreFontGlyphOrder,
 }
 
 impl CidToUnicode {
@@ -101,11 +103,25 @@ impl CidToUnicode {
     pub fn get(&self, cid: u16) -> Option<char> {
         match self {
             Self::Collection(map) => map.get(&cid).copied(),
-            Self::StandardGlyphOrder => DEFAULT_GLYPH_NAMES
-                .get(usize::from(cid))
-                .copied()
-                .and_then(agl::name_to_char),
+            Self::CoreFontGlyphOrder => match DEFAULT_GLYPH_NAMES.get(usize::from(cid)) {
+                Some(name) => agl::name_to_char(name),
+                None => CORE_FONT_GLYPH_RUNS.iter().find_map(|(first, glyphs)| {
+                    glyphs.get(usize::from(cid.checked_sub(*first)?)).copied()
+                }),
+            },
         }
+    }
+
+    /// The glyph order of the TrueType core font `base_font` names, when that font keeps the
+    /// order the core fonts share; the symbol fonts do not.
+    fn core_font_glyph_order(base_font: &[u8]) -> Option<Self> {
+        let family = base_font
+            .rsplit(|byte| *byte == b'+')
+            .next()
+            .and_then(|name| name.split(|byte| matches!(byte, b',' | b'-')).next());
+        let keeps_order = family == Some(b"Tahoma".as_slice())
+            || from_base_font_name(base_font).is_some_and(Standard14Font::has_standard_glyph_order);
+        keeps_order.then_some(Self::CoreFontGlyphOrder)
     }
 }
 
@@ -166,14 +182,13 @@ impl FromPdfObject for CidFontSpec {
         // A substituted TrueType core font without its own glyph map is indexed by CID.
         let indexes_core_font = kind == CidFontKind::Type2
             && program.is_none()
-            && matches!(cid_to_gid, CidToGidMap::Identity)
-            && base_font
+            && matches!(cid_to_gid, CidToGidMap::Identity);
+        let cid_to_unicode = system_info.cid_to_unicode_map().or_else(|| {
+            base_font
                 .as_deref()
-                .and_then(from_base_font_name)
-                .is_some_and(Standard14Font::has_standard_glyph_order);
-        let cid_to_unicode = system_info
-            .cid_to_unicode_map()
-            .or_else(|| indexes_core_font.then_some(CidToUnicode::StandardGlyphOrder));
+                .filter(|_| indexes_core_font)
+                .and_then(CidToUnicode::core_font_glyph_order)
+        });
         Ok(Self {
             kind,
             descriptor,
