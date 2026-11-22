@@ -15,7 +15,8 @@ pub struct WebCss {
     pub transform: String,
     /// Text or stroke color.
     pub color: String,
-    /// Interior color, or `transparent`.
+    /// Interior color, or `transparent` for none and for kinds whose interior the page
+    /// canvas or `shapes` paints.
     pub background: String,
     /// Border shorthand for kinds without vector shapes; empty for none.
     pub border: String,
@@ -39,7 +40,7 @@ impl WebAnnotationEntry {
         let css = WebCss {
             transform: css_matrix(&entry, device_to_css),
             color: css_color(Some(entry.style.color)),
-            background: if painted_on_canvas(&entry) {
+            background: if painted_on_canvas(&entry) || drawn_from_shapes(&entry.content) {
                 css_color(None)
             } else {
                 css_color(entry.style.background)
