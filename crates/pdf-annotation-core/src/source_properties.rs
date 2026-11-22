@@ -21,6 +21,13 @@ impl BorderStyle {
         self.width.unwrap_or(1.0).max(0.0)
     }
 
+    /// Resolve the dash lengths the border strokes with: `/D` only for the Dashed style,
+    /// defaulting to `[3]`; every other style is solid (`None`).
+    pub fn resolved_dash(&self) -> Option<Vec<f32>> {
+        matches!(self.style, Some(BorderStyleName::Dashed))
+            .then(|| self.dash_pattern.clone().unwrap_or_else(|| vec![3.0]))
+    }
+
     /// Whether the border is beveled or inset, which draws it twice as deep inside the
     /// annotation rectangle.
     pub fn is_three_dimensional(&self) -> bool {
@@ -242,5 +249,29 @@ impl WidgetAnnotation {
         indices.sort_unstable();
         indices.dedup();
         Ok(indices)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn border_dash_applies_only_to_dashed_style() {
+        let border = |style| BorderStyle {
+            width: Some(6.0),
+            style: Some(style),
+            dash_pattern: Some(vec![2.0, 2.0]),
+        };
+        assert_eq!(border(BorderStyleName::Solid).resolved_dash(), None);
+        assert_eq!(
+            border(BorderStyleName::Dashed).resolved_dash(),
+            Some(vec![2.0, 2.0])
+        );
+        let dashed_without_pattern = BorderStyle {
+            dash_pattern: None,
+            ..border(BorderStyleName::Dashed)
+        };
+        assert_eq!(dashed_without_pattern.resolved_dash(), Some(vec![3.0]));
     }
 }
