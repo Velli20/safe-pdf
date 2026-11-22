@@ -244,23 +244,17 @@ impl CanvasBackend for WebCanvasBackend {
             .map_err(Into::into)
     }
 
-    fn erase_stroke(
+    fn knockout_stroke(
         &mut self,
         path: &CanvasPath<'_>,
+        color: Color,
         width: f32,
         style: &StrokeStyle,
+        shader: Option<&Shader>,
     ) -> Result<(), PdfCanvasError> {
-        self.prepared_stroke(
-            path,
-            Color::from_rgb(0.0, 0.0, 0.0),
-            width,
-            style,
-            None,
-            None,
-        )?
-        .erasing()
-        .stroke(width, style)
-        .map_err(Into::into)
+        self.prepared_stroke(path, color, width, style, shader, None)?
+            .knockout_stroke(width, style)
+            .map_err(Into::into)
     }
 
     fn set_clip_region(
@@ -403,12 +397,6 @@ impl<'a> PreparedPath<'a> {
         })
     }
 
-    /// Makes the prepared paint clear the destination wherever it would cover it.
-    fn erasing(mut self) -> Self {
-        self.paint.composite = "destination-out";
-        self
-    }
-
     fn fill(self, rule: PathFillType) -> WebResult<()> {
         let _saved = SavedContext::new(self.context);
         self.paint.apply(self.context)?;
@@ -418,8 +406,33 @@ impl<'a> PreparedPath<'a> {
     }
 
     fn stroke(self, width: f32, style: &StrokeStyle) -> WebResult<()> {
+        let _saved = self.begin_stroke(width, style)?;
+        self.paint.apply(self.context)?;
+        self.context.stroke_with_path(&self.geometry);
+        Ok(())
+    }
+
+    /// Strokes the geometry, replacing the destination under the stroke: the coverage is
+    /// erased with an opaque stroke, then the paint is added into the cleared coverage, so
+    /// the anti-aliased edges mix the stroke and the destination by coverage.
+    fn knockout_stroke(self, width: f32, style: &StrokeStyle) -> WebResult<()> {
+        let _saved = self.begin_stroke(width, style)?;
+        self.context
+            .set_global_composite_operation("destination-out")?;
+        self.context.set_global_alpha(1.0);
+        self.context.set_stroke_style_str("#000");
+        self.context.stroke_with_path(&self.geometry);
+        self.paint.apply(self.context)?;
+        self.context.set_global_composite_operation("lighter")?;
+        self.context.stroke_with_path(&self.geometry);
+        Ok(())
+    }
+
+    /// Saves the context and sets up the stroke geometry's transform, width, caps, joins
+    /// and dashes. The returned guard restores the context.
+    fn begin_stroke(&self, width: f32, style: &StrokeStyle) -> WebResult<SavedContext<'a>> {
         let stroke = PreparedStroke::new(width, style, self.viewport)?;
-        let _saved = SavedContext::new(self.context);
+        let saved = SavedContext::new(self.context);
         if let Some(t) = &self.transform {
             t.validate()?;
             self.context.transform(
@@ -431,10 +444,8 @@ impl<'a> PreparedPath<'a> {
                 f64::from(t.ty),
             )?;
         }
-        self.paint.apply(self.context)?;
         stroke.apply(self.context)?;
-        self.context.stroke_with_path(&self.geometry);
-        Ok(())
+        Ok(saved)
     }
 }
 

@@ -39,7 +39,7 @@ pub struct ObservingCanvas {
     /// Each mask's recording size and the fill colors it paints.
     pub masks: Vec<(f32, f32, Vec<Color>)>,
     pub group_layers: Vec<(f32, Option<BlendMode>)>,
-    pub erased_strokes: usize,
+    pub knockout_strokes: usize,
 }
 
 impl ObservingCanvas {
@@ -88,14 +88,16 @@ impl CanvasBackend for ObservingCanvas {
         Ok(())
     }
 
-    /// Counts erased strokes.
-    fn erase_stroke(
+    /// Counts knockout strokes.
+    fn knockout_stroke(
         &mut self,
         _path: &CanvasPath<'_>,
+        _color: Color,
         _line_width: f32,
         _stroke_style: &StrokeStyle,
+        _shader: Option<&Shader>,
     ) -> Result<(), PdfCanvasError> {
-        self.erased_strokes += 1;
+        self.knockout_strokes += 1;
         Ok(())
     }
 

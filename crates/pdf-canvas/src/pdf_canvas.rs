@@ -665,7 +665,11 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             PaintMode::Stroke | PaintMode::FillAndStroke => self.prepare_stroke()?,
             PaintMode::Fill => None,
         };
-        Ok(PreparedPaint { fill, stroke })
+        Ok(PreparedPaint {
+            fill,
+            stroke,
+            blend_mode: self.state.paint.blend_mode,
+        })
     }
 
     /// Works out the current fill, or `None` when the fill pattern leaves no marks.
@@ -677,7 +681,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let paint = &self.state.paint;
         Ok(Some(FillPaint {
             color: paint.fill_color,
-            blend_mode: paint.blend_mode,
             shader,
             clip: self.pattern_bbox_clip(false)?,
         }))
@@ -694,7 +697,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let state = &self.state;
         Ok(Some(StrokePaint {
             color: state.paint.stroke_color,
-            blend_mode: state.paint.blend_mode,
             line_width: state.paint.line_width * scale,
             style: StrokeStyle::new(&state.paint, &state.transform, dash_pattern),
             shader,

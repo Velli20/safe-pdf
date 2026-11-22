@@ -274,7 +274,7 @@ fn fill_and_stroke_with_translucent_stroke_knocks_out_the_fill() {
 
     let observer = replay(&recording);
     assert_eq!(observer.group_layers, vec![(1.0, None)]);
-    assert_eq!(observer.erased_strokes, 1);
+    assert_eq!(observer.knockout_strokes, 1);
     assert_eq!(observer.fill_colors.len(), 1);
-    assert_eq!(observer.stroke_styles.len(), 1);
+    assert!(observer.stroke_styles.is_empty());
 }

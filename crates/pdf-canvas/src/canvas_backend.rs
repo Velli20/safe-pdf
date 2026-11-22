@@ -62,27 +62,32 @@ pub trait CanvasBackend {
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError>;
 
-    /// Clears the destination under the stroke of `path`, leaving it transparent.
+    /// Strokes `path`, replacing the destination under the stroke instead of compositing
+    /// over it.
     ///
-    /// Painting a fill and a translucent stroke as one object erases the fill under the
-    /// stroke inside a group layer, so the stroke composites with the backdrop alone.
+    /// Painting a fill and a translucent stroke as one object strokes this way inside a
+    /// group layer, so the stroke knocks out the fill and composites with the backdrop alone.
+    /// At the stroke's anti-aliased edges, the stroke and the destination mix by coverage.
     ///
     /// # Parameters
     ///
-    /// - `path`: The path whose stroke is erased. Its verbs resolve to logical device coordinates.
+    /// - `path`: The path to stroke. Its verbs resolve to logical device coordinates.
+    /// - `color`: The stroke color, used directly or as the shader's alpha.
     /// - `line_width`: The width of the stroke in device units.
     /// - `stroke_style`: Stroke metadata such as dash pattern.
+    /// - `shader`: Optional shader to use for the stroke paint.
     ///
-    /// The default implementation erases nothing, for backends without group layers,
-    /// where erasing would remove the backdrop as well.
-    fn erase_stroke(
+    /// The default implementation strokes with normal compositing, for backends without
+    /// group layers, where replacing would remove the backdrop as well.
+    fn knockout_stroke(
         &mut self,
         path: &CanvasPath<'_>,
+        color: Color,
         line_width: f32,
         stroke_style: &StrokeStyle,
+        shader: Option<&Shader>,
     ) -> Result<(), PdfCanvasError> {
-        let _ = (path, line_width, stroke_style);
-        Ok(())
+        self.stroke_path(path, color, line_width, stroke_style, shader, None)
     }
 
     /// Sets the clipping region by intersecting the current clip path with the given path.

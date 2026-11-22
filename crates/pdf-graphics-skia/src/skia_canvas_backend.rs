@@ -450,6 +450,32 @@ fn make_paint(
 }
 
 impl SkiaCanvasBackend<'_> {
+    /// Fills `path` without anti-aliasing, snapped to the nearest pixel edges, when it is
+    /// a rectangle aligned with the pixel grid, so thin bars stay solid and separate.
+    /// Returns whether the path was such a rectangle.
+    ///
+    /// See [`pdf_graphics::rect::Rect::snapped_to_pixels`].
+    fn fill_pixel_rect(
+        &mut self,
+        path: &CanvasPath<'_>,
+        paint: &mut skia_safe::Paint,
+    ) -> Result<bool, PdfCanvasError> {
+        let canvas = self.surface.canvas();
+        let to_pixels = from_skia_matrix(&canvas.local_to_device_as_3x3());
+        let Some(rect) = path.axis_aligned_rect(&to_pixels)? else {
+            return Ok(false);
+        };
+        let rect = rect.snapped_to_pixels();
+        // The snapped edges are whole numbers, so rounding only changes the type.
+        let pixels = skia_safe::Rect::new(rect.left, rect.top, rect.right, rect.bottom).round();
+        paint.set_anti_alias(false);
+        canvas.save();
+        canvas.reset_matrix();
+        canvas.draw_irect(pixels, paint);
+        canvas.restore();
+        Ok(true)
+    }
+
     /// Strokes device-space geometry with `blend_mode` as Skia's compositing operation, in
     /// the style's stroke space when the CTM scales unevenly or shears.
     fn draw_stroke(
@@ -524,32 +550,6 @@ impl SkiaCanvasBackend<'_> {
         }
         Ok(())
     }
-
-    /// Fills `path` without anti-aliasing, snapped to the nearest pixel edges, when it is
-    /// a rectangle aligned with the pixel grid, so thin bars stay solid and separate.
-    /// Returns whether the path was such a rectangle.
-    ///
-    /// See [`pdf_graphics::rect::Rect::snapped_to_pixels`].
-    fn fill_pixel_rect(
-        &mut self,
-        path: &CanvasPath<'_>,
-        paint: &mut skia_safe::Paint,
-    ) -> Result<bool, PdfCanvasError> {
-        let canvas = self.surface.canvas();
-        let to_pixels = from_skia_matrix(&canvas.local_to_device_as_3x3());
-        let Some(rect) = path.axis_aligned_rect(&to_pixels)? else {
-            return Ok(false);
-        };
-        let rect = rect.snapped_to_pixels();
-        // The snapped edges are whole numbers, so rounding only changes the type.
-        let pixels = skia_safe::Rect::new(rect.left, rect.top, rect.right, rect.bottom).round();
-        paint.set_anti_alias(false);
-        canvas.save();
-        canvas.reset_matrix();
-        canvas.draw_irect(pixels, paint);
-        canvas.restore();
-        Ok(true)
-    }
 }
 
 impl CanvasBackend for SkiaCanvasBackend<'_> {
@@ -598,20 +598,23 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         )
     }
 
-    /// Clears the destination under the stroke by drawing it opaque with `DstOut`.
-    fn erase_stroke(
+    /// Replaces the destination under the stroke by drawing it with `Src`, which blends
+    /// with the destination only by coverage at the stroke's edges.
+    fn knockout_stroke(
         &mut self,
         path: &CanvasPath<'_>,
+        color: Color,
         line_width: f32,
         stroke_style: &StrokeStyle,
+        shader: Option<&Shader>,
     ) -> Result<(), PdfCanvasError> {
         self.draw_stroke(
             path,
-            Color::from_rgb(0.0, 0.0, 0.0),
+            color,
             line_width,
             stroke_style,
-            None,
-            Some(skia_safe::BlendMode::DstOut),
+            shader,
+            Some(skia_safe::BlendMode::Src),
         )
     }
 
