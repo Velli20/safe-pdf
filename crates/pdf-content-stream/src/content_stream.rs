@@ -1,5 +1,5 @@
 use crate::operator_stream_parser::OperatorStreamParser;
-use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperatorVariant};
+use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_object_reader::{
     ArrayContext, EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ObjectReader,
     ReadResult, ReadSession, object_kind::ObjectKind, object_variant::ObjectVariant,
@@ -66,7 +66,7 @@ impl FromPdfObject for ContentStream {
             }
             _ => {
                 let context = context.stream()?;
-                parsed.parse(context.stream().raw_data(), false)?;
+                parsed.parse(context.stream().raw_data(), false);
                 context.content_stream_ids().next_id()?
             }
         };
@@ -116,7 +116,7 @@ impl<'reader> ParsedOperators<'reader> {
             let stream = context.at::<StreamObject>(index)?;
             let unparsed = if joined.is_empty() {
                 let more_input_follows = index.saturating_add(1) < elements.len();
-                self.parse(stream.raw_data(), more_input_follows)?
+                self.parse(stream.raw_data(), more_input_follows)
             } else {
                 Some(stream.raw_data())
             };
@@ -125,7 +125,7 @@ impl<'reader> ParsedOperators<'reader> {
                 joined.push(b'\n');
             }
         }
-        self.parse(&joined, false)?;
+        self.parse(&joined, false);
         Ok(())
     }
 
@@ -133,11 +133,7 @@ impl<'reader> ParsedOperators<'reader> {
     ///
     /// When `more_input_follows` is set, returns the input from the first item that later
     /// content may continue, leaving that item unparsed.
-    fn parse<'a>(
-        &mut self,
-        input: &'a [u8],
-        more_input_follows: bool,
-    ) -> Result<Option<&'a [u8]>, PdfOperatorError> {
+    fn parse<'a>(&mut self, input: &'a [u8], more_input_follows: bool) -> Option<&'a [u8]> {
         let mut parser = OperatorStreamParser::new(
             input,
             more_input_follows,
@@ -145,10 +141,10 @@ impl<'reader> ParsedOperators<'reader> {
             &mut self.session,
             &mut self.operators,
         );
-        while parser.parse_next_item()? {}
+        while parser.parse_next_item() {}
         let unfinished = parser.unfinished();
         self.operands = parser.into_operands();
-        Ok(unfinished)
+        unfinished
     }
 }
 
