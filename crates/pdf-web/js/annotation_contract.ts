@@ -1867,7 +1867,8 @@ transform: string,
  */
 color: string,
 /**
- * Interior color, or `transparent`.
+ * Interior color, or `transparent` for none and for kinds whose interior the page
+ * canvas or `shapes` paints.
  */
 background: string,
 /**
