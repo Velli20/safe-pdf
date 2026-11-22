@@ -282,9 +282,11 @@ pub trait FontFace: Send + Sync {
     fn glyph_for_name(&self, name: &GlyphName) -> Option<GlyphId>;
 
     /// Resolves a one-byte simple-font character code through the face's code-keyed cmap
-    /// subtables, as symbolic TrueType fonts require.
+    /// subtables, as symbolic TrueType fonts require, or through a Type 1 or CFF program's
+    /// built-in encoding.
     ///
-    /// Faces without such subtables return `None`.
+    /// Faces without such a mapping return `None`. A built-in encoding is authoritative, so a
+    /// code it leaves unassigned resolves to `.notdef`.
     fn glyph_for_code(&self, _code: u8) -> Option<GlyphId> {
         None
     }

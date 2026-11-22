@@ -80,16 +80,18 @@ impl<'a> CffProgramRef<'a> {
 
     /// Maps a one-byte character code through the program's built-in encoding.
     ///
-    /// A CID-keyed program has no encoding, and codes the encoding leaves at `.notdef` return
-    /// `None`.
+    /// A CID-keyed program has no encoding and returns `None`. A code the encoding leaves
+    /// unassigned resolves to `.notdef`, since the built-in encoding is authoritative.
     fn glyph_for_code(&self, code: u8) -> Option<read_fonts::types::GlyphId> {
         if self.font.is_cid() {
             return None;
         }
-        self.font
-            .encoding()?
-            .map(code)
-            .filter(|glyph| *glyph != read_fonts::types::GlyphId::NOTDEF)
+        Some(
+            self.font
+                .encoding()?
+                .map(code)
+                .unwrap_or(read_fonts::types::GlyphId::NOTDEF),
+        )
     }
 
     /// Computes face-wide design metrics from the font matrix and bounding box.
@@ -306,7 +308,7 @@ impl FontFace for CffFontFace {
 
     /// Resolves a one-byte character code through the program's built-in encoding.
     ///
-    /// Codes the encoding leaves at `.notdef` return `None` so callers can try Unicode.
+    /// A code the encoding leaves unassigned resolves to `.notdef`, not to a Unicode guess.
     fn glyph_for_code(&self, code: u8) -> Option<GlyphId> {
         self.program
             .borrow_dependent()
