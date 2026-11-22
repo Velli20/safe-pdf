@@ -494,6 +494,15 @@ impl Transform {
         x.max(y)
     }
 
+    /// Returns the mean of the two axis scales.
+    pub fn mean_scale(&self) -> f32 {
+        let Size {
+            width: x,
+            height: y,
+        } = self.axis_scales();
+        (x + y) / 2.0
+    }
+
     /// Returns the square root of the absolute determinant: the factor by which the
     /// linear part scales lengths on average, and exactly when it is a similarity.
     pub fn area_scale(&self) -> f32 {

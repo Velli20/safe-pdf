@@ -431,7 +431,7 @@ impl<'a> PreparedPath<'a> {
     /// Saves the context and sets up the stroke geometry's transform, width, caps, joins
     /// and dashes. The returned guard restores the context.
     fn begin_stroke(&self, width: f32, style: &StrokeStyle) -> WebResult<SavedContext<'a>> {
-        let pixel = style.pixel_width(self.viewport.device_to_backing(), self.transform.is_some());
+        let pixel = style.pixel_width(self.viewport.device_to_backing());
         let stroke = PreparedStroke::new(width, style, pixel)?;
         let saved = SavedContext::new(self.context);
         if let Some(t) = &self.transform {

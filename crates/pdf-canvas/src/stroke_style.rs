@@ -69,7 +69,7 @@ impl StrokeStyle {
 
     /// Returns `path` mapped into stroke space when stroking its device geometry would
     /// distort the pen, or `None` when [`StrokeStyle::transform`] preserves angles or
-    /// `line_width` resolves to a device hairline.
+    /// `line_width` is nonpositive, which a backend draws as a device hairline.
     ///
     /// A backend strokes the returned geometry with the line width and dash lengths, under
     /// [`StrokeStyle::transform`], so that the outline matches a stroke in user space.
@@ -85,34 +85,30 @@ impl StrokeStyle {
         path.remapped(&inverse).map(Some)
     }
 
-    /// Returns the width of one device pixel in the space a backend strokes in: stroke
-    /// space under [`StrokeStyle::transform`] when it strokes the geometry of
-    /// [`StrokeStyle::stroke_space_path`] (`stroke_space`), else the canvas space that
-    /// `to_pixels` maps to device pixels.
+    /// Returns the width of one device pixel in stroke space, where `to_pixels` maps
+    /// logical device space to device pixels.
     ///
     /// Like PDFium, the pixel is measured by the mean of the two axis scales, so a pen
-    /// squeezed along one axis but wide along the other is not widened.
-    pub fn pixel_width(&self, to_pixels: &Transform, stroke_space: bool) -> f32 {
-        let to_pixels = if stroke_space {
-            to_pixels.post_concatenated(&self.transform)
-        } else {
-            *to_pixels
-        };
-        let scales = to_pixels.axis_scales();
-        ((scales.width + scales.height) / 2.0).recip()
+    /// squeezed along one axis but wide along the other is not widened. When
+    /// [`StrokeStyle::transform`] is a rotation or reflection, this is also the pixel in
+    /// logical device space.
+    pub fn pixel_width(&self, to_pixels: &Transform) -> f32 {
+        to_pixels
+            .post_concatenated(&self.transform)
+            .mean_scale()
+            .recip()
     }
 }
 
 /// Resolves a device-space stroke width for a backend.
 ///
-/// `hairline` is the width of one device pixel. Like PDFium, no stroke is drawn thinner
-/// than that, so lines thinner than a pixel stay solid rather than fading out. PDF
-/// renders nonpositive widths as the thinnest line the device can draw, and reflected
-/// CTMs can yield negative widths; both also resolve to `hairline`. Nonfinite widths
-/// yield `None`.
-pub fn device_stroke_width(width: f32, hairline: f32) -> Option<f32> {
+/// No stroke is drawn thinner than `min_width`, which lets a backend keep lines thinner
+/// than a pixel solid rather than fading out. PDF renders nonpositive widths as the
+/// thinnest line the device can draw, and reflected CTMs can yield negative widths; both
+/// also resolve to `min_width`. Nonfinite widths yield `None`.
+pub fn device_stroke_width(width: f32, min_width: f32) -> Option<f32> {
     if !width.is_finite() {
         return None;
     }
-    Some(width.max(hairline))
+    Some(width.max(min_width))
 }
