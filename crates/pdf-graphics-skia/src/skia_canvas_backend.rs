@@ -475,43 +475,17 @@ impl SkiaCanvasBackend<'_> {
         canvas.restore();
         Ok(true)
     }
-}
 
-impl CanvasBackend for SkiaCanvasBackend<'_> {
-    /// Fills the supplied device-space path using the requested paint and fill rule.
-    fn fill_path(
-        &mut self,
-        path: &CanvasPath<'_>,
-        fill_type: PathFillType,
-        color: Color,
-        shader: Option<&Shader>,
-        blend_mode: Option<BlendMode>,
-    ) -> Result<(), PdfCanvasError> {
-        let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
-        if shader.is_none() && self.fill_pixel_rect(path, &mut paint)? {
-            return Ok(());
-        }
-        let mut sk_path = to_skia_path(path, true)?;
-        sk_path.set_fill_type(to_skia_fill_type(fill_type));
-        if let Some(shader_spec) = shader {
-            let mapping = from_skia_matrix(&self.surface.canvas().local_to_device_as_3x3());
-            paint.set_shader(to_skia_shader(shader_spec, &mapping)?);
-        }
-
-        self.surface.canvas().draw_path(&sk_path, &paint);
-        Ok(())
-    }
-
-    /// Strokes device-space geometry using the supplied width and stroke style, in the
-    /// style's stroke space when the CTM scales unevenly or shears.
-    fn stroke_path(
+    /// Strokes device-space geometry with `blend_mode` as Skia's compositing operation, in
+    /// the style's stroke space when the CTM scales unevenly or shears.
+    fn draw_stroke(
         &mut self,
         path: &CanvasPath<'_>,
         color: Color,
         line_width: f32,
         stroke_style: &StrokeStyle,
         shader: Option<&Shader>,
-        blend_mode: Option<BlendMode>,
+        blend_mode: Option<skia_safe::BlendMode>,
     ) -> Result<(), PdfCanvasError> {
         let stroke_space = stroke_style.stroke_space_path(path, line_width)?;
         // A single-point subpath has no direction, so only a round cap can mark it.
@@ -524,8 +498,11 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             color,
             skia_safe::paint::Style::Stroke,
             Some(line_width),
-            blend_mode,
+            None,
         );
+        if let Some(mode) = blend_mode {
+            paint.set_blend_mode(mode);
+        }
         paint.set_stroke_cap(match stroke_style.line_cap {
             pdf_graphics::LineCap::Butt => skia_safe::paint::Cap::Butt,
             pdf_graphics::LineCap::Round => skia_safe::paint::Cap::Round,
@@ -572,6 +549,73 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             canvas.restore();
         }
         Ok(())
+    }
+}
+
+impl CanvasBackend for SkiaCanvasBackend<'_> {
+    /// Fills the supplied device-space path using the requested paint and fill rule.
+    fn fill_path(
+        &mut self,
+        path: &CanvasPath<'_>,
+        fill_type: PathFillType,
+        color: Color,
+        shader: Option<&Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
+        if shader.is_none() && self.fill_pixel_rect(path, &mut paint)? {
+            return Ok(());
+        }
+        let mut sk_path = to_skia_path(path, true)?;
+        sk_path.set_fill_type(to_skia_fill_type(fill_type));
+        if let Some(shader_spec) = shader {
+            let mapping = from_skia_matrix(&self.surface.canvas().local_to_device_as_3x3());
+            paint.set_shader(to_skia_shader(shader_spec, &mapping)?);
+        }
+
+        self.surface.canvas().draw_path(&sk_path, &paint);
+        Ok(())
+    }
+
+    /// Strokes device-space geometry using the supplied width and stroke style, in the
+    /// style's stroke space when the CTM scales unevenly or shears.
+    fn stroke_path(
+        &mut self,
+        path: &CanvasPath<'_>,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: Option<&Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        self.draw_stroke(
+            path,
+            color,
+            line_width,
+            stroke_style,
+            shader,
+            blend_mode.map(to_skia_blend_mode),
+        )
+    }
+
+    /// Replaces the destination under the stroke by drawing it with `Src`, which blends
+    /// with the destination only by coverage at the stroke's edges.
+    fn knockout_stroke(
+        &mut self,
+        path: &CanvasPath<'_>,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: Option<&Shader>,
+    ) -> Result<(), PdfCanvasError> {
+        self.draw_stroke(
+            path,
+            color,
+            line_width,
+            stroke_style,
+            shader,
+            Some(skia_safe::BlendMode::Src),
+        )
     }
 
     /// Returns the logical canvas width used by PDF painting.

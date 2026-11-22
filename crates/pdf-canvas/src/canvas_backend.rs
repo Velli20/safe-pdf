@@ -62,6 +62,34 @@ pub trait CanvasBackend {
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError>;
 
+    /// Strokes `path`, replacing the destination under the stroke instead of compositing
+    /// over it.
+    ///
+    /// Painting a fill and a translucent stroke as one object strokes this way inside a
+    /// group layer, so the stroke knocks out the fill and composites with the backdrop alone.
+    /// At the stroke's anti-aliased edges, the stroke and the destination mix by coverage.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: The path to stroke. Its verbs resolve to logical device coordinates.
+    /// - `color`: The stroke color, used directly or as the shader's alpha.
+    /// - `line_width`: The width of the stroke in device units.
+    /// - `stroke_style`: Stroke metadata such as dash pattern.
+    /// - `shader`: Optional shader to use for the stroke paint.
+    ///
+    /// The default implementation strokes with normal compositing, for backends without
+    /// group layers, where replacing would remove the backdrop as well.
+    fn knockout_stroke(
+        &mut self,
+        path: &CanvasPath<'_>,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: Option<&Shader>,
+    ) -> Result<(), PdfCanvasError> {
+        self.stroke_path(path, color, line_width, stroke_style, shader, None)
+    }
+
     /// Sets the clipping region by intersecting the current clip path with the given path.
     ///
     /// All subsequent drawing operations will be constrained to this new region.

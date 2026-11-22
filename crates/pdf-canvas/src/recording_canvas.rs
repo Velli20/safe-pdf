@@ -42,6 +42,19 @@ enum RecordingCommand {
         /// Optional compositing operation.
         blend_mode: Option<BlendMode>,
     },
+    /// Stroke device-space path geometry, replacing the destination under the stroke.
+    KnockoutStroke {
+        /// Geometry to paint, retaining shared sources and deferred mappings.
+        path: CanvasPath<'static>,
+        /// Solid paint color, including opacity.
+        color: Color,
+        /// Stroke width in device units.
+        line_width: f32,
+        /// Caps, joins, and dash metadata.
+        stroke_style: StrokeStyle,
+        /// Optional shading or tiling paint.
+        shader: Option<Shader>,
+    },
     /// Intersect the current clipping region.
     SetClipRegion {
         /// Geometry to paint or clip, retaining shared sources and deferred mappings.
@@ -255,6 +268,19 @@ fn replay_commands<B: CanvasBackend>(
                         *blend_mode,
                     )?;
                 }
+                KnockoutStroke {
+                    path,
+                    color,
+                    line_width,
+                    stroke_style,
+                    shader,
+                } => backend.knockout_stroke(
+                    path,
+                    *color,
+                    *line_width,
+                    stroke_style,
+                    shader.as_ref(),
+                )?,
                 SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
                 Save => {
                     backend.save()?;
@@ -361,6 +387,28 @@ impl CanvasBackend for RecordingCanvas {
             stroke_style: stroke_style.clone(),
             shader: shader.cloned(),
             blend_mode,
+        });
+        Ok(())
+    }
+
+    /// Records stroking device-space geometry that replaces the destination under it.
+    fn knockout_stroke(
+        &mut self,
+        path: &CanvasPath<'_>,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: Option<&Shader>,
+    ) -> Result<(), PdfCanvasError> {
+        if let Some(Shader::TilingPatternImage(pattern)) = shader {
+            self.nest(pattern.recording(), pattern.replay_cost());
+        }
+        self.commands.push(RecordingCommand::KnockoutStroke {
+            path: path.clone().into_owned(),
+            color,
+            line_width,
+            stroke_style: stroke_style.clone(),
+            shader: shader.cloned(),
         });
         Ok(())
     }

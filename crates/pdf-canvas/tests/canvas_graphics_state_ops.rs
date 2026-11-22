@@ -261,3 +261,20 @@ fn isolated_transparency_group_paints_its_blend_modes_in_its_own_layer() {
     assert_eq!(observer.group_layers, vec![(1.0, None)]);
     assert_eq!(observer.fill_colors.len(), 1);
 }
+
+#[test]
+fn fill_and_stroke_with_translucent_stroke_knocks_out_the_fill() {
+    // `B` paints like a knockout group: the 75% stroke replaces the fill beneath it.
+    let resources = graphics_state_resource(vec![ExternalGraphicsStateKey::StrokingAlpha(
+        AlphaConstant::new(0.75),
+    )]);
+    let stream = content_stream(1, b"/GS0 gs 0 0 5 5 re B");
+
+    let recording = render(&stream, &Arc::new(resources)).expect("path should render");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.group_layers, vec![(1.0, None)]);
+    assert_eq!(observer.knockout_strokes, 1);
+    assert_eq!(observer.fill_colors.len(), 1);
+    assert!(observer.stroke_styles.is_empty());
+}

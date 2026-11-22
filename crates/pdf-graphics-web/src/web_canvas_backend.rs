@@ -239,19 +239,22 @@ impl CanvasBackend for WebCanvasBackend {
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        match style.stroke_space_path(path, width)? {
-            Some(stroke_space) => PreparedPath::new(
-                self,
-                &stroke_space,
-                color,
-                shader,
-                mode,
-                Some(style.transform),
-            )?,
-            None => PreparedPath::new(self, path, color, shader, mode, None)?,
-        }
-        .stroke(width, style)
-        .map_err(Into::into)
+        self.prepared_stroke(path, color, width, style, shader, mode)?
+            .stroke(width, style)
+            .map_err(Into::into)
+    }
+
+    fn knockout_stroke(
+        &mut self,
+        path: &CanvasPath<'_>,
+        color: Color,
+        width: f32,
+        style: &StrokeStyle,
+        shader: Option<&Shader>,
+    ) -> Result<(), PdfCanvasError> {
+        self.prepared_stroke(path, color, width, style, shader, None)?
+            .knockout_stroke(width, style)
+            .map_err(Into::into)
     }
 
     fn set_clip_region(
@@ -311,6 +314,32 @@ impl CanvasBackend for WebCanvasBackend {
         F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
     {
         IsolatedGroup::new(self)?.paint(alpha, blend_mode.as_ref(), paint)
+    }
+}
+
+impl WebCanvasBackend {
+    /// Prepares `path` for stroking, in the style's stroke space when the CTM scales
+    /// unevenly or shears.
+    fn prepared_stroke(
+        &self,
+        path: &CanvasPath<'_>,
+        color: Color,
+        width: f32,
+        style: &StrokeStyle,
+        shader: Option<&Shader>,
+        mode: Option<BlendMode>,
+    ) -> Result<PreparedPath<'_>, PdfCanvasError> {
+        Ok(match style.stroke_space_path(path, width)? {
+            Some(stroke_space) => PreparedPath::new(
+                self,
+                &stroke_space,
+                color,
+                shader,
+                mode,
+                Some(style.transform),
+            )?,
+            None => PreparedPath::new(self, path, color, shader, mode, None)?,
+        })
     }
 }
 
@@ -377,8 +406,33 @@ impl<'a> PreparedPath<'a> {
     }
 
     fn stroke(self, width: f32, style: &StrokeStyle) -> WebResult<()> {
+        let _saved = self.begin_stroke(width, style)?;
+        self.paint.apply(self.context)?;
+        self.context.stroke_with_path(&self.geometry);
+        Ok(())
+    }
+
+    /// Strokes the geometry, replacing the destination under the stroke: the coverage is
+    /// erased with an opaque stroke, then the paint is added into the cleared coverage, so
+    /// the anti-aliased edges mix the stroke and the destination by coverage.
+    fn knockout_stroke(self, width: f32, style: &StrokeStyle) -> WebResult<()> {
+        let _saved = self.begin_stroke(width, style)?;
+        self.context
+            .set_global_composite_operation("destination-out")?;
+        self.context.set_global_alpha(1.0);
+        self.context.set_stroke_style_str("#000");
+        self.context.stroke_with_path(&self.geometry);
+        self.paint.apply(self.context)?;
+        self.context.set_global_composite_operation("lighter")?;
+        self.context.stroke_with_path(&self.geometry);
+        Ok(())
+    }
+
+    /// Saves the context and sets up the stroke geometry's transform, width, caps, joins
+    /// and dashes. The returned guard restores the context.
+    fn begin_stroke(&self, width: f32, style: &StrokeStyle) -> WebResult<SavedContext<'a>> {
         let stroke = PreparedStroke::new(width, style, self.viewport)?;
-        let _saved = SavedContext::new(self.context);
+        let saved = SavedContext::new(self.context);
         if let Some(t) = &self.transform {
             t.validate()?;
             self.context.transform(
@@ -390,10 +444,8 @@ impl<'a> PreparedPath<'a> {
                 f64::from(t.ty),
             )?;
         }
-        self.paint.apply(self.context)?;
         stroke.apply(self.context)?;
-        self.context.stroke_with_path(&self.geometry);
-        Ok(())
+        Ok(saved)
     }
 }
 
