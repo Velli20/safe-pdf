@@ -6,9 +6,16 @@ use pdf_object_reader::{
 };
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
-use pdf_tokenizer::error::TokenizerError;
 
 use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperatorVariant};
+
+/// How parsing one item left the stream.
+enum ItemProgress {
+    /// The item was parsed, or dropped as malformed; parsing continues after it.
+    Complete,
+    /// Later content may change how the item parses, so it starts the unfinished input.
+    Unfinished,
+}
 
 /// Incrementally parses one stream of a content stream into PDF operators.
 ///
@@ -64,13 +71,13 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
 
     /// Parses the next operand or operator from the stream.
     ///
-    /// Returns `Ok(false)` when the stream is exhausted and `Ok(true)` after
-    /// successfully consuming one item.
-    pub(super) fn parse_next_item(&mut self) -> Result<bool, PdfOperatorError> {
+    /// Returns `false` when the stream is exhausted or stops at an unfinished item, and
+    /// `true` after consuming one item. Malformed items are dropped.
+    pub(super) fn parse_next_item(&mut self) -> bool {
         self.skip_trivia();
 
         let Some(next_byte) = self.peek_next_byte() else {
-            return Ok(false);
+            return false;
         };
 
         let start_position = self.parser.position();
@@ -78,32 +85,33 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
             self.parse_operator_from_stream()
         } else {
             self.parse_operand(next_byte)
+                .map(|()| ItemProgress::Complete)
         };
 
-        match result {
-            Ok(()) => Ok(true),
-            Err(error) if self.item_may_continue(&error) => {
-                self.unfinished = self.input.get(start_position..);
-                Ok(false)
-            }
-            Err(error) if is_truncated_operand_error(&error) => {
-                self.operands.clear();
-                Ok(false)
-            }
+        let progress = match result {
+            Ok(progress) => progress,
+            Err(_) if self.item_may_continue() => ItemProgress::Unfinished,
             Err(_) => {
                 self.recover_after_malformed_item(start_position);
-                Ok(true)
+                ItemProgress::Complete
+            }
+        };
+
+        match progress {
+            ItemProgress::Complete => true,
+            ItemProgress::Unfinished => {
+                self.unfinished = self.input.get(start_position..);
+                false
             }
         }
     }
 
     /// Returns whether a failed item could parse differently with the content after it.
     ///
-    /// Not every failure at the end of the input is a truncation error: where recovery
-    /// resumes after an unterminated string depends on what follows it.
-    fn item_may_continue(&self, error: &PdfOperatorError) -> bool {
-        self.more_input_follows
-            && (is_truncated_operand_error(error) || self.peek_next_byte().is_none())
+    /// Only an item that ran into the end of the input can: whether it was truncated, or
+    /// where recovery resumes after an unterminated string, depends on what follows it.
+    fn item_may_continue(&self) -> bool {
+        self.more_input_follows && self.peek_next_byte().is_none()
     }
 
     /// Skips inter-token whitespace and comments before reading the next item.
@@ -131,13 +139,13 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
     ///
     /// An inline image (`BI`) is parsed from the stream bytes that follow it.
     /// An unknown operator, or one whose operands do not decode, is dropped.
-    fn parse_operator_from_stream(&mut self) -> Result<(), PdfOperatorError> {
+    fn parse_operator_from_stream(&mut self) -> Result<ItemProgress, PdfOperatorError> {
         let name = self.parser.read_operator_name()?;
         let operator = if name == b"BI" {
             // A later stream can hold a better end for the data than any found in this
             // one, so an image can be read only once the rest of the content is known.
             if self.more_input_follows {
-                return Err(ParserError::UnexpectedEndOfFile.into());
+                return Ok(ItemProgress::Unfinished);
             }
             Some(PdfOperatorVariant::InlineImage(Arc::new(
                 self.parse_inline_image()?,
@@ -152,7 +160,7 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
             self.out.push(operator);
         }
         self.operands.clear();
-        Ok(())
+        Ok(ItemProgress::Complete)
     }
 
     /// Parses an inline image after its `BI` operator, through `EI`.
@@ -183,32 +191,6 @@ fn next_item_is_operator(byte: u8) -> bool {
     PdfParser::is_pdf_regular_character(byte) && !matches!(byte, b'+' | b'-' | b'.' | b'0'..=b'9')
 }
 
-/// Returns whether an operand parse error means the content stream ended
-/// before the operand object was fully available.
-fn is_truncated_operand_error(error: &PdfOperatorError) -> bool {
-    match error {
-        PdfOperatorError::ParserError(parser_error) => match parser_error {
-            ParserError::UnexpectedEndOfFile => true,
-            ParserError::TokenizerError(tokenizer_error) => {
-                matches!(
-                    tokenizer_error,
-                    TokenizerError::UnexpectedEndOfFile(_, _)
-                        | TokenizerError::UnexpectedToken(None, _)
-                )
-            }
-            _ => false,
-        },
-        PdfOperatorError::TokenizerError(tokenizer_error) => {
-            matches!(
-                tokenizer_error,
-                TokenizerError::UnexpectedEndOfFile(_, _)
-                    | TokenizerError::UnexpectedToken(None, _)
-            )
-        }
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -231,26 +213,6 @@ mod tests {
                 "byte {byte:?} should be an operator"
             );
         }
-    }
-
-    #[test]
-    fn truncated_operand_errors_are_detected() {
-        for error in [
-            PdfOperatorError::ParserError(ParserError::UnexpectedEndOfFile),
-            PdfOperatorError::ParserError(ParserError::TokenizerError(
-                TokenizerError::UnexpectedToken(None, pdf_tokenizer::PdfToken::RightSquareBracket),
-            )),
-            PdfOperatorError::TokenizerError(TokenizerError::UnexpectedEndOfFile(1, 0)),
-        ] {
-            assert!(is_truncated_operand_error(&error));
-        }
-
-        assert!(!is_truncated_operand_error(&PdfOperatorError::ParserError(
-            ParserError::UnexpectedTokenAt {
-                token: "]".to_string(),
-                position: 0,
-            },
-        )));
     }
 
     #[test]
@@ -303,20 +265,12 @@ mod tests {
         );
         parser.operands.push(ObjectVariant::Integer(1));
 
-        assert!(
-            parser
-                .parse_next_item()
-                .expect("unknown operators should be skipped")
-        );
+        assert!(parser.parse_next_item());
 
         assert!(parser.operands.is_empty());
         assert!(parser.out.is_empty());
 
-        assert!(
-            parser
-                .parse_next_item()
-                .expect("parser should continue after unknown operator")
-        );
+        assert!(parser.parse_next_item());
         assert!(matches!(
             parser.out.first(),
             Some(PdfOperatorVariant::SaveGraphicsState)
@@ -336,11 +290,7 @@ mod tests {
             &mut out,
         );
 
-        assert!(
-            parser
-                .parse_next_item()
-                .expect("inline image should parse through hook")
-        );
+        assert!(parser.parse_next_item());
         assert_eq!(parser.out.len(), 1);
         let cloned = parser
             .out
@@ -358,11 +308,7 @@ mod tests {
             other => panic!("expected inline image, got {other:?}"),
         }
 
-        assert!(
-            parser
-                .parse_next_item()
-                .expect("should parse the next operator")
-        );
+        assert!(parser.parse_next_item());
         assert!(matches!(
             parser.out.get(1),
             Some(PdfOperatorVariant::RestoreGraphicsState)
@@ -382,10 +328,7 @@ mod tests {
             &mut out,
         );
 
-        while parser
-            .parse_next_item()
-            .expect("stream items before truncation should parse")
-        {}
+        while parser.parse_next_item() {}
 
         assert!(parser.operands.is_empty());
         assert_eq!(parser.out.len(), 2);
@@ -407,10 +350,7 @@ mod tests {
         let mut parser =
             OperatorStreamParser::new(b") q", false, Vec::with_capacity(6), &mut session, &mut out);
 
-        while parser
-            .parse_next_item()
-            .expect("invalid delimiter should be skipped")
-        {}
+        while parser.parse_next_item() {}
 
         assert!(parser.operands.is_empty());
         assert_eq!(parser.out.len(), 1);
@@ -433,10 +373,7 @@ mod tests {
             &mut out,
         );
 
-        while parser
-            .parse_next_item()
-            .expect("corrupt operand should be skipped")
-        {}
+        while parser.parse_next_item() {}
 
         assert!(parser.operands.is_empty());
         assert_eq!(parser.out.len(), 1);
@@ -459,10 +396,7 @@ mod tests {
             &mut out,
         );
 
-        while parser
-            .parse_next_item()
-            .expect("invalid top-level reference should be skipped")
-        {}
+        while parser.parse_next_item() {}
 
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
@@ -484,10 +418,7 @@ mod tests {
             &mut out,
         );
 
-        while parser
-            .parse_next_item()
-            .expect("nested reference should parse in a dictionary")
-        {}
+        while parser.parse_next_item() {}
 
         assert_eq!(parser.out.len(), 2);
         assert!(matches!(
@@ -514,10 +445,7 @@ mod tests {
         );
         let original_capacity = parser.operands.capacity();
 
-        while parser
-            .parse_next_item()
-            .expect("invalid operator operand should be skipped")
-        {}
+        while parser.parse_next_item() {}
 
         assert!(parser.operands.is_empty());
         assert_eq!(parser.operands.capacity(), original_capacity);
@@ -541,10 +469,7 @@ mod tests {
             &mut out,
         );
 
-        while parser
-            .parse_next_item()
-            .expect("malformed inline image should be skipped")
-        {}
+        while parser.parse_next_item() {}
 
         assert!(parser.operands.is_empty());
         assert_eq!(parser.out.len(), 1);
@@ -567,10 +492,7 @@ mod tests {
             &mut out,
         );
 
-        while parser
-            .parse_next_item()
-            .expect("brace delimiters should be skipped")
-        {}
+        while parser.parse_next_item() {}
 
         assert!(parser.operands.is_empty());
         assert_eq!(parser.out.len(), 1);
@@ -593,10 +515,7 @@ mod tests {
             &mut out,
         );
 
-        while parser
-            .parse_next_item()
-            .expect("inline image and trailing operator should parse")
-        {}
+        while parser.parse_next_item() {}
 
         assert!(parser.operands.is_empty());
         assert_eq!(parser.out.len(), 2);
