@@ -81,7 +81,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         _shader: Option<&Shader>,
         _blend_mode: Option<pdf_graphics::BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        let stroke_space = stroke_style.stroke_space_path(path, line_width)?;
+        let stroke_space = stroke_style.stroke_space_path(path)?;
         let path = to_femtovg_path(stroke_space.as_ref().unwrap_or(path))?;
 
         let mut stroke_paint = Paint::color(Color::rgbf(color.r, color.g, color.b));

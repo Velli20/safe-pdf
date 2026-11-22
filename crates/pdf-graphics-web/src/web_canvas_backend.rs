@@ -239,7 +239,7 @@ impl CanvasBackend for WebCanvasBackend {
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        self.prepared_stroke(path, color, width, style, shader, mode)?
+        self.prepared_stroke(path, color, style, shader, mode)?
             .stroke(width, style)
             .map_err(Into::into)
     }
@@ -252,7 +252,7 @@ impl CanvasBackend for WebCanvasBackend {
         style: &StrokeStyle,
         shader: Option<&Shader>,
     ) -> Result<(), PdfCanvasError> {
-        self.prepared_stroke(path, color, width, style, shader, None)?
+        self.prepared_stroke(path, color, style, shader, None)?
             .knockout_stroke(width, style)
             .map_err(Into::into)
     }
@@ -324,12 +324,11 @@ impl WebCanvasBackend {
         &self,
         path: &CanvasPath<'_>,
         color: Color,
-        width: f32,
         style: &StrokeStyle,
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
     ) -> Result<PreparedPath<'_>, PdfCanvasError> {
-        Ok(match style.stroke_space_path(path, width)? {
+        Ok(match style.stroke_space_path(path)? {
             Some(stroke_space) => PreparedPath::new(
                 self,
                 &stroke_space,
