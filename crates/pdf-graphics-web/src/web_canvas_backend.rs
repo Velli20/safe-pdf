@@ -239,7 +239,7 @@ impl CanvasBackend for WebCanvasBackend {
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        self.prepared_stroke(path, color, width, style, shader, mode)?
+        self.prepared_stroke(path, color, style, shader, mode)?
             .stroke(width, style)
             .map_err(Into::into)
     }
@@ -252,7 +252,7 @@ impl CanvasBackend for WebCanvasBackend {
         style: &StrokeStyle,
         shader: Option<&Shader>,
     ) -> Result<(), PdfCanvasError> {
-        self.prepared_stroke(path, color, width, style, shader, None)?
+        self.prepared_stroke(path, color, style, shader, None)?
             .knockout_stroke(width, style)
             .map_err(Into::into)
     }
@@ -324,12 +324,11 @@ impl WebCanvasBackend {
         &self,
         path: &CanvasPath<'_>,
         color: Color,
-        width: f32,
         style: &StrokeStyle,
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
     ) -> Result<PreparedPath<'_>, PdfCanvasError> {
-        Ok(match style.stroke_space_path(path, width)? {
+        Ok(match style.stroke_space_path(path)? {
             Some(stroke_space) => PreparedPath::new(
                 self,
                 &stroke_space,
@@ -431,7 +430,8 @@ impl<'a> PreparedPath<'a> {
     /// Saves the context and sets up the stroke geometry's transform, width, caps, joins
     /// and dashes. The returned guard restores the context.
     fn begin_stroke(&self, width: f32, style: &StrokeStyle) -> WebResult<SavedContext<'a>> {
-        let stroke = PreparedStroke::new(width, style, self.viewport)?;
+        let pixel = style.pixel_width(self.viewport.device_to_backing());
+        let stroke = PreparedStroke::new(width, style, pixel)?;
         let saved = SavedContext::new(self.context);
         if let Some(t) = &self.transform {
             t.validate()?;
@@ -527,9 +527,10 @@ struct PreparedStroke<'a> {
 }
 
 impl<'a> PreparedStroke<'a> {
-    fn new(width: f32, style: &'a StrokeStyle, viewport: &CanvasViewport) -> WebResult<Self> {
-        let width = device_stroke_width(width, viewport.hairline_width())
-            .ok_or(Error::InvalidInput("stroke width"))?;
+    /// `pixel` is one device pixel in the space the stroke is drawn in; the stroke is no
+    /// thinner, since a canvas has no hairline.
+    fn new(width: f32, style: &'a StrokeStyle, pixel: f32) -> WebResult<Self> {
+        let width = device_stroke_width(width, pixel).ok_or(Error::InvalidInput("stroke width"))?;
         let (dash, phase) = match &style.dash_pattern {
             Some(pattern) => (
                 pattern

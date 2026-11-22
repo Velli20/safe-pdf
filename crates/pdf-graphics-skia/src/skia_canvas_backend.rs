@@ -487,13 +487,22 @@ impl SkiaCanvasBackend<'_> {
         shader: Option<&Shader>,
         blend_mode: Option<skia_safe::BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        let stroke_space = stroke_style.stroke_space_path(path, line_width)?;
+        let to_pixels = from_skia_matrix(&self.surface.canvas().local_to_device_as_3x3());
+        // Skia draws a zero-width stroke as a solid one-pixel hairline, but fades an
+        // anti-aliased stroke thinner than a pixel. No stroke is drawn fainter than a pixel:
+        // anything thinner becomes the hairline, which stays one device pixel wide under the
+        // stroke transform, so its dashes are still measured in stroke space.
+        let line_width = device_stroke_width(line_width, 0.0)
+            .ok_or(SkiaCanvasBackendError::InvalidStrokeWidth)?;
+        let line_width = if line_width < stroke_style.pixel_width(&to_pixels) {
+            0.0
+        } else {
+            line_width
+        };
+        let stroke_space = stroke_style.stroke_space_path(path)?;
         // A single-point subpath has no direction, so only a round cap can mark it.
         let point_contours = stroke_style.line_cap == pdf_graphics::LineCap::Round;
         let sk_path = to_skia_path(stroke_space.as_ref().unwrap_or(path), point_contours)?;
-        // Skia draws zero-width strokes as hairlines.
-        let line_width = device_stroke_width(line_width, 0.0)
-            .ok_or(SkiaCanvasBackendError::InvalidStrokeWidth)?;
         let mut paint = make_paint(
             color,
             skia_safe::paint::Style::Stroke,
@@ -524,8 +533,7 @@ impl SkiaCanvasBackend<'_> {
             }
         }
         if let Some(shader_spec) = shader {
-            let mapping = from_skia_matrix(&self.surface.canvas().local_to_device_as_3x3());
-            let shader = to_skia_shader(shader_spec, &mapping)?;
+            let shader = to_skia_shader(shader_spec, &to_pixels)?;
             paint.set_shader(match &stroke_space {
                 // Keep the shader in device space under the stroke transform.
                 Some(_) => shader
