@@ -253,7 +253,7 @@ pub fn resolve_source_style(
     };
     if let Some(border) = border {
         style.border_width = border.resolved_width();
-        style.dash = border.dash_pattern.clone();
+        style.dash = border.resolved_dash();
     } else if annotation.border.is_none() && matches!(annotation.kind, NativeAnnotation::Widget(_))
     {
         // A widget without `/BS` or `/Border` has the default `/Border [0 0 1]`.
