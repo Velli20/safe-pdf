@@ -370,8 +370,9 @@ fn fallback_fit(
 /// leaves it to fallback rather than drawing whatever glyph its CID or glyph ID indexes. Native
 /// faces try their explicit PDF selector first, then use the first Unicode scalar as a recovery
 /// path. Without an explicit selector, a one-byte code is looked up in the face's code-keyed cmap
-/// subtables: before Unicode for a symbolic font, whose codes address those subtables directly,
-/// and after it otherwise.
+/// subtables or built-in encoding: before Unicode for a symbolic font, whose codes address that
+/// mapping directly, and after it otherwise. A built-in encoding answers `.notdef` for codes it
+/// leaves unassigned, so a symbolic font never draws a glyph guessed from the code's Unicode.
 fn select_glyph(
     face: &dyn FontFace,
     decoded: &DecodedGlyph<'_>,
