@@ -17,6 +17,9 @@ pub enum PdfCanvasError {
     /// Invalid portable mask geometry.
     #[error(transparent)]
     Mask(#[from] crate::mask_layer::MaskError),
+    /// Tiling pattern geometry cannot be prepared for replay.
+    #[error(transparent)]
+    TilingPattern(#[from] TilingShaderError),
     /// Recording commands contain an invalid scope boundary.
     #[error(transparent)]
     Recording(#[from] crate::recording_canvas::RecordingError),
@@ -86,12 +89,5 @@ impl From<DashPatternError> for PdfCanvasError {
     /// Converts this error at the canvas boundary while retaining its diagnostic.
     fn from(error: DashPatternError) -> Self {
         Self::InvalidDashPattern(error.to_string())
-    }
-}
-
-impl From<TilingShaderError> for PdfCanvasError {
-    /// Preserves the canvas error category and diagnostics for rejected tiling patterns.
-    fn from(error: TilingShaderError) -> Self {
-        Self::UnsupportedFeature(error.to_string())
     }
 }

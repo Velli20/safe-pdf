@@ -614,12 +614,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         )?;
 
         Ok(
-            match TilingShader::new(Arc::new(recording_canvas), Some(transform), bbox, step) {
+            match TilingShader::new(Arc::new(recording_canvas), transform, bbox, step) {
                 // A cell too costly to replay, such as one built from deeply
                 // nested patterns, paints nothing instead of failing the page.
                 Err(TilingShaderError::ReplayLimitExceeded) => TilingShader::new(
                     Arc::new(RecordingCanvas::new(bbox.width(), bbox.height())),
-                    Some(transform),
+                    transform,
                     bbox,
                     step,
                 )?,
