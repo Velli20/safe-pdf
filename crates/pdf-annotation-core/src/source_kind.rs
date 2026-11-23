@@ -44,7 +44,8 @@ impl AnnotationKind {
     ///
     /// # Errors
     /// Returns `Validation` for an unusable resolved style, `MissingRect` or
-    /// `InvalidRect` for kinds that need a usable rectangle, `InvalidTextString` for
+    /// `InvalidRect` for kinds that need a usable rectangle (including ink without strokes),
+    /// `InvalidTextString` for
     /// undecodable contents, and `InvalidSourceField` for a widget without a binding.
     /// The payload itself is validated when the engine accepts it.
     pub fn from_source(
@@ -77,10 +78,16 @@ impl AnnotationKind {
                 quads: v.quad_points.clone(),
                 style,
             }),
-            NativeAnnotation::Ink(v) => Self::Ink(Ink {
-                strokes: v.ink_list.strokes.clone(),
-                style,
-            }),
+            // Ink without strokes is placed at its source rectangle, so it needs one.
+            NativeAnnotation::Ink(v) => {
+                if v.ink_list.strokes.is_empty() {
+                    source.bounds()?;
+                }
+                Self::Ink(Ink {
+                    strokes: v.ink_list.strokes.clone(),
+                    style,
+                })
+            }
             NativeAnnotation::FreeText(v) => Self::FreeText(Box::new(FreeText {
                 bounds: source.bounds()?,
                 text: source.contents()?,
@@ -157,5 +164,51 @@ impl AnnotationKind {
                 bounds: source.rect.map(|_| source.bounds()).transpose()?,
             })),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        AnnotationOverlay,
+        pdf_data::{InkAnnotation, InkList, NativeAnnotation, SourceAnnotation},
+    };
+    use pdf_graphics::{rect::Rect, size::Size, viewport::PageViewport};
+
+    #[test]
+    fn ink_without_strokes_or_rect_is_not_adopted() {
+        let ink = SourceAnnotation {
+            id: 1,
+            object_number: Some(6),
+            opacity: 1.0,
+            subtype: b"Ink".as_slice().into(),
+            rect: None,
+            contents: None,
+            name: None,
+            flags: None,
+            appearance: None,
+            appearance_state: None,
+            border: None,
+            color: None,
+            struct_parent: None,
+            optional_content: None,
+            kind: NativeAnnotation::Ink(Box::new(InkAnnotation {
+                ink_list: InkList {
+                    strokes: Vec::new(),
+                },
+                border_style: None,
+                interior_color: None,
+            })),
+        };
+        let mut overlay = AnnotationOverlay::new([std::slice::from_ref(&ink)], None, None).unwrap();
+        let page = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 612.0,
+            bottom: 792.0,
+        };
+        let viewport = PageViewport::new(page, 0, Size::new(612.0, 792.0)).unwrap();
+        let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+        assert!(prepared.entries().is_empty());
     }
 }
