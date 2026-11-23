@@ -134,4 +134,14 @@ impl Annotation {
             .and_then(|widget| widget.text_value().ok())
             .is_some_and(|value| value == text.value)
     }
+
+    /// Whether `field`, this widget's bound list box, still holds the source selection,
+    /// which the widget's source appearance shows.
+    pub(crate) fn shows_source_selection(&self, field: &Field) -> bool {
+        matches!(field.definition.content, FieldKind::ListBox(_))
+            && self
+                .source_widget()
+                .and_then(|widget| widget.choice_field().ok())
+                .is_some_and(|source| source == field.definition.content)
+    }
 }
