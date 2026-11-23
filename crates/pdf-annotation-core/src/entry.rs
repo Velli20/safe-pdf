@@ -161,6 +161,10 @@ pub struct AnnotationEntry {
     /// Whether the host draws this entry's source appearance into the entry itself,
     /// rendered on request for the entry's id, in place of a label.
     pub artwork: bool,
+    /// Whether the page canvas paints this entry's source appearance at its source
+    /// rectangle. The host shows the entry's shapes only while dragging it, since the
+    /// canvas keeps the appearance in place until the move commits.
+    pub painted: bool,
     /// Local-unit outlines for markup, ink, and geometric annotations.
     pub shapes: Vec<Shape>,
 }

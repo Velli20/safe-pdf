@@ -1,5 +1,5 @@
-//! Source appearances a host paints in place of a native presentation: widgets and ink
-//! without strokes on the page canvas, stamp, note and free-text artwork into the
+//! Source appearances a host paints in place of a native presentation: widgets, ink
+//! without strokes, and unchanged squares and circles on the page canvas, stamp, note and free-text artwork into the
 //! annotation's own presentation.
 use crate::{
     engine::DocumentView,
@@ -51,7 +51,8 @@ impl PaintedAppearance {
     /// while a text field's value is still its source `/V`. The widget
     /// `presentation` marks pressed draws its down appearance when it has one for that
     /// state, and the text entry it marks editing draws without its value. Ink without
-    /// strokes draws its source `/AS` state.
+    /// strokes, and squares and circles that still show their source shape, draw their
+    /// source `/AS` state.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
@@ -64,7 +65,7 @@ impl PaintedAppearance {
         if !annotation.is_displayed(optional_content) {
             return Ok(None);
         }
-        if annotation.is_drawn_from_appearance() {
+        if annotation.paints_source_appearance() {
             return Ok(annotation
                 .source()
                 .and_then(|source| source.normal_appearance(source.rect?)));
@@ -244,10 +245,10 @@ mod tests {
         commands::{AnnotationCommand, Operation},
         pdf_data::{
             AppearanceDictionary, AppearanceStreams, NativeAnnotation, SourceAnnotation,
-            TextAnnotation,
+            SquareAnnotation, TextAnnotation,
         },
     };
-    use pdf_graphics::{rect::Rect, size::Size, viewport::PageViewport};
+    use pdf_graphics::{point::Point, rect::Rect, size::Size, viewport::PageViewport};
     use pdf_object_reader::{
         Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
         pdf_array::PdfArray, pdf_object::PdfObject, pdf_string::PdfString, string_kind::StringKind,
@@ -380,6 +381,79 @@ mod tests {
         assert_eq!(appearances.len(), 1);
         assert_eq!(Some(painted.rect), source.rect);
         assert_eq!(painted.stream.value(), &ObjectVariant::Stream(appearance));
+    }
+
+    #[test]
+    fn square_paints_its_appearance_on_the_canvas_until_moved() {
+        let rect = Rect {
+            left: 315.0,
+            top: 285.0,
+            right: 559.0,
+            bottom: 405.0,
+        };
+        let square = SourceAnnotation {
+            id: 1,
+            object_number: Some(43),
+            opacity: 1.0,
+            subtype: b"Square".as_slice().into(),
+            rect: Some(rect),
+            contents: None,
+            name: None,
+            flags: None,
+            appearance: Some(AppearanceDictionary {
+                normal: Some(AppearanceStreams::Stream(PdfObject::new(
+                    ObjectVariant::Null,
+                ))),
+                down: None,
+            }),
+            appearance_state: None,
+            border: None,
+            color: None,
+            struct_parent: None,
+            optional_content: None,
+            kind: NativeAnnotation::Square(Box::new(SquareAnnotation {
+                border_style: None,
+                interior_color: None,
+                border_effect: None,
+                difference_rect: None,
+            })),
+        };
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&square)], None, None).unwrap();
+        let page = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 612.0,
+            bottom: 792.0,
+        };
+        let viewport = PageViewport::new(page, 0, Size::new(612.0, 792.0)).unwrap();
+        let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+        let entry = prepared.entries().first().unwrap();
+        assert!(entry.painted && entry.draggable);
+        let id = entry.id;
+        let appearances = overlay
+            .painted_appearances(0, PresentationState::default())
+            .unwrap();
+        assert_eq!(appearances.len(), 1);
+        assert_eq!(appearances.first().unwrap().rect, rect);
+
+        let request = AnnotationCommandRequest {
+            target: None,
+            command: AnnotationCommand {
+                expected_revision: overlay.revision(),
+                operation: Operation::Translate {
+                    id,
+                    delta: Point::new(10.0, 0.0),
+                },
+            },
+        };
+        overlay.accept_event(request, None, None).unwrap();
+        let prepared = overlay.prepare(0, &viewport, 1).unwrap();
+        assert!(!prepared.entries().first().unwrap().painted);
+        let appearances = overlay
+            .painted_appearances(0, PresentationState::default())
+            .unwrap();
+        assert!(appearances.is_empty());
     }
 
     #[test]

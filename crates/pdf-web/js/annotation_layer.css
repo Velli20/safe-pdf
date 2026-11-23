@@ -9,6 +9,9 @@
 .native-control:is(input,textarea,select) { background-image: linear-gradient(var(--native-form-highlight), var(--native-form-highlight)); }
 .native-control:is(input[type=radio],input[type=checkbox]):not(.native-painted) { appearance: auto; }
 .native-control.native-painted { appearance: none; resize: none; }
+/* The canvas paints an unchanged shape annotation from its appearance; its outline only
+   previews a drag until the move commits. */
+.native-canvas-painted:not(.native-dragging) svg { visibility: hidden; }
 /* The canvas paints a list box's options and selection from its appearance; the control only
    takes input over it. */
 select.native-control.native-painted option, select.native-control.native-painted option:checked { color: transparent; background: transparent; }
