@@ -5,7 +5,6 @@ use std::sync::Arc;
 use pdf_graphics::{
     PathFillType,
     pdf_path::PdfPath,
-    rect::Rect,
     transform::{Transform, TransformError},
 };
 use pdf_shading::model::Shading;
@@ -33,7 +32,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             Some(clip) => clip.clone(),
             // If no clip path exists, the entire page is used.
             None => {
-                page = PdfPath::from(&Rect::new(self.canvas.width(), self.canvas.height()));
+                page = PdfPath::from(&self.device_rect());
                 CanvasPath::device(&page)
             }
         };
