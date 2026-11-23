@@ -31,6 +31,7 @@ export class AnnotationDrag {
     if (!drag.active && Math.hypot(dx, dy) < DRAG_THRESHOLD_CSS_PX) return;
     drag.active = true;
     drag.delta = [dx, dy];
+    drag.component.container.classList.add('native-dragging');
     drag.component.container.style.transform = `translate(${dx}px, ${dy}px) ${drag.component.baseTransform}`;
     event.preventDefault();
   }
@@ -55,6 +56,7 @@ export class AnnotationDrag {
     this.session = undefined;
     if (!drag) return;
     drag.component.container.style.transform = drag.component.baseTransform;
+    drag.component.container.classList.remove('native-dragging');
     if (drag.component.container.hasPointerCapture(drag.id)) drag.component.container.releasePointerCapture(drag.id);
   }
   remove(component) { if (this.session?.component === component) this.cancel(); }

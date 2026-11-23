@@ -46,6 +46,7 @@ pub(crate) fn project(
     let action = annotation.action();
     let visible = annotation.is_displayed(optional_content);
     let artwork = PaintedAppearance::artwork(annotation, optional_content).is_some();
+    let painted = annotation.paints_source_appearance();
     Ok(AnnotationEntry {
         id: annotation.id,
         page: annotation.page.0,
@@ -57,8 +58,7 @@ pub(crate) fn project(
         subtype: annotation.content.subtype_name().into_owned(),
         // Source artwork or an appearance painted on the page canvas shows the annotation
         // as authored, so no placeholder is needed.
-        unsupported: unsupported_reason(annotation, field)
-            .filter(|_| !artwork && !annotation.is_drawn_from_appearance()),
+        unsupported: unsupported_reason(annotation, field).filter(|_| !artwork && !painted),
         origin: bounds.origin(),
         size: bounds.size(),
         transform: viewport.local_frame(Point::new(bounds.left, bounds.bottom))?,
@@ -73,6 +73,7 @@ pub(crate) fn project(
         has_popup,
         control: field.and_then(|field| annotation.widget_control(field)),
         artwork,
+        painted: visible && painted,
         shapes: shapes::shapes(annotation, &bounds, &style),
         style,
     })

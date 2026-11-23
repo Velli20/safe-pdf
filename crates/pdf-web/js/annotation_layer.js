@@ -87,6 +87,7 @@ export class NativeAnnotationLayer {
     component.baseTransform = css.transform;
     Object.assign(container.style, { transform: css.transform, width: `${entry.size.width}px`, height: `${entry.size.height}px`, opacity: style.opacity, color: css.color });
     container.dataset.annotationId = String(entry.id); container.dataset.kind = entry.content.kind;
+    container.classList.toggle('native-canvas-painted', entry.painted);
     container.tabIndex = entry.editable || entry.draggable ? 0 : -1;
     container.setAttribute('aria-label', entry.text || entry.subtype);
     node.setAttribute('aria-label', entry.control?.label || entry.text || entry.subtype);

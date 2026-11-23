@@ -190,6 +190,7 @@ mod tests {
             has_popup: false,
             control: None,
             artwork: false,
+            painted: false,
             shapes: Vec::new(),
         };
         let web = WebAnnotationEntry::new(entry, &Transform::identity());

@@ -1848,6 +1848,12 @@ control: WidgetControl | null,
  */
 artwork: boolean,
 /**
+ * Whether the page canvas paints this entry's source appearance at its source
+ * rectangle. The host shows the entry's shapes only while dragging it, since the
+ * canvas keeps the appearance in place until the move commits.
+ */
+painted: boolean,
+/**
  * Local-unit outlines for markup, ink, and geometric annotations.
  */
 shapes: Array<Shape>, };
