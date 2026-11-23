@@ -61,8 +61,8 @@ export class FormControl extends AnnotationComponent {
     };
     this.listen(this.node, 'pointerdown', event => {
       const control = this.control();
-      // Text entries have no down appearance; only buttons are pressed.
-      if (event.button !== 0 || !control.painted || FormControl.isTextEntry(control) || !this.entry.editable && control.kind !== ControlKind.Button) return;
+      // Text entries and list boxes have no down appearance; only buttons are pressed.
+      if (event.button !== 0 || !control.painted || FormControl.isTextEntry(control) || control.list_box || !this.entry.editable && control.kind !== ControlKind.Button) return;
       pressed = true;
       this.layer.onPress(this.entry, true);
     });

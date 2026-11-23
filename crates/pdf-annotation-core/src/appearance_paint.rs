@@ -45,7 +45,8 @@ impl PaintedAppearance {
     ///
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
-    /// buttons and read-only text fields their source `/AS`, and editable text fields and
+    /// buttons, read-only text fields and list boxes whose selection is still the source
+    /// one their source `/AS`, and editable text fields and
     /// editable combo boxes their normal appearance with the live value, drawn as it is
     /// while a text field's value is still its source `/V`. The widget
     /// `presentation` marks pressed draws its down appearance when it has one for that

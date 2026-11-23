@@ -230,7 +230,7 @@ impl WidgetAnnotation {
 
     /// List box or combo box from `/Opt`, `/I` or `/V`, and the edit flag; only combos
     /// read `/V` text.
-    fn choice_field(&self) -> Result<FieldKind, SourceAdoptionError> {
+    pub(crate) fn choice_field(&self) -> Result<FieldKind, SourceAdoptionError> {
         let options = self.choice_options()?;
         let selected = self.selected_options(&options)?;
         if !self.is_multi_select() && selected.len() > 1 {
