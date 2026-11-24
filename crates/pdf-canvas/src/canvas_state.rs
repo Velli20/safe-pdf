@@ -1,10 +1,14 @@
 //! PDF graphics-state values retained across saved states.
-use pdf_color_space::color_space::ColorSpace;
-use pdf_graphics::{CanvasPaint, transform::Transform};
-use pdf_resources::{color_transfer::ColorTransferTables, pattern::Pattern, resources::Resources};
+use pdf_graphics::{CanvasPaint, color::Color, transform::Transform};
+use pdf_resources::{color_transfer::ColorTransferTables, resources::Resources};
 use std::sync::Arc;
 
-use crate::{CanvasPath, mask_layer::MaskLayer, text_state::TextState};
+use crate::{
+    CanvasPath,
+    current_color::{CurrentColor, PaintTarget},
+    mask_layer::MaskLayer,
+    text_state::TextState,
+};
 
 /// Represents the complete graphics state for a PDF canvas, including
 /// transformation, color, stroke, text, and pattern information.
@@ -26,35 +30,42 @@ pub(crate) struct CanvasState {
     pub clip_path: Option<CanvasPath<'static>>,
     /// The current resource dictionary, overriding the page's resources if set.
     pub resources: Option<Arc<Resources>>,
-    /// The current pattern used for filling.
-    pub fill_pattern: Option<Arc<Pattern>>,
-    /// The current pattern used for stroking.
-    pub stroke_pattern: Option<Arc<Pattern>>,
-    /// The current color space for stroking operations.
-    pub stroke_color_space: Arc<ColorSpace>,
-    /// The current color space for non-stroking operations.
-    pub fill_color_space: Arc<ColorSpace>,
+    /// The current color space and pattern for stroking operations.
+    pub stroke: CurrentColor,
+    /// The current color space and pattern for non-stroking operations.
+    pub fill: CurrentColor,
 }
 
 impl CanvasState {
-    /// Selects a device color space for stroking or non-stroking operations.
-    ///
-    /// Color operators such as `rg` select their space on every use, so the current
-    /// allocation is kept when it already holds `space`.
-    pub(crate) fn select_device_color_space(&mut self, stroking: bool, space: ColorSpace) {
-        let slot = if stroking {
-            &mut self.stroke_color_space
-        } else {
-            &mut self.fill_color_space
-        };
-        let unchanged = matches!(
-            (slot.as_ref(), &space),
-            (ColorSpace::DeviceGray, ColorSpace::DeviceGray)
-                | (ColorSpace::DeviceRGB, ColorSpace::DeviceRGB)
-                | (ColorSpace::DeviceCMYK, ColorSpace::DeviceCMYK)
-        );
-        if !unchanged {
-            *slot = Arc::new(space);
+    /// Returns the color space and pattern selected for `target`.
+    pub(crate) const fn current_color(&self, target: PaintTarget) -> &CurrentColor {
+        match target {
+            PaintTarget::Stroke => &self.stroke,
+            PaintTarget::Fill => &self.fill,
+        }
+    }
+
+    /// Returns the color space and pattern selected for `target`, to change them.
+    pub(crate) const fn current_color_mut(&mut self, target: PaintTarget) -> &mut CurrentColor {
+        match target {
+            PaintTarget::Stroke => &mut self.stroke,
+            PaintTarget::Fill => &mut self.fill,
+        }
+    }
+
+    /// Returns the numeric color `target` paints with, including its alpha constant.
+    pub(crate) const fn paint_color(&self, target: PaintTarget) -> Color {
+        match target {
+            PaintTarget::Stroke => self.paint.stroke_color,
+            PaintTarget::Fill => self.paint.fill_color,
+        }
+    }
+
+    /// Replaces the numeric color `target` paints with, keeping its alpha constant.
+    pub(crate) fn set_paint_color(&mut self, target: PaintTarget, color: Color) {
+        match target {
+            PaintTarget::Stroke => self.paint.set_stroke_color(color),
+            PaintTarget::Fill => self.paint.set_fill_color(color),
         }
     }
 }
@@ -71,10 +82,8 @@ impl Default for CanvasState {
             text_state: TextState::default(),
             clip_path: None,
             resources: None,
-            fill_pattern: None,
-            stroke_pattern: None,
-            stroke_color_space: Arc::new(ColorSpace::DeviceGray),
-            fill_color_space: Arc::new(ColorSpace::DeviceGray),
+            stroke: CurrentColor::default(),
+            fill: CurrentColor::default(),
         }
     }
 }

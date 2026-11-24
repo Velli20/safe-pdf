@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pdf_graphics::color::Color;
 
 use crate::{
@@ -7,6 +9,9 @@ use crate::{
     lab_color_space::LabColorSpace, separation_color_space::SeparationColorSpace,
 };
 
+/// A PDF color space.
+///
+/// The parameters of a space are shared, so cloning one never copies them.
 #[derive(Debug, Clone)]
 pub enum ColorSpace {
     /// Grayscale color space with a single component (0.0 = black, 1.0 = white).
@@ -16,26 +21,38 @@ pub enum ColorSpace {
     /// CMYK color space with four components (Cyan, Magenta, Yellow, Black).
     DeviceCMYK,
     /// Indexed (palette-based) color space.
-    Indexed(IndexedColorSpace),
+    Indexed(Arc<IndexedColorSpace>),
     /// ICC profile-based color space.
-    ICCBased(ICCBasedColorSpace),
+    ICCBased(Arc<ICCBasedColorSpace>),
     /// Separation color space (single spot colorant).
-    Separation(SeparationColorSpace),
+    Separation(Arc<SeparationColorSpace>),
     /// CIE 1976 L*a*b* color space.
-    Lab(LabColorSpace),
+    Lab(Arc<LabColorSpace>),
     /// Calibrated Gray color space.
-    CalGray(CalGrayColorSpace),
+    CalGray(Arc<CalGrayColorSpace>),
     /// Calibrated RGB color space.
-    CalRGB(CalRGBColorSpace),
+    CalRGB(Arc<CalRGBColorSpace>),
     /// DeviceN multi-colorant color space.
-    DeviceN(DeviceNColorSpace),
+    DeviceN(Arc<DeviceNColorSpace>),
     /// Pattern color space. Painting uses a pattern resource, not
     /// plain color components. The optional inner space is the underlying color
     /// space for uncolored tiling patterns (e.g. `[/Pattern /DeviceGray]`).
-    Pattern(Option<Box<ColorSpace>>),
+    Pattern(Option<Arc<ColorSpace>>),
 }
 
 impl ColorSpace {
+    /// Returns the color space `name` always identifies, regardless of resources.
+    #[must_use]
+    pub fn from_reserved_name(name: &[u8]) -> Option<Self> {
+        match name {
+            b"DeviceGray" => Some(Self::DeviceGray),
+            b"DeviceRGB" => Some(Self::DeviceRGB),
+            b"DeviceCMYK" => Some(Self::DeviceCMYK),
+            b"Pattern" => Some(Self::Pattern(None)),
+            _ => None,
+        }
+    }
+
     /// Returns the number of color components required as *input* to this color space.
     ///
     /// For `Indexed`, this is always 1 (the palette index), regardless of how many

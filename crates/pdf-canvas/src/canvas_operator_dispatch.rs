@@ -1,8 +1,12 @@
 //! Dispatch of parsed content-stream operators to their canvas handlers.
+use pdf_color_space::color_space::ColorSpace;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
-use pdf_graphics::{PaintMode, PathFillType};
+use pdf_graphics::{PaintMode, PathFillType, color::Color};
 
-use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
+use crate::{
+    canvas_backend::CanvasBackend, current_color::PaintTarget, error::PdfCanvasError,
+    pdf_canvas::PdfCanvas,
+};
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Applies one content-stream operator to the canvas.
@@ -94,16 +98,36 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                 self.pending_clip = Some(PathFillType::EvenOdd);
                 Ok(())
             }
-            PdfOperatorVariant::SetGrayFill { gray } => self.set_non_stroking_gray(*gray),
-            PdfOperatorVariant::SetGrayStroke { gray } => self.set_stroking_gray(*gray),
-            PdfOperatorVariant::SetRGBFill { r, g, b } => self.set_non_stroking_rgb(*r, *g, *b),
-            PdfOperatorVariant::SetRGBStroke { r, g, b } => self.set_stroking_rgb(*r, *g, *b),
-            PdfOperatorVariant::SetCMYKFill { c, m, y, k } => {
-                self.set_non_stroking_cmyk(*c, *m, *y, *k)
-            }
-            PdfOperatorVariant::SetCMYKStroke { c, m, y, k } => {
-                self.set_stroking_cmyk(*c, *m, *y, *k)
-            }
+            PdfOperatorVariant::SetGrayFill { gray } => self.set_device_color(
+                PaintTarget::Fill,
+                ColorSpace::DeviceGray,
+                Color::from_gray(*gray),
+            ),
+            PdfOperatorVariant::SetGrayStroke { gray } => self.set_device_color(
+                PaintTarget::Stroke,
+                ColorSpace::DeviceGray,
+                Color::from_gray(*gray),
+            ),
+            PdfOperatorVariant::SetRGBFill { r, g, b } => self.set_device_color(
+                PaintTarget::Fill,
+                ColorSpace::DeviceRGB,
+                Color::from_rgb(*r, *g, *b),
+            ),
+            PdfOperatorVariant::SetRGBStroke { r, g, b } => self.set_device_color(
+                PaintTarget::Stroke,
+                ColorSpace::DeviceRGB,
+                Color::from_rgb(*r, *g, *b),
+            ),
+            PdfOperatorVariant::SetCMYKFill { c, m, y, k } => self.set_device_color(
+                PaintTarget::Fill,
+                ColorSpace::DeviceCMYK,
+                Color::from_cmyk(*c, *m, *y, *k),
+            ),
+            PdfOperatorVariant::SetCMYKStroke { c, m, y, k } => self.set_device_color(
+                PaintTarget::Stroke,
+                ColorSpace::DeviceCMYK,
+                Color::from_cmyk(*c, *m, *y, *k),
+            ),
             PdfOperatorVariant::SetLineWidth { width } => self.set_line_width(*width),
             PdfOperatorVariant::SetLineCapStyle { style } => self.set_line_cap(*style),
             PdfOperatorVariant::SetLineJoinStyle { style } => self.set_line_join(*style),
@@ -162,17 +186,23 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             PdfOperatorVariant::InvokeXObject { name } => self.invoke_xobject(name),
             PdfOperatorVariant::InlineImage(image) => self.paint_inline_image(image),
             PdfOperatorVariant::PaintShading { name } => self.paint_shading(name),
-            PdfOperatorVariant::SetStrokeColorSpace { name } => self.set_color_space(name, true),
+            PdfOperatorVariant::SetStrokeColorSpace { name } => {
+                self.set_color_space(PaintTarget::Stroke, name)
+            }
             PdfOperatorVariant::SetNonStrokingColorSpace { name } => {
-                self.set_color_space(name, false)
+                self.set_color_space(PaintTarget::Fill, name)
             }
             PdfOperatorVariant::SetStrokingColor(color) => match &color.pattern {
-                Some(pattern) => self.set_stroking_color_extended(&color.components, pattern),
-                None => self.set_stroking_color(&color.components),
+                Some(pattern) => {
+                    self.set_pattern_color(PaintTarget::Stroke, &color.components, pattern)
+                }
+                None => self.set_color(PaintTarget::Stroke, &color.components),
             },
             PdfOperatorVariant::SetNonStrokingColor(color) => match &color.pattern {
-                Some(pattern) => self.set_non_stroking_color_extended(&color.components, pattern),
-                None => self.set_non_stroking_color(&color.components),
+                Some(pattern) => {
+                    self.set_pattern_color(PaintTarget::Fill, &color.components, pattern)
+                }
+                None => self.set_color(PaintTarget::Fill, &color.components),
             },
             PdfOperatorVariant::BeginCompatibility
             | PdfOperatorVariant::EndCompatibility

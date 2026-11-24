@@ -32,7 +32,7 @@ pub enum Resource {
     /// A shading resource, used for gradient fills and complex color transitions.
     Shading(Arc<Shading>),
     /// A color space resource, used for defining color models.
-    ColorSpace(Arc<ColorSpace>),
+    ColorSpace(ColorSpace),
 }
 
 impl Resource {
@@ -68,11 +68,11 @@ impl Resource {
         Some(Arc::clone(shading))
     }
 
-    pub(crate) fn as_color_space(&self) -> Option<Arc<ColorSpace>> {
+    pub(crate) fn as_color_space(&self) -> Option<ColorSpace> {
         let Self::ColorSpace(color_space) = self else {
             return None;
         };
-        Some(Arc::clone(color_space))
+        Some(color_space.clone())
     }
 }
 

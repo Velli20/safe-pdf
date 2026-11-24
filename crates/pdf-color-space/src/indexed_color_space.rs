@@ -14,7 +14,7 @@ use crate::{color_space::ColorSpace, error::ColorSpaceError};
 #[derive(Debug, Clone)]
 pub struct IndexedColorSpace {
     /// The underlying color space for palette entries.
-    pub base: Box<ColorSpace>,
+    pub base: ColorSpace,
     /// Maximum valid index value (0 to 255). The palette contains `hival + 1` entries.
     pub hival: u8,
     /// Raw lookup table bytes. Each entry contains `base.num_color_components()` bytes.
@@ -40,7 +40,7 @@ impl FromPdfObject for IndexedColorSpace {
         };
 
         Ok(Self {
-            base: Box::new(array.at(1)?),
+            base: array.at(1)?,
             hival: array.at(2)?,
             // Streams must be matched first: a string read would also accept a stream's raw,
             // possibly still encoded, bytes.
@@ -208,7 +208,7 @@ mod tests {
 
     fn indexed_rgb() -> IndexedColorSpace {
         IndexedColorSpace {
-            base: Box::new(ColorSpace::DeviceRGB),
+            base: ColorSpace::DeviceRGB,
             hival: 7,
             lookup: vec![
                 0, 128, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 255, 0,

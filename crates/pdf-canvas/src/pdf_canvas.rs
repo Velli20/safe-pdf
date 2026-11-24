@@ -1,5 +1,4 @@
 //! PDF operator interpretation and painting orchestration.
-use pdf_color_space::color_space::ColorSpace;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::font_selection::FontSelection;
@@ -10,6 +9,7 @@ use crate::{
     canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
     content_stream_render_state::ContentStreamRenderState,
+    current_color::PaintTarget,
     error::PdfCanvasError,
     recording_canvas::{RecordingCanvas, fits_offscreen_recording},
     stroke_style::StrokeStyle,
@@ -474,15 +474,11 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Returns the device-space clip of the active shading pattern's `/BBox`, if any.
     pub(crate) fn pattern_bbox_clip(
         &self,
-        for_stroke: bool,
+        target: PaintTarget,
     ) -> Result<Option<CanvasPath<'static>>, PdfCanvasError> {
         let state = &self.state;
-        let pattern = if for_stroke {
-            &state.stroke_pattern
-        } else {
-            &state.fill_pattern
-        };
-        Ok(match pattern.as_deref() {
+        let pattern = state.current_color(target).pattern.as_deref();
+        Ok(match pattern {
             Some(pattern @ Pattern::Shading { shading, .. }) => {
                 shading_bbox_clip(shading, &Self::pattern_transform(state, pattern))?
             }
@@ -497,16 +493,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// The [`PatternPaint`] to use, or an error if pattern rendering fails.
     pub(crate) fn compute_shader(
         &mut self,
-        for_stroke: bool,
+        target: PaintTarget,
     ) -> Result<PatternPaint, PdfCanvasError> {
         let state = &self.state;
-        let pattern = if for_stroke {
-            state.stroke_pattern.clone()
-        } else {
-            state.fill_pattern.clone()
-        };
-
-        let Some(pattern) = pattern else {
+        let Some(pattern) = state.current_color(target).pattern.clone() else {
             return Ok(PatternPaint::Color);
         };
         let transform = Self::pattern_transform(state, &pattern);
@@ -545,11 +535,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
                 // The cell of an uncolored pattern is painted in the color selected
                 // together with the pattern.
-                let paint = &self.state.paint;
                 let cell_color = match paint_type {
                     PaintType::Colored => None,
-                    PaintType::Uncolored if for_stroke => Some(paint.stroke_color),
-                    PaintType::Uncolored => Some(paint.fill_color),
+                    PaintType::Uncolored => Some(self.state.paint_color(target)),
                 };
 
                 if let Some((cached, cached_transform, cached_color, shader)) =
@@ -668,7 +656,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
     /// Works out the current fill, or `None` when the fill pattern leaves no marks.
     fn prepare_fill(&mut self) -> Result<Option<FillPaint>, PdfCanvasError> {
-        let shader = match self.compute_shader(false)? {
+        let shader = match self.compute_shader(PaintTarget::Fill)? {
             PatternPaint::Nothing => return Ok(None),
             pattern_paint => pattern_paint.into_shader(),
         };
@@ -676,13 +664,13 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(Some(FillPaint {
             color: paint.fill_color,
             shader,
-            clip: self.pattern_bbox_clip(false)?,
+            clip: self.pattern_bbox_clip(PaintTarget::Fill)?,
         }))
     }
 
     /// Works out the current stroke, or `None` when the stroke pattern leaves no marks.
     fn prepare_stroke(&mut self) -> Result<Option<StrokePaint>, PdfCanvasError> {
-        let shader = match self.compute_shader(true)? {
+        let shader = match self.compute_shader(PaintTarget::Stroke)? {
             PatternPaint::Nothing => return Ok(None),
             pattern_paint => pattern_paint.into_shader(),
         };
@@ -694,7 +682,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             line_width: state.paint.line_width * scale,
             style: StrokeStyle::new(&state.paint, &state.transform, dash_pattern),
             shader,
-            clip: self.pattern_bbox_clip(true)?,
+            clip: self.pattern_bbox_clip(PaintTarget::Stroke)?,
         }))
     }
 
@@ -845,54 +833,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(())
     }
 
-    /// Sets the current fill pattern by name from the page resources.
-    ///
-    /// # Parameters
-    ///
-    /// - `pattern_name`: The name of the pattern to activate.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the pattern is not found in the resources.
-    pub(crate) fn set_fill_pattern(&mut self, pattern_name: &[u8]) -> Result<(), PdfCanvasError> {
-        let Some(pattern) = self
-            .state
-            .resources
-            .as_ref()
-            .and_then(|r| r.pattern(pattern_name))
-        else {
-            return Err(PdfCanvasError::PatternNotFound(
-                String::from_utf8_lossy(pattern_name).into_owned(),
-            ));
-        };
-        self.state.fill_pattern = Some(pattern);
-        Ok(())
-    }
-
-    /// Sets the current stroke pattern by name from the page resources.
-    ///
-    /// # Parameters
-    ///
-    /// - `pattern_name`: The name of the pattern to activate.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the pattern is not found in the resources.
-    pub(crate) fn set_stroke_pattern(&mut self, pattern_name: &[u8]) -> Result<(), PdfCanvasError> {
-        let Some(pattern) = self
-            .state
-            .resources
-            .as_ref()
-            .and_then(|r| r.pattern(pattern_name))
-        else {
-            return Err(PdfCanvasError::PatternNotFound(
-                String::from_utf8_lossy(pattern_name).into_owned(),
-            ));
-        };
-        self.state.stroke_pattern = Some(pattern);
-        Ok(())
-    }
-
     /// Renders a sequence of PDF content stream operations onto the canvas.
     ///
     /// # Parameters
@@ -1030,71 +970,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         self.canvas.restore()?;
         if let Some(state) = self.saved_states.pop() {
             self.state = state;
-        }
-        Ok(())
-    }
-
-    /// Sets the current color space for stroking or filling operations.
-    ///
-    /// # Parameters
-    ///
-    /// - `name`: The name of the color space to set.  c
-    /// - `is_stroking`: If `true`, sets the stroking color space; otherwise, sets the filling color space.
-    pub(crate) fn set_color_space(
-        &mut self,
-        name: &[u8],
-        is_stroking: bool,
-    ) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        if is_stroking {
-            state.stroke_pattern = None;
-        } else {
-            state.fill_pattern = None;
-        }
-
-        // The names /DeviceGray, /DeviceRGB, /DeviceCMYK, and /Pattern are reserved
-        // keywords that always identify their corresponding colour spaces directly.
-        // Per PDF spec §8.6.8 each also sets the current colour to its initial value.
-        let initial_color = match name {
-            b"DeviceGray" => Some((ColorSpace::DeviceGray, Color::from_gray(0.0))),
-            b"DeviceRGB" => Some((ColorSpace::DeviceRGB, Color::from_rgb(0.0, 0.0, 0.0))),
-            b"DeviceCMYK" => Some((ColorSpace::DeviceCMYK, Color::from_cmyk(0.0, 0.0, 0.0, 1.0))),
-            _ => None,
-        };
-        if let Some((space, color)) = initial_color {
-            state.select_device_color_space(is_stroking, space);
-            if is_stroking {
-                state.paint.set_stroke_color(color);
-            } else {
-                state.paint.set_fill_color(color);
-            }
-            return Ok(());
-        }
-        if name == b"Pattern" {
-            // Pattern: no initial colour is defined by the spec.
-            let cs = Arc::new(ColorSpace::Pattern(None));
-            if is_stroking {
-                state.stroke_color_space = cs;
-            } else {
-                state.fill_color_space = cs;
-            }
-            return Ok(());
-        }
-
-        let Some(cs) = state
-            .resources
-            .as_ref()
-            .and_then(|res| res.color_space(name))
-        else {
-            return Err(PdfCanvasError::ColorSpaceNotFound(
-                String::from_utf8_lossy(name).into_owned(),
-            ));
-        };
-
-        if is_stroking {
-            state.stroke_color_space = cs;
-        } else {
-            state.fill_color_space = cs;
         }
         Ok(())
     }
@@ -1273,7 +1148,7 @@ mod tests {
         let mut backend = RecordingCanvas::new(100.0, 100.0);
         let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
             .expect("canvas should build");
-        canvas.state.fill_pattern = Some(std::sync::Arc::new(pattern));
+        canvas.state.fill.pattern = Some(std::sync::Arc::new(pattern));
 
         let operators = [
             PdfOperatorVariant::Rectangle {

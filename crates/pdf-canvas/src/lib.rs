@@ -21,6 +21,8 @@ mod canvas_state;
 mod canvas_text_ops;
 /// Limits and context for nested content-stream rendering.
 mod content_stream_render_state;
+/// The color space and pattern selected for stroking or non-stroking operations.
+mod current_color;
 /// Errors reported across the canvas boundary.
 pub mod error;
 /// The font a `Tf` operand selects by resource name.

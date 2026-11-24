@@ -14,7 +14,7 @@ pub struct ICCBasedColorSpace {
     /// Alternate color space used as a rendering fallback.
     ///
     /// If absent, the device-equivalent for `num_components` is used instead.
-    pub alternate_space: Option<Box<ColorSpace>>,
+    pub alternate_space: Option<ColorSpace>,
     /// Shared raw ICC profile bytes.
     ///
     /// ICC colour management is not yet implemented. The alternate space (or a
@@ -41,9 +41,7 @@ impl FromPdfObject for ICCBasedColorSpace {
             .into());
         }
 
-        let alternate_space = dictionary
-            .optional::<ColorSpace>(b"Alternate")?
-            .map(Box::new);
+        let alternate_space = dictionary.optional::<ColorSpace>(b"Alternate")?;
 
         Ok(Self {
             num_components,
@@ -59,7 +57,7 @@ impl ICCBasedColorSpace {
     ///
     /// An alternate with a different number of components has none.
     pub(crate) fn device_equivalent(&self) -> Option<ColorSpace> {
-        let space = match self.alternate_space.as_deref() {
+        let space = match &self.alternate_space {
             Some(alternate) => alternate.device_equivalent()?,
             None => match self.num_components {
                 1 => ColorSpace::DeviceGray,

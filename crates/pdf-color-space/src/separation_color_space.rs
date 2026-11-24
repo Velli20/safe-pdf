@@ -15,7 +15,7 @@ pub struct SeparationColorSpace {
     /// The name of the colorant (e.g., `/All`, `/None`, or a custom name).
     pub name: Arc<[u8]>,
     /// The alternate color space to use if the separation is not supported.
-    pub alternate_space: Box<ColorSpace>,
+    pub alternate_space: ColorSpace,
     /// The tint transform function (transforms tint 0.0-1.0 to alternate space).
     /// Typically a Function object (Dictionary or Stream).
     pub tint_transform: Function,
@@ -37,7 +37,7 @@ impl FromPdfObject for SeparationColorSpace {
 
         Ok(Self {
             name: array.at(1)?,
-            alternate_space: Box::new(array.at(2)?),
+            alternate_space: array.at(2)?,
             tint_transform: array.at(3)?,
         })
     }
