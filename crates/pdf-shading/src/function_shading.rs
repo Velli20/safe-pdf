@@ -113,11 +113,7 @@ impl FunctionShading {
     /// `bbox` is in shading space, so it is mapped back through `/Matrix`. A singular
     /// matrix or a nonfinite result leaves the domain alone.
     fn domain_with_bbox(&self, domain: &Rect, bbox: &Rect) -> Rect {
-        let Ok(bbox) = self
-            .matrix
-            .try_inverse()
-            .and_then(|inverse| inverse.try_map_rect(bbox))
-        else {
+        let Ok(bbox) = self.matrix.inverse_map_rect(bbox) else {
             return *domain;
         };
         let area = Rect {
@@ -145,15 +141,9 @@ impl FunctionShading {
     /// Each edge is clamped to `1..=MAX_RASTER_DIMENSION`. A NaN extent stays NaN, which
     /// [`Self::rasterize`] rejects.
     fn raster_size(domain: &Rect, to_device: &Transform) -> Size {
-        let Size {
-            width: scale_x,
-            height: scale_y,
-        } = to_device.axis_scales();
+        let mapped = to_device.map_edge_lengths(domain.size());
         let pixels = |extent: f32| extent.ceil().clamp(1.0, MAX_RASTER_DIMENSION);
-        Size::new(
-            pixels(domain.width() * scale_x),
-            pixels(domain.height() * scale_y),
-        )
+        Size::new(pixels(mapped.width), pixels(mapped.height))
     }
 
     /// Samples the shading at pixel centers over `area`, row 0 nearest `area.top`.

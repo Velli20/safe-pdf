@@ -5,7 +5,8 @@ use num_traits::ToPrimitive;
 use pdf_canvas::{CanvasViewport, PageViewport, ViewportError};
 use pdf_document::page::PdfPage;
 use pdf_graphics::{
-    point::Point, rect::Rect, size::Size, transform::Transform, viewport::pixel_extent,
+    invertible_transform::InvertibleTransform, point::Point, rect::Rect, size::Size,
+    transform::Transform,
 };
 
 /// Validated page viewport using the engine's existing affine and geometry types.
@@ -18,8 +19,7 @@ use pdf_graphics::{
 pub struct WebViewport {
     page: PageViewport,
     canvas: CanvasViewport,
-    device_to_css: Transform,
-    css_to_device: Transform,
+    device_to_css: InvertibleTransform,
     revision: u32,
 }
 
@@ -33,13 +33,12 @@ impl WebViewport {
         device_to_css: Transform,
         revision: u32,
     ) -> WebResult<Self> {
-        let css_to_device = device_to_css.try_inverse()?;
+        let device_to_css = InvertibleTransform::new(device_to_css)?;
         let canvas = CanvasViewport::new(page.device_size(), backing_size)?;
         Ok(Self {
             page,
             canvas,
             device_to_css,
-            css_to_device,
             revision,
         })
     }
@@ -64,10 +63,12 @@ impl WebViewport {
         let turn = Transform::from_quarter_turn(rotation, size.quarter_turned(rotation))
             .ok_or(Error::InvalidInput("display rotation"))?;
         let device_to_css = Transform::from_scale(zoom, zoom).post_concatenated(&turn);
-        let backing = |v: f32| pixel_extent(v * zoom * dpr).ok_or(Error::ResourceLimit);
+        let backing_size = Size::new(size.width * zoom * dpr, size.height * zoom * dpr)
+            .to_pixels()
+            .ok_or(Error::ResourceLimit)?;
         Self::new(
             page.viewport(None, size)?,
-            Size::new(backing(size.width)?, backing(size.height)?),
+            backing_size,
             device_to_css,
             revision,
         )
@@ -83,16 +84,14 @@ impl WebViewport {
             .device_to_backing()
             .post_concatenated(self.page.page_to_device());
         let rect = rect.normalized();
-        let local = Size::new(rect.width(), rect.height());
-        let backing = |extent: f32, scale: f32| {
-            pixel_extent(extent * scale).ok_or(Error::InvalidInput("artwork bounds"))
-        };
+        let local = rect.size();
+        let backing_size = page_to_backing
+            .map_edge_lengths(local)
+            .to_pixels()
+            .ok_or(Error::InvalidInput("artwork bounds"))?;
         Self::new(
             PageViewport::new(rect, 0, local)?,
-            Size::new(
-                backing(local.width, page_to_backing.sx.hypot(page_to_backing.ky))?,
-                backing(local.height, page_to_backing.kx.hypot(page_to_backing.sy))?,
-            ),
+            backing_size,
             Transform::identity(),
             self.revision,
         )
@@ -110,12 +109,12 @@ impl WebViewport {
 
     /// Returns the host DOM mapping, independent of temporary content/mask transforms.
     pub fn device_to_css(&self) -> &Transform {
-        &self.device_to_css
+        self.device_to_css.forward()
     }
 
     /// Maps a container-local CSS pointer into the current engine device coordinates.
     pub fn pointer_to_device(&self, point: Point) -> WebResult<Point> {
-        Ok(self.css_to_device.try_map_point(point)?)
+        Ok(self.device_to_css.unmap_point(point)?)
     }
 
     /// Converts a CSS pixel displacement into a PDF page displacement for drag input.
@@ -124,10 +123,7 @@ impl WebViewport {
         let (Some(dx), Some(dy)) = (dx.to_f32(), dy.to_f32()) else {
             return Err(Error::InvalidInput("drag displacement"));
         };
-        let device = self
-            .css_to_device
-            .linear()
-            .try_map_point(Point::new(dx, dy))?;
+        let device = self.device_to_css.unmap_delta(Point::new(dx, dy))?;
         let page = self.page.map_device_delta(device)?;
         Ok([f64::from(page.x), f64::from(page.y)])
     }

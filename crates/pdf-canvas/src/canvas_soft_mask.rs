@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use pdf_graphics::{
-    MaskMode, PaintMode, PathFillType, color::Color, rect::Rect, size::Size, transform::Transform,
+    MaskMode, PaintMode, PathFillType, color::Color, size::Size, transform::Transform,
 };
 use pdf_resources::soft_mask::SoftMask;
 
@@ -43,8 +43,12 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         // Without a backdrop, coverage outside the group's bounds is zero, so the
         // recording needs to cover only those bounds.
         let region = match backdrop {
+            // The visible area, mapped into the current user space.
             Some(_) => self
-                .visible_user_area()
+                .state
+                .transform
+                .inverse_map_rect(&self.device_rect())
+                .ok()
                 .filter(fits_offscreen_recording)
                 .unwrap_or(bounds),
             None => bounds,
@@ -70,13 +74,6 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             smask.mask_type.clone(),
             smask.transfer.table().cloned(),
         )?))
-    }
-
-    /// Maps the backend's visible area into the current user space, or `None` when the
-    /// current transform is singular.
-    fn visible_user_area(&self) -> Option<Rect> {
-        let inverse = self.state.transform.try_inverse().ok()?;
-        Some(inverse.map_rect(&self.device_rect()))
     }
 
     /// Fills `[0, width] x [0, height]` with an opaque backdrop `color`, leaving the

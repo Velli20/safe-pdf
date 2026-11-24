@@ -2,6 +2,7 @@
 
 use crate::{
     geometry::Bounds,
+    invertible_transform::InvertibleTransform,
     point::Point,
     quad::Quad,
     rect::Rect,
@@ -35,9 +36,7 @@ pub struct PageViewport {
     /// Width and height of the target's logical device coordinate space.
     device_size: Size,
     /// Affine mapping from PDF page coordinates to logical device coordinates.
-    page_to_device: Transform,
-    /// Inverse affine mapping from logical device coordinates to PDF page coordinates.
-    device_to_page: Transform,
+    page_to_device: InvertibleTransform,
 }
 
 impl PageViewport {
@@ -66,13 +65,11 @@ impl PageViewport {
         );
         let turn =
             Transform::from_quarter_turn(rotation, device_size).ok_or(ViewportError::Bounds)?;
-        let page_to_device = turn.post_concatenated(&base);
-        let device_to_page = page_to_device.try_inverse()?;
+        let page_to_device = InvertibleTransform::new(turn.post_concatenated(&base))?;
         Ok(Self {
             bounds,
             device_size,
             page_to_device,
-            device_to_page,
         })
     }
 
@@ -88,27 +85,27 @@ impl PageViewport {
 
     /// Returns the initial page transform; backends must not reapply it to paths.
     pub fn page_to_device(&self) -> &Transform {
-        &self.page_to_device
+        self.page_to_device.forward()
     }
 
     /// Returns the inverse page mapping.
     pub fn device_to_page(&self) -> &Transform {
-        &self.device_to_page
+        self.page_to_device.inverse()
     }
 
     /// Maps a page point into logical device coordinates.
     pub fn map_page_point(&self, point: Point) -> Result<Point, ViewportError> {
-        Ok(self.page_to_device.try_map_point(point)?)
+        Ok(self.page_to_device().try_map_point(point)?)
     }
 
     /// Maps a logical device point into PDF page coordinates.
     pub fn map_device_point(&self, point: Point) -> Result<Point, ViewportError> {
-        Ok(self.device_to_page.try_map_point(point)?)
+        Ok(self.page_to_device.unmap_point(point)?)
     }
 
     /// Maps all corners of a finite page rectangle into normalized device bounds.
     pub fn map_rect(&self, rect: &Rect) -> Result<Rect, ViewportError> {
-        let mapped = self.page_to_device.try_map_rect(rect)?;
+        let mapped = self.page_to_device().try_map_rect(rect)?;
         // The edges are finite once mapping succeeds, so normalizing keeps them.
         if !rect.normalized().is_valid() {
             return Err(ViewportError::Bounds);
@@ -131,14 +128,14 @@ impl PageViewport {
     /// nonfinite result.
     pub fn local_frame(&self, origin: Point) -> Result<Transform, ViewportError> {
         let local_to_page = Transform::from_row(1.0, 0.0, 0.0, -1.0, origin.x, origin.y);
-        let local_to_device = self.page_to_device.post_concatenated(&local_to_page);
+        let local_to_device = self.page_to_device().post_concatenated(&local_to_page);
         local_to_device.validate()?;
         Ok(local_to_device)
     }
 
     /// Maps a device-space movement without applying the page origin translation.
     pub fn map_device_delta(&self, delta: Point) -> Result<Point, ViewportError> {
-        Ok(self.device_to_page.linear().try_map_point(delta)?)
+        Ok(self.page_to_device.unmap_delta(delta)?)
     }
 }
 
@@ -202,12 +199,4 @@ impl CanvasViewport {
     pub fn device_to_backing(&self) -> &Transform {
         &self.device_to_backing
     }
-}
-
-/// Rounds a positive finite raster extent up to a representable pixel dimension.
-pub fn pixel_extent(value: f32) -> Option<u32> {
-    if !value.is_finite() || value <= 0.0 {
-        return None;
-    }
-    value.ceil().to_u32().filter(|extent| *extent > 0)
 }
