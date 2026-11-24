@@ -63,7 +63,7 @@ pub(crate) fn paint_mesh<E: MeshElement>(
         return Ok(ShadingPaint::transparent());
     };
 
-    let grid = PixelGrid::new(area, Size::new(1.0, 1.0), MAX_RASTER_DIMENSION);
+    let grid = PixelGrid::new(area, area.size(), MAX_RASTER_DIMENSION);
     let placement = grid.placement();
     let to_pixels = placement.try_inverse()?.post_concatenated(transform);
     let mut raster = MeshRaster::new(grid.size());

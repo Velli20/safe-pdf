@@ -15,9 +15,9 @@ pub(crate) struct PixelGrid {
 }
 
 impl PixelGrid {
-    /// Covers `area` with `scales` pixels per unit along each axis, rounded up to whole
-    /// pixels and limited to `1..=max_dimension`.
-    pub(crate) fn new(area: Rect, scales: Size, max_dimension: u16) -> Self {
+    /// Covers `area` with `extent` pixels, rounded up to whole pixels and limited to
+    /// `1..=max_dimension` along each axis.
+    pub(crate) fn new(area: Rect, extent: Size, max_dimension: u16) -> Self {
         let pixels = |extent: f32| {
             extent
                 .ceil()
@@ -27,10 +27,7 @@ impl PixelGrid {
         };
         Self {
             area,
-            size: Size::new(
-                pixels(area.width() * scales.width),
-                pixels(area.height() * scales.height),
-            ),
+            size: Size::new(pixels(extent.width), pixels(extent.height)),
         }
     }
 

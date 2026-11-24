@@ -108,7 +108,7 @@ impl ShadingPaint {
         }
     }
 
-    /// Checks gradient geometry and stops, or raster dimensions, data length, and format,
+    /// Checks gradient geometry and stops, or raster dimensions, format, and data length,
     /// and that the transform can be inverted.
     ///
     /// # Errors
@@ -119,6 +119,7 @@ impl ShadingPaint {
     /// singular transform.
     pub fn validate(&self) -> Result<(), ImageRasterError> {
         self.source.validate()?;
+        // Sampling maps device points back into shading or source-pixel space.
         self.transform.try_inverse()?;
         Ok(())
     }

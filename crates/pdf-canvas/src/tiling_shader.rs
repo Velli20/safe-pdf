@@ -10,7 +10,7 @@ use pdf_graphics::{
     rect::Rect,
     size::Size,
     transform::{Transform, TransformError},
-    viewport::pixel_extent,
+    viewport::CanvasViewport,
 };
 use thiserror::Error;
 
@@ -178,16 +178,15 @@ impl TilingShader {
         let pattern_to_backing = device_to_backing.post_concatenated(&self.pattern_transform);
         pattern_to_backing.try_inverse()?;
         let [step_x, step_y] = self.repeat_step;
-        let density = pattern_to_backing.axis_scales();
-        let width = (step_x * density.width).ceil();
-        let height = (step_y * density.height).ceil();
-        let size = Size::new(
-            pixel_extent(width).ok_or(TilingShaderError::RasterLimit)?,
-            pixel_extent(height).ok_or(TilingShaderError::RasterLimit)?,
-        );
+        let period = Size::new(step_x, step_y);
+        let size = pattern_to_backing
+            .map_edge_lengths(period)
+            .to_pixels()
+            .ok_or(TilingShaderError::RasterLimit)?;
+        let cell = CanvasViewport::new(period, size).map_err(|_| TilingShaderError::RasterLimit)?;
         Ok(TileRaster {
             size,
-            cell_to_pixel: Transform::from_scale(width / step_x, height / step_y),
+            cell_to_pixel: *cell.device_to_backing(),
             pattern_to_backing,
         })
     }

@@ -86,7 +86,11 @@ impl FunctionShading {
         let outside = background.unwrap_or(Color::TRANSPARENT);
 
         let to_device = transform.post_concatenated(&self.matrix);
-        let grid = PixelGrid::new(area, to_device.axis_scales(), MAX_RASTER_DIMENSION);
+        let grid = PixelGrid::new(
+            area,
+            to_device.map_edge_lengths(area.size()),
+            MAX_RASTER_DIMENSION,
+        );
         let pixels = grid
             .centers()
             .map(|center| {
@@ -110,8 +114,7 @@ impl FunctionShading {
     /// matrix or a nonfinite result leaves the domain alone.
     fn domain_with_bbox(&self, bbox: &Rect) -> Rect {
         self.matrix
-            .try_inverse()
-            .and_then(|inverse| inverse.try_map_rect(bbox))
+            .inverse_map_rect(bbox)
             .map(|bbox| self.domain.union(&bbox))
             .ok()
             .filter(Rect::<f32>::is_valid)
