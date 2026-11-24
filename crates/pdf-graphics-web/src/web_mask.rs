@@ -46,6 +46,10 @@ impl<'a> IsolatedMask<'a> {
         })
     }
 
+    /// Paints the content, then composites it onto the parent through the coverage.
+    ///
+    /// The coverage applies without the content's clips: their anti-aliased edges would
+    /// apply it only in part and leave unmasked content behind.
     pub(crate) fn paint<F>(self, paint: F) -> Result<(), PdfCanvasError>
     where
         F: FnOnce(&mut WebCanvasBackend) -> Result<(), PdfCanvasError>,
@@ -58,7 +62,7 @@ impl<'a> IsolatedMask<'a> {
         } = self;
         let result = {
             let mut backend = backend;
-            paint(&mut backend).and_then(|()| backend.finish_page().map_err(Into::into))
+            paint(&mut backend).and_then(|()| backend.finish_surface().map_err(Into::into))
         };
         let result = result.and_then(|()| {
             composite_surface(content.context(), &coverage, 1.0, "destination-in")?;
