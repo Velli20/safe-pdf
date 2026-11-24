@@ -119,7 +119,10 @@ impl IndexedColorSpace {
         let index = components
             .first()
             .copied()
-            .ok_or(ColorSpaceError::InsufficientComponents(1, components.len()))?;
+            .ok_or(ColorSpaceError::ComponentCountMismatch {
+                expected: 1,
+                found: components.len(),
+            })?;
         let rounded = index.round();
         if !rounded.is_finite() {
             return Err(ColorSpaceError::Unsupported(format!(

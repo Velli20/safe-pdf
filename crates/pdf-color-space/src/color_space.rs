@@ -100,15 +100,48 @@ impl ColorSpace {
                 let expected_components = device_space.num_color_components();
                 Color::from_device_components(components)
                     .filter(|_| components.len() == expected_components)
-                    .ok_or(ColorSpaceError::InsufficientComponents(
-                        expected_components,
-                        components.len(),
-                    ))
+                    .ok_or(ColorSpaceError::ComponentCountMismatch {
+                        expected: expected_components,
+                        found: components.len(),
+                    })
             }
             ColorSpace::Pattern(_) => Err(ColorSpaceError::Unsupported(
                 "Pattern color space: color is set by the pattern resource, not by components"
                     .into(),
             )),
+        }
+    }
+
+    /// Converts the operands of a color operator (`SC`, `SCN`, `sc`, `scn`) to a color.
+    ///
+    /// In a device space the number of operands selects gray, RGB or CMYK, because
+    /// malformed content streams set colors of a device space other than the current one.
+    /// Every other space is as strict as [`Self::apply`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operands do not form a color in this space.
+    pub fn color_from_operands(&self, operands: &[f32]) -> Result<Color, ColorSpaceError> {
+        if !self.is_device_space() {
+            return self.apply(operands);
+        }
+        Color::from_device_components(operands).ok_or_else(|| {
+            ColorSpaceError::ComponentCountMismatch {
+                expected: self.num_color_components(),
+                found: operands.len(),
+            }
+        })
+    }
+
+    /// Returns the space that color components given along with a pattern name belong to.
+    ///
+    /// For a Pattern space with an underlying space, as uncolored tiling patterns use, it
+    /// is the underlying space. Every other space is its own.
+    #[must_use]
+    pub fn pattern_component_space(&self) -> &Self {
+        match self {
+            Self::Pattern(Some(underlying)) => underlying,
+            _ => self,
         }
     }
 }
@@ -148,7 +181,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            ColorSpaceError::InsufficientComponents(3, 1)
+            ColorSpaceError::ComponentCountMismatch {
+                expected: 3,
+                found: 1
+            }
         ));
     }
 }

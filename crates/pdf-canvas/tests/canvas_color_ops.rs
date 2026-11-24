@@ -49,7 +49,10 @@ fn invalid_generic_operand_count_still_returns_component_error() {
     assert!(matches!(
         render(b"0.2 0.4 scn"),
         Err(PdfCanvasError::ColorSpaceError(
-            ColorSpaceError::InsufficientComponents(1, 2)
+            ColorSpaceError::ComponentCountMismatch {
+                expected: 1,
+                found: 2
+            }
         ))
     ));
 }

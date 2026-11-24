@@ -1,38 +1,15 @@
 use pdf_color_space::color_space::ColorSpace;
-use pdf_color_space::error::ColorSpaceError;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 use pdf_graphics::color::Color;
-
-fn apply_content_stream_color(
-    color_space: &ColorSpace,
-    components: &[f32],
-) -> Result<Color, ColorSpaceError> {
-    // Honor the declared color space whenever its component count is valid.
-    match color_space.apply(components) {
-        Ok(color) => Ok(color),
-        // Some malformed content streams use SC/sc/SCN/scn operands whose count
-        // identifies a different device color space than the active one. Recover
-        // only from that arity mismatch; other color spaces and errors stay strict.
-        Err(err @ ColorSpaceError::InsufficientComponents(_, _))
-            if color_space.is_device_space() =>
-        {
-            Color::from_device_components(components).ok_or(err)
-        }
-        Err(err) => Err(err),
-    }
-}
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Handles `SC`/`SCN` without a pattern: sets the stroking color.
     pub(crate) fn set_stroking_color(&mut self, components: &[f32]) -> Result<(), PdfCanvasError> {
         let state = &mut self.state;
         state.stroke_pattern = None;
-
-        state.paint.set_stroke_color(apply_content_stream_color(
-            &state.stroke_color_space,
-            components,
-        )?);
+        let color = state.stroke_color_space.color_from_operands(components)?;
+        state.paint.set_stroke_color(color);
         Ok(())
     }
 
@@ -43,11 +20,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     ) -> Result<(), PdfCanvasError> {
         let state = &mut self.state;
         state.fill_pattern = None;
-
-        state.paint.set_fill_color(apply_content_stream_color(
-            &state.fill_color_space,
-            components,
-        )?);
+        let color = state.fill_color_space.color_from_operands(components)?;
+        state.paint.set_fill_color(color);
         Ok(())
     }
 
@@ -60,15 +34,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         if !components.is_empty() {
             let state = &mut self.state;
             state.fill_pattern = None;
-            let cs = state.fill_color_space.as_ref();
-            // For uncolored tiling patterns the components belong to the underlying
-            // color space wrapped inside Pattern, not to the Pattern space itself.
-            let color = match cs {
-                ColorSpace::Pattern(Some(inner_cs)) => {
-                    apply_content_stream_color(inner_cs, components)?
-                }
-                _ => apply_content_stream_color(cs, components)?,
-            };
+            let space = state.fill_color_space.pattern_component_space();
+            let color = space.color_from_operands(components)?;
             state.paint.set_fill_color(color);
         }
 
@@ -84,15 +51,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         if !components.is_empty() {
             let state = &mut self.state;
             state.stroke_pattern = None;
-            let cs = state.stroke_color_space.as_ref();
-            // For uncolored tiling patterns the components belong to the underlying
-            // color space wrapped inside Pattern, not to the Pattern space itself.
-            let color = match cs {
-                ColorSpace::Pattern(Some(inner_cs)) => {
-                    apply_content_stream_color(inner_cs, components)?
-                }
-                _ => apply_content_stream_color(cs, components)?,
-            };
+            let space = state.stroke_color_space.pattern_component_space();
+            let color = space.color_from_operands(components)?;
             state.paint.set_stroke_color(color);
         }
 
