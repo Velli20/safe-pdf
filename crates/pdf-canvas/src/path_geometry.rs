@@ -10,8 +10,7 @@ use pdf_graphics::{
 
 #[derive(Clone)]
 enum Geometry<'a> {
-    Borrowed(&'a PdfPath),
-    Owned(PdfPath),
+    Borrowed(&'a [PathVerb]),
     Shared(Arc<PdfPath>),
 }
 
@@ -29,42 +28,46 @@ pub struct CanvasPath<'a> {
 impl<'a> CanvasPath<'a> {
     /// Borrows a path that already uses logical device coordinates.
     pub fn device(path: &'a PdfPath) -> Self {
-        Self {
-            geometry: Geometry::Borrowed(path),
-            transform: None,
-        }
+        Self::from_verbs(&path.verbs, None)
     }
 
     /// Borrows geometry with a source-to-device mapping, rejecting nonfinite matrices.
     /// Coordinates are validated when the verbs are consumed.
     pub fn transformed(path: &'a PdfPath, transform: Transform) -> Result<Self, TransformError> {
         transform.validate()?;
-        Ok(Self {
-            geometry: Geometry::Borrowed(path),
-            transform: Some(transform),
-        })
+        Ok(Self::from_verbs(&path.verbs, Some(transform)))
     }
 
-    /// Owns the geometry needed to retain this path beyond its source borrow.
-    /// Shared geometry keeps its original allocation and deferred mapping.
-    pub fn into_owned(self) -> CanvasPath<'static> {
-        CanvasPath {
-            geometry: match self.geometry {
-                Geometry::Borrowed(path) => Geometry::Owned(path.clone()),
-                Geometry::Owned(path) => Geometry::Owned(path),
-                Geometry::Shared(path) => Geometry::Shared(path),
-            },
-            transform: self.transform,
+    /// Borrows verbs with an already validated source-to-device mapping.
+    pub(crate) fn from_verbs(verbs: &'a [PathVerb], transform: Option<Transform>) -> Self {
+        Self {
+            geometry: Geometry::Borrowed(verbs),
+            transform,
         }
     }
 
-    /// Returns the retained source geometry without applying its mapping.
-    pub(crate) fn source(&self) -> &PdfPath {
+    /// Returns this path with its shared geometry retained, or `None` when it borrows verbs.
+    pub(crate) fn to_shared(&self) -> Option<CanvasPath<'static>> {
         match &self.geometry {
-            Geometry::Borrowed(path) => path,
-            Geometry::Owned(path) => path,
-            Geometry::Shared(path) => path,
+            Geometry::Borrowed(_) => None,
+            Geometry::Shared(path) => Some(CanvasPath {
+                geometry: Geometry::Shared(Arc::clone(path)),
+                transform: self.transform,
+            }),
         }
+    }
+
+    /// Returns the source verbs without applying their mapping.
+    pub(crate) fn source(&self) -> &[PathVerb] {
+        match &self.geometry {
+            Geometry::Borrowed(verbs) => verbs,
+            Geometry::Shared(path) => &path.verbs,
+        }
+    }
+
+    /// Returns the source-to-device mapping, or `None` for verbs in device coordinates.
+    pub(crate) fn transform(&self) -> Option<Transform> {
+        self.transform
     }
 
     /// Iterates over device-coordinate verbs without allocating an intermediate path.
@@ -72,7 +75,7 @@ impl<'a> CanvasPath<'a> {
     /// Returns an error for nonfinite source coordinates or mapping overflow.
     /// Finite singular transforms are allowed because no inverse is required.
     pub fn verbs(&self) -> impl Iterator<Item = Result<PathVerb, TransformError>> + '_ {
-        self.source().verbs.iter().map(|verb| {
+        self.source().iter().map(|verb| {
             let point = |x: f32, y: f32| {
                 let point = Point::new(x, y);
                 match &self.transform {
@@ -176,7 +179,8 @@ impl<'a> CanvasPath<'a> {
     pub fn remapped(&self, transform: &Transform) -> Result<CanvasPath<'_>, TransformError> {
         let mut composed = self.transform.unwrap_or_else(Transform::identity);
         composed.concat(transform);
-        CanvasPath::transformed(self.source(), composed)
+        composed.validate()?;
+        Ok(CanvasPath::from_verbs(self.source(), Some(composed)))
     }
 
     /// Appends the mapped verbs to `target`, validating all mapped coordinates.

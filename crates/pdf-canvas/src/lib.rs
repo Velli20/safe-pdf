@@ -53,3 +53,5 @@ pub mod text;
 mod text_state;
 /// Tiling shader.
 pub mod tiling_shader;
+
+mod verb_buffer;
