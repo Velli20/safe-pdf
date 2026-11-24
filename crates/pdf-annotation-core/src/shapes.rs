@@ -138,10 +138,7 @@ fn quad_shapes(
     quads
         .iter()
         .map(|quad| {
-            let corners = quad.corners.map(|corner| {
-                let (x, y) = local.transform_point(corner.x, corner.y);
-                Point::new(x, y)
-            });
+            let corners = quad.corners.map(|corner| local.map_point(corner));
             Shape::Polyline {
                 path: outline(&Quad { corners }),
                 paint: paint.clone(),

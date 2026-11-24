@@ -32,11 +32,8 @@ impl Bounds for Quad<f32> {
         if !self.is_finite() {
             return None;
         }
-        let mut bounds = BoundsAccumulator::new();
-        for &corner in &self.corners {
-            bounds.include(corner);
-        }
-        bounds.finish()
+        let corners = self.corners.iter().copied();
+        corners.collect::<BoundsAccumulator>().finish()
     }
 }
 

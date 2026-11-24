@@ -6,9 +6,10 @@
 //! Sampling and allocation are independent of rendering backends. Callers choose
 //! the output resolution and enforce their own memory budgets.
 
-use crate::{color_stops::interpolate, paint::ShadingPaint};
-use pdf_graphics::{Image, PixelFormat, point::Point, rect::Rect, transform::Transform};
+use pdf_graphics::{Image, PixelFormat, point::Point, rect::Rect};
 use pdf_image::{ImageRasterError as Error, raster};
+
+use crate::paint::{ShadingPaint, ShadingSource};
 
 /// Samples a paint at pixel centers over `bounds`, returning straight-alpha RGBA8 pixels.
 ///
@@ -26,9 +27,9 @@ use pdf_image::{ImageRasterError as Error, raster};
 /// # Errors
 ///
 /// Returns [`Error::InvalidInput`] for invalid paint data, nonpositive or nonfinite
-/// output bounds, zero output dimensions, or mapped points that cannot be represented
-/// with finite coordinates, and [`Error::Transform`] for singular or nonfinite
-/// transforms. Returns [`Error::ResourceLimit`] if the buffer size overflows and
+/// output bounds or zero output dimensions, and [`Error::Transform`] for singular or
+/// nonfinite transforms, or if the bounds cannot be mapped back with finite coordinates.
+/// Returns [`Error::ResourceLimit`] if the buffer size overflows and
 /// [`Error::Allocation`] if allocation fails. No fixed resolution or memory cap is
 /// imposed by this function.
 pub fn rasterize_shading(
@@ -37,7 +38,7 @@ pub fn rasterize_shading(
     size: [u32; 2],
 ) -> Result<Image, Error> {
     paint.validate()?;
-    if !bounds.is_valid() || !bounds.width().is_finite() || !bounds.height().is_finite() {
+    if !bounds.is_valid() {
         return Err(Error::InvalidInput("sample bounds"));
     }
     let [w, h] = size;
@@ -51,10 +52,12 @@ pub fn rasterize_shading(
     let rows = raster::pixel_centers(bounds.top, bounds.height(), h)?;
     // Invert once per image: paint transforms map out of shading space, while
     // sampling needs the opposite direction.
-    let local = paint.transform().try_inverse()?;
+    let local = paint.transform.try_inverse()?;
+    // Finite corners keep every sample between them finite.
+    local.try_map_rect(bounds)?;
     for &y in &rows {
         for &x in &columns {
-            data.extend_from_slice(&paint.sample(map_point(&local, Point::new(x, y))?)?);
+            data.extend_from_slice(&paint.source.sample(local.map_point(Point::new(x, y))));
         }
     }
     Ok(Image {
@@ -66,87 +69,64 @@ pub fn rasterize_shading(
     })
 }
 
-impl ShadingPaint {
-    /// Evaluates a validated paint at a finite point already mapped into shading space.
+impl ShadingSource {
+    /// Evaluates a validated source at a finite point in its own coordinates.
     ///
     /// Returns straight-alpha RGBA8, using transparent black for uncovered samples.
-    /// The caller must validate the paint and apply its inverse transform first.
-    fn sample(&self, p: Point) -> Result<[u8; 4], Error> {
-        let (t, positions, colors) = match self {
-            Self::LinearGradient {
-                x0,
-                y0,
-                x1,
-                y1,
-                positions,
-                colors,
-                ..
-            } => {
-                // Project onto the gradient axis: t = dot(p - start, end - start) / |end - start|².
-                let dx = f64::from(*x1) - f64::from(*x0);
-                let dy = f64::from(*y1) - f64::from(*y0);
-                let t = ((f64::from(p.x) - f64::from(*x0)) * dx
-                    + (f64::from(p.y) - f64::from(*y0)) * dy)
-                    / (dx * dx + dy * dy);
-                (t, positions, colors)
+    fn sample(&self, point: Point) -> [u8; 4] {
+        let sample = match self {
+            Self::LinearGradient { start, end, stops } => {
+                let t = linear_parameter(*start, *end, point);
+                Some(stops.color_at(t).to_rgba8())
             }
             Self::RadialGradient {
-                start_x,
-                start_y,
-                start_r,
-                end_x,
-                end_y,
-                end_r,
-                positions,
-                colors,
-                ..
-            } => {
-                let start = [*start_x, *start_y, *start_r];
-                let Some(t) = radial_parameter(start, [*end_x, *end_y, *end_r], p) else {
-                    return Ok([0; 4]);
-                };
-                (t, positions, colors)
-            }
-            Self::RasterImage { image, .. } => {
-                return Ok(raster::nearest_pixel(image, p.x, p.y).unwrap_or([0; 4]));
-            }
+                start,
+                start_radius,
+                end,
+                end_radius,
+                stops,
+            } => radial_parameter((*start, *start_radius), (*end, *end_radius), point)
+                .map(|t| stops.color_at(t).to_rgba8()),
+            Self::RasterImage(image) => raster::nearest_pixel(image, point.x, point.y),
         };
-        // Pad past the end stops; duplicate-stop handling lives in interpolate.
-        interpolate(t, positions, colors)
+        sample.unwrap_or_default()
     }
 }
 
-/// Returns the radial gradient parameter of the circle through `p`, if one exists.
+/// Returns the parameter of `point` projected onto the axis from `start` to `end`.
+fn linear_parameter(start: Point, end: Point, point: Point) -> f64 {
+    // t = dot(point - start, end - start) / |end - start|².
+    let [x, y] = offset(start, point);
+    let [dx, dy] = offset(start, end);
+    (x * dx + y * dy) / (dx * dx + dy * dy)
+}
+
+/// Returns the radial gradient parameter of the circle through `point`, if one exists.
 ///
-/// `start` and `end` hold each circle's center and radius as `[x, y, r]`.
-fn radial_parameter(start: [f32; 3], end: [f32; 3], p: Point) -> Option<f64> {
-    let [start_x, start_y, r] = start.map(f64::from);
-    let [end_x, end_y, end_r] = end.map(f64::from);
-    let x = f64::from(p.x) - start_x;
-    let y = f64::from(p.y) - start_y;
-    let dx = end_x - start_x;
-    let dy = end_y - start_y;
-    let dr = end_r - r;
+/// `start` and `end` hold each circle's center and radius.
+fn radial_parameter(
+    (start, start_radius): (Point, f32),
+    (end, end_radius): (Point, f32),
+    point: Point,
+) -> Option<f64> {
+    let [x, y] = offset(start, point);
+    let [dx, dy] = offset(start, end);
+    let r = f64::from(start_radius);
+    let dr = f64::from(end_radius) - r;
     // A circle at t has center start + t * (dx, dy) and radius r + t * dr.
     // Expanding |(x, y) - t * (dx, dy)|² = (r + t * dr)² gives a*t² + b*t + c = 0.
     let a = dx * dx + dy * dy - dr * dr;
     let b = -2.0 * (x * dx + y * dy + r * dr);
     let c = x * x + y * y - r * r;
-    let roots = if a.abs() < 1e-12 {
-        // Treat a nearly zero quadratic coefficient as a linear equation.
-        // NaN marks the cases where this solver cannot select an intersection.
-        if b.abs() < 1e-12 {
-            [f64::NAN; 2]
-        } else {
-            [-c / b; 2]
-        }
+    // Infinite and NaN roots mark the equations without a solution. A nearly zero
+    // quadratic coefficient leaves a linear equation.
+    let roots = if a.abs() >= 1e-12 {
+        let root = (b * b - 4.0 * a * c).sqrt();
+        [(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)]
+    } else if b.abs() >= 1e-12 {
+        [-c / b; 2]
     } else {
-        let d = b * b - 4.0 * a * c;
-        if d < 0.0 {
-            [f64::NAN; 2]
-        } else {
-            [(-b - d.sqrt()) / (2.0 * a), (-b + d.sqrt()) / (2.0 * a)]
-        }
+        return None;
     };
     // Discard non-real solutions and circles with negative radius. When
     // both roots survive, prefer the larger-radius circle: the smaller t
@@ -157,20 +137,16 @@ fn radial_parameter(start: [f32; 3], end: [f32; 3], p: Point) -> Option<f64> {
         .reduce(|a, b| if dr < 0.0 { a.min(b) } else { a.max(b) })
 }
 
-/// Applies a transform and rejects arithmetic overflow or other nonfinite coordinates.
-fn map_point(t: &Transform, p: Point) -> Result<Point, Error> {
-    let (x, y) = t.transform_point(p.x, p.y);
-    if x.is_finite() && y.is_finite() {
-        Ok(Point::new(x, y))
-    } else {
-        Err(Error::InvalidInput("nonfinite point"))
-    }
+/// Returns the displacement between two points in the precision parameters are solved in.
+fn offset(from: Point, to: Point) -> [f64; 2] {
+    [
+        f64::from(to.x) - f64::from(from.x),
+        f64::from(to.y) - f64::from(from.y),
+    ]
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::color_stops::ColorStops;
     use pdf_graphics::{color::Color, transform::Transform};
@@ -186,34 +162,36 @@ mod tests {
         }
     }
 
-    fn linear(transform: Option<Transform>) -> ShadingPaint {
-        let ColorStops { positions, colors } = stops();
-        ShadingPaint::linear_gradient([0.0, 0.0, 1.0, 0.0], transform, positions, colors).unwrap()
+    fn linear(transform: Transform) -> ShadingPaint {
+        ShadingPaint::linear_gradient([0.0, 0.0, 1.0, 0.0], &stops(), transform).unwrap()
     }
 
     fn radial(start_r: f32, end_x: f32, end_r: f32) -> ShadingPaint {
-        let ColorStops { positions, colors } = stops();
-        ShadingPaint::RadialGradient {
-            start_x: 0.0,
-            start_y: 0.0,
-            start_r,
-            end_x,
-            end_y: 0.0,
-            end_r,
-            positions,
-            colors,
+        ShadingPaint {
+            source: ShadingSource::RadialGradient {
+                start: Point::new(0.0, 0.0),
+                start_radius: start_r,
+                end: Point::new(end_x, 0.0),
+                end_radius: end_r,
+                stops: stops(),
+            },
             transform: Transform::identity(),
         }
     }
 
     #[test]
     fn linear_samples_centers_at_requested_resolution() {
-        let image = rasterize_shading(&linear(None), &Rect::UNIT_RECT, [2, 1]).unwrap();
+        let image =
+            rasterize_shading(&linear(Transform::identity()), &Rect::UNIT_RECT, [2, 1]).unwrap();
         assert_eq!((image.width, image.height), (2, 1));
         assert_eq!(image.pixel_format, PixelFormat::RGBA8888);
         assert_eq!(image.data.as_ref(), &[64, 64, 64, 255, 191, 191, 191, 255]);
-        let image =
-            rasterize_shading(&linear(None), &Rect::from([-1.0, 0.0, 2.0, 1.0]), [3, 1]).unwrap();
+        let image = rasterize_shading(
+            &linear(Transform::identity()),
+            &Rect::from([-1.0, 0.0, 2.0, 1.0]),
+            [3, 1],
+        )
+        .unwrap();
         assert_eq!(
             image.data.as_ref(),
             &[0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255]
@@ -225,7 +203,7 @@ mod tests {
         // A quarter turn, nonuniform scale, and translation turn the horizontal ramp vertical.
         let transform = Transform::from_row(0.0, 2.0, -3.0, 0.0, 8.0, 10.0);
         let image = rasterize_shading(
-            &linear(Some(transform)),
+            &linear(transform),
             &Rect::from([5.0, 10.0, 8.0, 12.0]),
             [1, 2],
         )
@@ -236,19 +214,19 @@ mod tests {
     #[test]
     fn radial_handles_expanding_shrinking_and_linear_equations() {
         assert_eq!(
-            radial(0.0, 0.0, 2.0).sample(Point::new(1.0, 0.0)).unwrap(),
+            radial(0.0, 0.0, 2.0).source.sample(Point::new(1.0, 0.0)),
             [128, 128, 128, 255]
         );
         assert_eq!(
-            radial(2.0, 0.0, 0.0).sample(Point::new(0.5, 0.0)).unwrap(),
+            radial(2.0, 0.0, 0.0).source.sample(Point::new(0.5, 0.0)),
             [191, 191, 191, 255]
         );
         assert_eq!(
-            radial(0.0, 1.0, 1.0).sample(Point::new(1.0, 0.0)).unwrap(),
+            radial(0.0, 1.0, 1.0).source.sample(Point::new(1.0, 0.0)),
             [128, 128, 128, 255]
         );
         assert_eq!(
-            radial(1.0, 2.0, 1.0).sample(Point::new(0.0, 2.0)).unwrap(),
+            radial(1.0, 2.0, 1.0).source.sample(Point::new(0.0, 2.0)),
             [0; 4]
         );
         let image = rasterize_shading(
@@ -270,8 +248,7 @@ mod tests {
                 pixel_format: PixelFormat::RGBA8888,
                 interpolate: false,
             },
-            Rect::new(2.0, 1.0),
-            Some(Transform::from_translate(3.0, 4.0)),
+            Transform::from_translate(3.0, 4.0),
         )
         .unwrap();
         let image = rasterize_shading(&paint, &Rect::from([2.0, 4.0, 6.0, 5.0]), [4, 1]).unwrap();
@@ -290,16 +267,20 @@ mod tests {
             Rect::new(f32::INFINITY, 1.0),
         ] {
             assert!(matches!(
-                rasterize_shading(&linear(None), &bounds, [1, 1]),
+                rasterize_shading(&linear(Transform::identity()), &bounds, [1, 1]),
                 Err(Error::InvalidInput(_))
             ));
         }
         assert!(matches!(
-            rasterize_shading(&linear(None), &Rect::UNIT_RECT, [0, 1]),
+            rasterize_shading(&linear(Transform::identity()), &Rect::UNIT_RECT, [0, 1]),
             Err(Error::InvalidInput(_))
         ));
         assert!(matches!(
-            rasterize_shading(&linear(None), &Rect::UNIT_RECT, [u32::MAX; 2]),
+            rasterize_shading(
+                &linear(Transform::identity()),
+                &Rect::UNIT_RECT,
+                [u32::MAX; 2]
+            ),
             Err(Error::ResourceLimit)
         ));
         for transform in [
@@ -309,17 +290,9 @@ mod tests {
         ] {
             assert!(matches!(
                 rasterize_shading(
-                    &ShadingPaint::LinearGradient {
-                        x0: 0.0,
-                        y0: 0.0,
-                        x1: 1.0,
-                        y1: 0.0,
+                    &ShadingPaint {
                         transform,
-                        positions: Arc::from([0.0, 1.0]),
-                        colors: Arc::from([
-                            Color::from_rgb(0.0, 0.0, 0.0),
-                            Color::from_rgb(1.0, 1.0, 1.0),
-                        ]),
+                        ..linear(Transform::identity())
                     },
                     &Rect::UNIT_RECT,
                     [1, 1]
@@ -327,15 +300,12 @@ mod tests {
                 Err(Error::Transform(_))
             ));
         }
-        let mut paint = linear(None);
-        if let ShadingPaint::LinearGradient { x1, .. } = &mut paint {
-            *x1 = 0.0;
+        for x1 in [0.0, f32::NAN] {
+            assert!(
+                ShadingPaint::linear_gradient([0.0, 0.0, x1, 0.0], &stops(), Transform::identity())
+                    .is_err()
+            );
         }
-        assert!(paint.validate().is_err());
-        if let ShadingPaint::LinearGradient { x1, .. } = &mut paint {
-            *x1 = f32::NAN;
-        }
-        assert!(paint.validate().is_err());
         for paint in [
             radial(1.0, 0.0, 1.0),
             radial(-1.0, 0.0, 1.0),
@@ -348,26 +318,26 @@ mod tests {
     #[test]
     fn rejects_malformed_raster_data() {
         for (width, height) in [(1, 1), (0, 1), (usize::MAX, 2)] {
-            let paint = ShadingPaint::RasterImage {
-                image: Image {
+            let paint = ShadingPaint {
+                source: ShadingSource::RasterImage(Image {
                     data: vec![0; 3].into(),
                     width,
                     height,
                     pixel_format: PixelFormat::RGBA8888,
                     interpolate: false,
-                },
+                }),
                 transform: Transform::identity(),
             };
             assert!(rasterize_shading(&paint, &Rect::UNIT_RECT, [1, 1]).is_err());
         }
-        let paint = ShadingPaint::RasterImage {
-            image: Image {
+        let paint = ShadingPaint {
+            source: ShadingSource::RasterImage(Image {
                 data: vec![0; 4].into(),
                 width: 1,
                 height: 1,
                 pixel_format: PixelFormat::Gray8,
                 interpolate: false,
-            },
+            }),
             transform: Transform::identity(),
         };
         assert!(paint.validate().is_err());

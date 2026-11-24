@@ -654,8 +654,11 @@ impl RecordingCanvas {
 #[cfg(test)]
 mod tests {
     use pdf_graphics::pdf_path::PdfPath;
-    use pdf_graphics::{MaskMode, PixelFormat};
-    use pdf_shading::paint::ShadingPaint;
+    use pdf_graphics::{MaskMode, PixelFormat, point::Point};
+    use pdf_shading::{
+        color_stops::ColorStops,
+        paint::{ShadingPaint, ShadingSource},
+    };
     use std::sync::Arc;
 
     use super::*;
@@ -824,20 +827,21 @@ mod tests {
     #[test]
     /// Verifies that recorded gradient and canvas clone share color stops.
     fn recorded_gradient_and_canvas_clone_share_color_stops() {
-        let colors: Arc<[Color]> = [
-            Color::from_rgb(0.0, 0.0, 0.0),
-            Color::from_rgb(1.0, 1.0, 1.0),
-        ]
-        .into();
-        let positions: Arc<[f32]> = [0.0, 1.0].into();
-        let shader = Some(Shader::Shading(ShadingPaint::LinearGradient {
-            x0: 0.0,
-            y0: 0.0,
-            x1: 1.0,
-            y1: 1.0,
+        let stops = ColorStops {
+            colors: [
+                Color::from_rgb(0.0, 0.0, 0.0),
+                Color::from_rgb(1.0, 1.0, 1.0),
+            ]
+            .into(),
+            positions: [0.0, 1.0].into(),
+        };
+        let shader = Some(Shader::Shading(ShadingPaint {
+            source: ShadingSource::LinearGradient {
+                start: Point::new(0.0, 0.0),
+                end: Point::new(1.0, 1.0),
+                stops: stops.clone(),
+            },
             transform: Transform::identity(),
-            colors: Arc::clone(&colors),
-            positions: Arc::clone(&positions),
         }));
         let mut canvas = RecordingCanvas::new(1.0, 1.0);
 
@@ -858,14 +862,13 @@ mod tests {
                     command,
                     RecordingCommand::FillPath {
                         shader:
-                            Some(Shader::Shading(ShadingPaint::LinearGradient {
-                                colors: recorded_colors,
-                                positions: recorded_positions,
+                            Some(Shader::Shading(ShadingPaint {
+                                source: ShadingSource::LinearGradient { stops: recorded, .. },
                                 ..
                             })),
                         ..
-                    } if Arc::ptr_eq(recorded_colors, &colors)
-                        && Arc::ptr_eq(recorded_positions, &positions)
+                    } if Arc::ptr_eq(&recorded.colors, &stops.colors)
+                        && Arc::ptr_eq(&recorded.positions, &stops.positions)
                 )
             }));
         }

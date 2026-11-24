@@ -10,9 +10,10 @@ use pdf_canvas::{
 };
 use pdf_graphics::{
     BlendMode, DashPattern, Image, PathFillType, PixelFormat, color::Color, pdf_path::PathVerb,
-    size::Size, transform::Transform,
+    point::Point, size::Size, transform::Transform,
 };
-use pdf_shading::paint::ShadingPaint;
+use pdf_shading::paint::ShadingSource;
+use skia_safe::{SamplingOptions, TileMode, gradient_shader::GradientShaderColors};
 
 /// Native allocation, conversion, and mask replay failures.
 #[derive(Debug, thiserror::Error)]
@@ -322,109 +323,75 @@ fn to_skia_shader(
     shader: &Shader,
     device_to_backing: &Transform,
 ) -> Result<skia_safe::Shader, PdfCanvasError> {
-    match shader {
-        Shader::Shading(ShadingPaint::LinearGradient {
-            x0,
-            y0,
-            x1,
-            y1,
-            transform,
-            positions,
-            colors,
-        }) => {
-            let colors: Vec<skia_safe::Color> = colors
-                .iter()
-                .map(|color| skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color())
-                .collect();
-
-            let mat = to_skia_matrix(transform);
-
-            skia_safe::Shader::linear_gradient(
-                (
-                    skia_safe::Point::new(*x0, *y0),
-                    skia_safe::Point::new(*x1, *y1),
+    let (shader, name) = match shader {
+        Shader::Shading(paint) => {
+            let matrix = to_skia_matrix(&paint.transform);
+            match &paint.source {
+                ShadingSource::LinearGradient { start, end, stops } => (
+                    skia_safe::Shader::linear_gradient(
+                        (to_skia_point(*start), to_skia_point(*end)),
+                        GradientShaderColors::Colors(&to_skia_colors(&stops.colors)),
+                        Some(stops.positions.as_ref()),
+                        TileMode::Clamp,
+                        None,
+                        Some(&matrix),
+                    ),
+                    "linear_gradient",
                 ),
-                skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
-                Some(positions.as_ref()),
-                skia_safe::TileMode::Clamp,
-                None,
-                Some(&mat),
-            )
-            .ok_or_else(|| {
-                SkiaCanvasBackendError::ShaderCreationFailed {
-                    shader: "linear_gradient",
-                }
-                .into()
-            })
-        }
-        Shader::Shading(ShadingPaint::RadialGradient {
-            start_x,
-            start_y,
-            start_r,
-            end_x,
-            end_y,
-            end_r,
-            positions,
-            colors,
-            transform,
-        }) => {
-            let colors: Vec<skia_safe::Color> = colors
-                .iter()
-                .map(|color| skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color())
-                .collect();
-
-            let mat = to_skia_matrix(transform);
-
-            skia_safe::Shader::two_point_conical_gradient(
-                skia_safe::Point::new(*start_x, *start_y),
-                *start_r,
-                skia_safe::Point::new(*end_x, *end_y),
-                *end_r,
-                skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
-                Some(positions.as_ref()),
-                skia_safe::TileMode::Clamp,
-                None,
-                Some(&mat),
-            )
-            .ok_or_else(|| {
-                SkiaCanvasBackendError::ShaderCreationFailed {
-                    shader: "two_point_conical_gradient",
-                }
-                .into()
-            })
+                ShadingSource::RadialGradient {
+                    start,
+                    start_radius,
+                    end,
+                    end_radius,
+                    stops,
+                } => (
+                    skia_safe::Shader::two_point_conical_gradient(
+                        to_skia_point(*start),
+                        *start_radius,
+                        to_skia_point(*end),
+                        *end_radius,
+                        GradientShaderColors::Colors(&to_skia_colors(&stops.colors)),
+                        Some(stops.positions.as_ref()),
+                        TileMode::Clamp,
+                        None,
+                        Some(&matrix),
+                    ),
+                    "two_point_conical_gradient",
+                ),
+                ShadingSource::RasterImage(image) => (
+                    to_skia_image(image)?.to_shader(
+                        (TileMode::Decal, TileMode::Decal),
+                        SamplingOptions::default(),
+                        Some(&matrix),
+                    ),
+                    "raster_image",
+                ),
+            }
         }
         Shader::TilingPatternImage(pattern) => {
-            let (image, mat) = to_skia_tiling_image(pattern, device_to_backing)?;
-            image
-                .to_shader(
-                    (skia_safe::TileMode::Repeat, skia_safe::TileMode::Repeat),
-                    skia_safe::SamplingOptions::default(),
-                    Some(&mat),
-                )
-                .ok_or_else(|| {
-                    SkiaCanvasBackendError::ShaderCreationFailed {
-                        shader: "tiling_pattern_image",
-                    }
-                    .into()
-                })
-        }
-        Shader::Shading(ShadingPaint::RasterImage { image, transform }) => {
-            let image = to_skia_image(image)?;
-            let matrix = to_skia_matrix(transform);
-            image
-                .to_shader(
-                    (skia_safe::TileMode::Decal, skia_safe::TileMode::Decal),
-                    skia_safe::SamplingOptions::default(),
+            let (image, matrix) = to_skia_tiling_image(pattern, device_to_backing)?;
+            (
+                image.to_shader(
+                    (TileMode::Repeat, TileMode::Repeat),
+                    SamplingOptions::default(),
                     Some(&matrix),
-                )
-                .ok_or_else(|| {
-                    SkiaCanvasBackendError::ShaderCreationFailed {
-                        shader: "raster_image",
-                    }
-                    .into()
-                })
+                ),
+                "tiling_pattern_image",
+            )
         }
-    }
+    };
+    Ok(shader.ok_or(SkiaCanvasBackendError::ShaderCreationFailed { shader: name })?)
+}
+
+fn to_skia_point(point: Point) -> skia_safe::Point {
+    skia_safe::Point::new(point.x, point.y)
+}
+
+fn to_skia_colors(colors: &[Color]) -> Vec<skia_safe::Color> {
+    colors
+        .iter()
+        .map(|color| skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color())
+        .collect()
 }
 
 /// Creates a Skia Paint object for a given color and style.

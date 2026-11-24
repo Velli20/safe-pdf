@@ -9,7 +9,11 @@ use pdf_graphics::{
 };
 use pdf_shading::model::Shading;
 
-use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
+use crate::{
+    canvas_backend::{CanvasBackend, Shader},
+    error::PdfCanvasError,
+    pdf_canvas::PdfCanvas,
+};
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Prepares a shading paint and fills the current clip through the selected soft mask.
@@ -41,7 +45,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let blend_mode = state.paint.blend_mode;
         let mat = state.transform;
         let bbox_clip = shading_bbox_clip(&shading, &mat)?;
-        let shader = Some(self.build_shading_shader(&shading, &Some(mat), false)?);
+        let shader = Some(Shader::Shading(shading.paint(&mat, false)?));
 
         self.with_soft_mask(|backend| {
             with_clip(backend, bbox_clip.as_ref(), |backend| {

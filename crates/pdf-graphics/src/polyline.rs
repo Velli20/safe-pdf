@@ -94,8 +94,7 @@ impl Polyline<f32> {
     /// Maps vertices in place without checking that the mapped coordinates stay finite.
     pub fn transform(&mut self, transform: &Transform) {
         for point in &mut self.points {
-            let (x, y) = transform.transform_point(point.x, point.y);
-            *point = Point::new(x, y);
+            *point = transform.map_point(*point);
         }
     }
 

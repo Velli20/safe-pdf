@@ -2,16 +2,16 @@
 
 use std::sync::Arc;
 
-use pdf_color_space::color_space::ColorSpace;
-use pdf_function::function::{Function, FunctionImpl};
-use pdf_graphics::{color::Color, interval::Interval};
-
-use crate::error::PdfShadingError;
 use num_traits::ToPrimitive;
+use pdf_color_space::color_space::ColorSpace;
+use pdf_function::function::Function;
+use pdf_graphics::{color::Color, interval::Interval};
 use pdf_image::ImageRasterError;
 
+use crate::error::PdfShadingError;
+
 /// A collection of sampled colors and normalized positions for gradient-style shadings.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColorStops {
     /// The colors at each stop position.
     pub colors: Arc<[Color]>,
@@ -23,30 +23,19 @@ impl ColorStops {
     /// Number of color stops sampled when converting a function to gradient stops.
     const DEFAULT_NUM_COLOR_STOPS: u16 = 16;
 
-    /// Samples a shading function into discrete color stops for backend gradients.
-    pub fn from_function(
-        function: &Function,
-        color_space: &ColorSpace,
-    ) -> Result<Self, PdfShadingError> {
-        let domain = function.domain().unwrap_or(Interval::UNIT);
-        Self::from_function_domain(function, color_space, domain)
-    }
-
-    /// Samples a shading function across an explicit shading domain.
+    /// Samples a shading function across a shading domain into discrete color stops.
     ///
     /// The function is sampled at evenly spaced positions and on both sides of each
     /// breakpoint inside the domain, so a stitching function keeps every segment
     /// however many it has. Both samples of a breakpoint share its position, which
     /// makes the handover a hard edge.
-    pub fn from_function_domain(
+    pub fn from_function(
         function: &Function,
         color_space: &ColorSpace,
         domain: Interval,
     ) -> Result<Self, PdfShadingError> {
         if !domain.is_increasing() {
-            return Err(PdfShadingError::UnsupportedFeature(
-                "invalid shading domain".to_string(),
-            ));
+            return Err(PdfShadingError::InvalidDomain(domain));
         }
 
         let breakpoints = function.breakpoints();
@@ -55,7 +44,7 @@ impl ColorStops {
         let mut positions = Vec::with_capacity(capacity);
         let mut colors = Vec::with_capacity(capacity);
         let mut sample = |t: f32, x: f32| -> Result<(), PdfShadingError> {
-            let components = function.interpolate(&[x])?;
+            let components = function.apply(&[x])?;
             colors.push(color_space.apply(&components)?);
             positions.push(t);
             Ok(())
@@ -121,72 +110,56 @@ impl ColorStops {
             positions: positions.into(),
         }
     }
-}
 
-impl TryFrom<&Function> for ColorStops {
-    type Error = PdfShadingError;
-
-    /// Samples a shading function into color stops using `DeviceRGB`.
-    fn try_from(function: &Function) -> Result<Self, Self::Error> {
-        Self::from_function(function, &ColorSpace::DeviceRGB)
+    /// Returns the stops with every color channel clamped to `[0.0, 1.0]`.
+    pub(crate) fn clamped(&self) -> Self {
+        Self {
+            colors: self.colors.iter().map(|color| color.clamped()).collect(),
+            positions: Arc::clone(&self.positions),
+        }
     }
-}
 
-/// Validates borrowed backend gradient stops before sampling.
-pub(crate) fn validate_stops(positions: &[f32], colors: &[Color]) -> Result<(), ImageRasterError> {
-    if positions.len() != colors.len()
-        || positions.len() < 2
-        || positions
-            .iter()
-            .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
-        || positions.windows(2).any(|v| matches!(v,[a,b] if a>b))
-        || colors
-            .iter()
-            .any(|c| [c.r, c.g, c.b, c.a].iter().any(|v| !v.is_finite()))
-    {
-        return Err(ImageRasterError::InvalidInput(
-            "gradient stops or coordinates",
-        ));
+    /// Checks that there are at least two stops, with valid colors and ordered positions
+    /// between zero and one.
+    pub(crate) fn validate(&self) -> Result<(), ImageRasterError> {
+        let Self { colors, positions } = self;
+        if positions.len() != colors.len()
+            || positions.len() < 2
+            || !positions.is_sorted()
+            || !positions
+                .iter()
+                .all(|position| (0.0..=1.0).contains(position))
+            || !colors.iter().all(Color::is_valid)
+        {
+            return Err(ImageRasterError::InvalidInput(
+                "gradient stops or coordinates",
+            ));
+        }
+        Ok(())
     }
-    Ok(())
-}
 
-// The stop slices must have passed validate_stops before interpolation.
-pub(crate) fn interpolate(
-    t: f64,
-    positions: &[f32],
-    colors: &[Color],
-) -> Result<[u8; 4], ImageRasterError> {
-    let Some(first) = colors.first() else {
-        return Err(ImageRasterError::InvalidInput("empty stops"));
-    };
-    // The segment ends at the first stop past `t`; a duplicate position is passed over,
-    // so the later color applies from it.
-    let end = positions.partition_point(|p| f64::from(*p) <= t);
-    let Some(start) = end.checked_sub(1) else {
-        return Ok(first.to_rgba8());
-    };
-    let (Some(a), Some(b), Some(ca), Some(cb)) = (
-        positions.get(start),
-        positions.get(end),
-        colors.get(start),
-        colors.get(end),
-    ) else {
-        return colors
-            .last()
-            .map(|c| c.to_rgba8())
-            .ok_or(ImageRasterError::InvalidInput("empty stops"));
-    };
-    let f = ((t - f64::from(*a)) / f64::from(*b - *a))
-        .to_f32()
-        .ok_or(ImageRasterError::InvalidInput("stop interpolation"))?;
-    Ok(Color::from_rgba(
-        ca.r + (cb.r - ca.r) * f,
-        ca.g + (cb.g - ca.g) * f,
-        ca.b + (cb.b - ca.b) * f,
-        ca.a + (cb.a - ca.a) * f,
-    )
-    .to_rgba8())
+    /// Returns the color at the gradient parameter `t`, padding past the end stops.
+    ///
+    /// Where stops share a position, the last of them applies from it.
+    pub(crate) fn color_at(&self, t: f64) -> Color {
+        let end = self
+            .positions
+            .partition_point(|position| f64::from(*position) <= t);
+        let start = end.checked_sub(1).and_then(|start| self.stop(start));
+        match (start, self.stop(end)) {
+            (Some((start, from)), Some((end, to))) => {
+                let fraction = (t - f64::from(start)) / f64::from(end - start);
+                from.lerp(to, fraction.to_f32().unwrap_or_default())
+            }
+            (Some((_, color)), None) | (None, Some((_, color))) => color,
+            (None, None) => Color::TRANSPARENT,
+        }
+    }
+
+    /// Returns the position and color of the stop at `index`.
+    fn stop(&self, index: usize) -> Option<(f32, Color)> {
+        Some((*self.positions.get(index)?, *self.colors.get(index)?))
+    }
 }
 
 #[cfg(test)]
@@ -202,12 +175,9 @@ mod tests {
             1.0,
             Interval::new(0.0, 10.0),
         ));
-        let stops = ColorStops::from_function_domain(
-            &function,
-            &ColorSpace::DeviceRGB,
-            Interval::new(2.0, 8.0),
-        )
-        .unwrap();
+        let stops =
+            ColorStops::from_function(&function, &ColorSpace::DeviceRGB, Interval::new(2.0, 8.0))
+                .unwrap();
 
         assert_eq!(stops.positions.first(), Some(&0.0));
         assert_eq!(stops.positions.last(), Some(&1.0));
@@ -222,17 +192,23 @@ mod tests {
             Color::from_rgb(0.0, 1.0, 0.0),
             Color::from_rgb(0.0, 0.0, 1.0),
         ];
-        assert_eq!(
-            interpolate(0.5, &[0.0, 0.5, 0.5], &colors).unwrap(),
-            [0, 0, 255, 255]
-        );
+        let stops = ColorStops {
+            colors: colors.into(),
+            positions: [0.0, 0.5, 0.5].into(),
+        };
+        assert_eq!(stops.color_at(0.5).to_rgba8(), [0, 0, 255, 255]);
     }
+
     #[test]
     fn rejects_invalid_stops() {
         let colors = [
             Color::from_rgb(0.0, 0.0, 0.0),
             Color::from_rgb(1.0, 1.0, 1.0),
         ];
+        let stops = |positions: &[f32], colors: [Color; 2]| ColorStops {
+            colors: colors.into(),
+            positions: positions.into(),
+        };
         for positions in [
             vec![],
             vec![0.0],
@@ -242,14 +218,14 @@ mod tests {
             vec![0.0, 1.1],
             vec![0.0, f32::NAN],
         ] {
-            assert!(validate_stops(&positions, &colors).is_err());
+            assert!(stops(&positions, colors).validate().is_err());
         }
         let mut invalid = colors;
         if let Some(color) = invalid.first_mut() {
             color.a = f32::NAN;
         }
-        assert!(validate_stops(&[0.0, 1.0], &invalid).is_err());
-        assert!(validate_stops(&[0.5, 0.5], &colors).is_ok());
+        assert!(stops(&[0.0, 1.0], invalid).validate().is_err());
+        assert!(stops(&[0.5, 0.5], colors).validate().is_ok());
     }
 
     #[test]
@@ -258,17 +234,12 @@ mod tests {
             Color::from_rgba(1.0, 0.0, 0.0, 0.0),
             Color::from_rgba(0.0, 0.0, 1.0, 1.0),
         ];
-        assert_eq!(
-            interpolate(0.5, &[0.25, 0.75], &colors).unwrap(),
-            [128, 0, 128, 128]
-        );
-        assert_eq!(
-            interpolate(0.0, &[0.25, 0.75], &colors).unwrap(),
-            [255, 0, 0, 0]
-        );
-        assert_eq!(
-            interpolate(1.0, &[0.25, 0.75], &colors).unwrap(),
-            [0, 0, 255, 255]
-        );
+        let stops = ColorStops {
+            colors: colors.into(),
+            positions: [0.25, 0.75].into(),
+        };
+        assert_eq!(stops.color_at(0.5).to_rgba8(), [128, 0, 128, 128]);
+        assert_eq!(stops.color_at(0.0).to_rgba8(), [255, 0, 0, 0]);
+        assert_eq!(stops.color_at(1.0).to_rgba8(), [0, 0, 255, 255]);
     }
 }

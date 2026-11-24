@@ -3,8 +3,9 @@
 use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{color::Color, point::Point, rect::Rect, transform::Transform};
 use pdf_shading::{
+    color_stops::ColorStops,
     model::{MeshTriangle, MeshVertex, Shading},
-    paint::{ShadingPaint, build_shading_paint},
+    paint::{ShadingPaint, ShadingSource},
 };
 
 #[test]
@@ -31,10 +32,14 @@ fn builds_transformed_free_form_triangle_raster_paint() {
         }],
     };
 
-    let paint = build_shading_paint(&shading, Some(Transform::from_translate(2.0, 3.0)), false)
+    let paint = shading
+        .paint(&Transform::from_translate(2.0, 3.0), false)
         .expect("free-form triangle mesh should build raster paint");
-    assert!(matches!(paint, ShadingPaint::RasterImage { .. }));
-    let ShadingPaint::RasterImage { image, transform } = paint else {
+    let ShadingPaint {
+        source: ShadingSource::RasterImage(image),
+        transform,
+    } = paint
+    else {
         return;
     };
 
@@ -81,9 +86,14 @@ fn free_form_triangle_mesh_falls_back_from_empty_bbox_to_geometry() {
         }],
     };
 
-    let paint = build_shading_paint(&shading, None, false)
+    let paint = shading
+        .paint(&Transform::identity(), false)
         .expect("triangle geometry should provide bounds");
-    let ShadingPaint::RasterImage { image, transform } = paint else {
+    let ShadingPaint {
+        source: ShadingSource::RasterImage(image),
+        transform,
+    } = paint
+    else {
         return;
     };
 
@@ -107,9 +117,10 @@ fn fully_degenerate_free_form_mesh_builds_transparent_paint() {
         }],
     };
 
-    let paint =
-        build_shading_paint(&shading, None, false).expect("degenerate mesh should be a no-op");
-    let ShadingPaint::RasterImage { image, .. } = paint else {
+    let paint = shading
+        .paint(&Transform::identity(), false)
+        .expect("degenerate mesh should be a no-op");
+    let ShadingSource::RasterImage(image) = paint.source else {
         return;
     };
 
@@ -119,40 +130,43 @@ fn fully_degenerate_free_form_mesh_builds_transparent_paint() {
 }
 
 #[test]
-fn gradient_preparation_normalizes_colors_and_transform() {
+fn gradient_preparation_normalizes_colors() {
     let paint = ShadingPaint::linear_gradient(
         [0.0, 0.0, 10.0, 0.0],
-        None,
-        [0.0, 1.0].into(),
-        [
-            Color::from_rgba(-1.0, 0.5, 2.0, 1.5),
-            Color::from_rgb(0.0, 0.0, 0.0),
-        ]
-        .into(),
+        &ColorStops {
+            positions: [0.0, 1.0].into(),
+            colors: [
+                Color::from_rgba(-1.0, 0.5, 2.0, 1.5),
+                Color::from_rgb(0.0, 0.0, 0.0),
+            ]
+            .into(),
+        },
+        Transform::identity(),
     )
     .expect("gradient should be prepared");
 
-    let ShadingPaint::LinearGradient {
-        colors, transform, ..
-    } = paint
-    else {
+    let ShadingSource::LinearGradient { stops, .. } = paint.source else {
         return;
     };
-    assert_eq!(transform, Transform::identity());
-    assert_eq!(colors.first(), Some(&Color::from_rgba(0.0, 0.5, 1.0, 1.0)));
+    assert_eq!(
+        stops.colors.first(),
+        Some(&Color::from_rgba(0.0, 0.5, 1.0, 1.0))
+    );
 }
 
 #[test]
 fn gradient_preparation_rejects_singular_transform() {
     let result = ShadingPaint::linear_gradient(
         [0.0, 0.0, 10.0, 0.0],
-        Some(Transform::from_scale(0.0, 1.0)),
-        [0.0, 1.0].into(),
-        [
-            Color::from_rgb(0.0, 0.0, 0.0),
-            Color::from_rgb(1.0, 1.0, 1.0),
-        ]
-        .into(),
+        &ColorStops {
+            positions: [0.0, 1.0].into(),
+            colors: [
+                Color::from_rgb(0.0, 0.0, 0.0),
+                Color::from_rgb(1.0, 1.0, 1.0),
+            ]
+            .into(),
+        },
+        Transform::from_scale(0.0, 1.0),
     );
 
     assert!(result.is_err());

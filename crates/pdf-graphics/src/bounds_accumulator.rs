@@ -59,6 +59,17 @@ impl BoundsAccumulator {
     }
 }
 
+impl FromIterator<Point> for BoundsAccumulator {
+    /// Accumulates the bounds of every point.
+    fn from_iter<I: IntoIterator<Item = Point>>(points: I) -> Self {
+        let mut bounds = Self::new();
+        for point in points {
+            bounds.include(point);
+        }
+        bounds
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::BoundsAccumulator;

@@ -5,15 +5,7 @@ use crate::point::Point;
 /// The four input points are the start point, two control points, and the end point.
 /// The parameter `t` is expected to be in the range `[0.0, 1.0]`.
 pub fn evaluate_cubic_bezier(points: [Point; 4], t: f32) -> Point {
-    let basis = bernstein_basis(t);
-    let (x, y) = points
-        .into_iter()
-        .zip(basis)
-        .fold((0.0, 0.0), |(x, y), (point, weight)| {
-            (x + point.x * weight, y + point.y * weight)
-        });
-
-    Point::new(x, y)
+    Point::weighted_sum(points.into_iter().zip(bernstein_basis(t)))
 }
 
 /// Computes the cubic Bernstein basis weights for parameter `t`.

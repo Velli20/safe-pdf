@@ -52,14 +52,14 @@ impl Transform {
         point: crate::point::Point,
     ) -> Result<crate::point::Point, TransformError> {
         self.validate()?;
-        if !point.x.is_finite() || !point.y.is_finite() {
+        if !point.is_finite() {
             return Err(TransformError::NonFinite);
         }
-        let (x, y) = self.transform_point(point.x, point.y);
-        if !x.is_finite() || !y.is_finite() {
+        let mapped = self.map_point(point);
+        if !mapped.is_finite() {
             return Err(TransformError::NonFinite);
         }
-        Ok(crate::point::Point::new(x, y))
+        Ok(mapped)
     }
 
     /// Maps all four corners of a rectangle and returns their normalized bounds,
@@ -455,6 +455,12 @@ impl Transform {
         let new_x = self.sx * x + self.kx * y + self.tx;
         let new_y = self.ky * x + self.sy * y + self.ty;
         (new_x, new_y)
+    }
+
+    /// Maps a point without checking that the mapped coordinates stay finite.
+    pub fn map_point(&self, point: crate::point::Point) -> crate::point::Point {
+        let (x, y) = self.transform_point(point.x, point.y);
+        crate::point::Point::new(x, y)
     }
 
     /// Transforms a rectangle using this transform.

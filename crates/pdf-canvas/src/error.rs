@@ -1,6 +1,7 @@
 //! Errors produced by PDF interpretation, recording, and backend drawing.
 use pdf_color_space::error::ColorSpaceError;
 use pdf_graphics::dash_pattern::DashPatternError;
+use pdf_shading::error::PdfShadingError;
 use thiserror::Error;
 
 use crate::tiling_shader::TilingShaderError;
@@ -71,6 +72,9 @@ pub enum PdfCanvasError {
     #[error("Invalid dash pattern: {0}")]
     /// Dash intervals or their phase are invalid.
     InvalidDashPattern(String),
+    /// A shading could not be prepared for painting.
+    #[error(transparent)]
+    Shading(#[from] PdfShadingError),
     #[error("Unsupported PDF canvas feature: {0}")]
     /// The requested PDF feature is unsupported.
     UnsupportedFeature(String),

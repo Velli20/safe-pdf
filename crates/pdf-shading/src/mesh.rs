@@ -1,549 +1,271 @@
-//! Mesh shading evaluation, tessellation, and rasterization helpers.
+//! Evaluation, tessellation, and rasterization of mesh shadings.
+
+use std::ops::Range;
 
 use num_traits::ToPrimitive;
 use pdf_graphics::{
-    BoundsAccumulator,
+    Bounds, BoundsAccumulator,
     bezier::{bernstein_basis, evaluate_cubic_bezier},
     color::Color,
     point::Point,
     rect::Rect,
+    size::Size,
     transform::Transform,
 };
+use pdf_image::ImageRasterError;
 
-use crate::model::{MeshPatch, MeshTriangle};
+use crate::{
+    model::{MeshPatch, MeshTriangle, MeshVertex},
+    paint::ShadingPaint,
+    pixel_grid::{PIXEL_CENTER, PixelGrid},
+};
 
-pub use crate::model::MeshVertex;
+/// Fewest and most cells a patch is divided into along each side.
+const MIN_SUBDIVISION: u16 = 8;
+const MAX_SUBDIVISION: u16 = 32;
 
-const DEFAULT_SUBDIVISION: usize = 8;
-const MAX_SUBDIVISION: f32 = 32.0;
-const MAX_RASTER_DIMENSION: usize = 2048;
+/// Largest raster edge a mesh is sampled into.
+const MAX_RASTER_DIMENSION: u16 = 2048;
 
-/// A borrowed mesh patch view used by tessellation and rasterization helpers.
-#[derive(Debug, Clone, Copy)]
-pub enum MeshPatchRef<'a> {
-    /// A borrowed Coons patch.
-    Coons {
-        /// Boundary control points for the patch.
-        control_points: &'a [Point; 12],
-        /// Corner colors ordered clockwise from the top-left corner.
-        corner_colors: &'a [Color; 4],
-    },
-    /// A borrowed tensor-product patch.
-    Tensor {
-        /// Control points for the 4x4 patch net.
-        control_points: &'a [Point; 16],
-        /// Corner colors ordered clockwise from the top-left corner.
-        corner_colors: &'a [Color; 4],
-    },
+/// How far outside a triangle a pixel center may fall and still be painted, as a
+/// barycentric weight, so rounding leaves no gaps between adjacent triangles.
+const EDGE_TOLERANCE: f32 = 0.001;
+
+/// A piece of a mesh that paints itself independently of the others.
+pub(crate) trait MeshElement: Bounds {
+    /// Returns this element with its points mapped by `transform`.
+    fn mapped(&self, transform: &Transform) -> Self;
+
+    /// Paints this element, whose points are in pixel coordinates.
+    fn fill(&self, raster: &mut MeshRaster);
 }
 
-/// A rasterized mesh in device space.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RasterizedPatchMesh {
-    /// Packed RGBA8 pixels in row-major order.
-    pub pixels: Vec<u8>,
-    /// Destination rectangle for the rasterized image.
-    pub bounds: Rect,
-    /// Raster width in pixels.
-    pub width: usize,
-    /// Raster height in pixels.
-    pub height: usize,
+/// Builds a raster paint of `elements` over `bbox` in device space, or over the bounds of
+/// the elements without a usable `bbox`.
+///
+/// A mesh that covers no area paints nothing.
+pub(crate) fn paint_mesh<E: MeshElement>(
+    elements: &[E],
+    bbox: Option<Rect>,
+    transform: &Transform,
+) -> Result<ShadingPaint, ImageRasterError> {
+    let area = bbox
+        .map(|bbox| transform.map_rect(&bbox))
+        .filter(Rect::<f32>::is_valid)
+        .or_else(|| {
+            elements
+                .iter()
+                .filter_map(|element| element.mapped(transform).bounds())
+                .reduce(|a, b| a.union(&b))
+        })
+        .filter(Rect::<f32>::is_valid);
+    let Some(area) = area else {
+        return Ok(ShadingPaint::transparent());
+    };
+
+    let grid = PixelGrid::new(area, area.size(), MAX_RASTER_DIMENSION);
+    let placement = grid.placement();
+    let to_pixels = placement.try_inverse()?.post_concatenated(transform);
+    let mut raster = MeshRaster::new(grid.size());
+    for element in elements {
+        element.mapped(&to_pixels).fill(&mut raster);
+    }
+    ShadingPaint::raster_image(grid.image(raster.pixels, false), placement)
 }
 
-impl<'a> MeshPatchRef<'a> {
-    /// Creates a borrowed mesh view from a parsed [`MeshPatch`].
-    pub fn from_patch(patch: &'a MeshPatch) -> Self {
-        match patch {
-            MeshPatch::Coons {
-                control_points,
-                corner_colors,
-            } => Self::Coons {
-                control_points,
-                corner_colors,
-            },
-            MeshPatch::Tensor {
-                control_points,
-                corner_colors,
-            } => Self::Tensor {
-                control_points,
-                corner_colors,
-            },
+impl Bounds for MeshTriangle {
+    fn bounds(&self) -> Option<Rect> {
+        let points = self.vertices.iter().map(|vertex| vertex.point);
+        points.collect::<BoundsAccumulator>().finish()
+    }
+}
+
+impl MeshElement for MeshTriangle {
+    fn mapped(&self, transform: &Transform) -> Self {
+        Self {
+            vertices: self.vertices.map(|vertex| MeshVertex {
+                point: transform.map_point(vertex.point),
+                color: vertex.color,
+            }),
         }
     }
 
-    fn control_points(&self) -> &'a [Point] {
-        match self {
-            Self::Coons { control_points, .. } => control_points.as_slice(),
-            Self::Tensor { control_points, .. } => control_points.as_slice(),
-        }
+    fn fill(&self, raster: &mut MeshRaster) {
+        raster.fill_triangle(self);
     }
+}
 
-    fn evaluate(self, u: f32, v: f32) -> MeshVertex {
-        match self {
+impl Bounds for MeshPatch {
+    fn bounds(&self) -> Option<Rect> {
+        let points = self.control_points().iter().copied();
+        points.collect::<BoundsAccumulator>().finish()
+    }
+}
+
+impl MeshElement for MeshPatch {
+    fn mapped(&self, transform: &Transform) -> Self {
+        match *self {
             Self::Coons {
                 control_points,
                 corner_colors,
-            } => evaluate_coons_patch_vertex(control_points, corner_colors, u, v),
+            } => Self::Coons {
+                control_points: control_points.map(|point| transform.map_point(point)),
+                corner_colors,
+            },
             Self::Tensor {
                 control_points,
                 corner_colors,
-            } => evaluate_tensor_patch_vertex(control_points, corner_colors, u, v),
-        }
-    }
-}
-
-/// Evaluates a Coons patch vertex at the `(u, v)` parametric coordinate.
-pub fn evaluate_coons_patch_vertex(
-    control_points: &[Point; 12],
-    corner_colors: &[Color; 4],
-    u: f32,
-    v: f32,
-) -> MeshVertex {
-    let &[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11] = control_points;
-
-    let top = evaluate_cubic_bezier([p0, p1, p2, p3], u);
-    let right = evaluate_cubic_bezier([p3, p4, p5, p6], v);
-    let bottom = evaluate_cubic_bezier([p9, p8, p7, p6], u);
-    let left = evaluate_cubic_bezier([p0, p11, p10, p9], v);
-    let bilinear = bilinear_point(p0, p3, p6, p9, u, v);
-
-    MeshVertex {
-        point: Point::new(
-            (1.0 - v) * top.x + v * bottom.x + (1.0 - u) * left.x + u * right.x - bilinear.x,
-            (1.0 - v) * top.y + v * bottom.y + (1.0 - u) * left.y + u * right.y - bilinear.y,
-        ),
-        color: bilinear_color(corner_colors, u, v),
-    }
-}
-
-/// Evaluates a tensor-product patch vertex at the `(u, v)` parametric coordinate.
-pub fn evaluate_tensor_patch_vertex(
-    control_points: &[Point; 16],
-    corner_colors: &[Color; 4],
-    u: f32,
-    v: f32,
-) -> MeshVertex {
-    let u_basis = bernstein_basis(u);
-    let v_basis = bernstein_basis(v);
-    let mut x = 0.0;
-    let mut y = 0.0;
-
-    for (row, v_weight) in control_points.as_chunks::<4>().0.iter().zip(v_basis) {
-        for (&point, u_weight) in row.iter().zip(u_basis) {
-            let weight = u_weight * v_weight;
-            x += point.x * weight;
-            y += point.y * weight;
+            } => Self::Tensor {
+                control_points: control_points.map(|point| transform.map_point(point)),
+                corner_colors,
+            },
         }
     }
 
-    MeshVertex {
-        point: Point::new(x, y),
-        color: bilinear_color(corner_colors, u, v),
-    }
-}
-
-/// Computes device-space bounds for a sequence of patches after applying `transform`.
-pub fn patch_mesh_bounds<'a, I>(patches: I, transform: &Transform) -> Option<Rect>
-where
-    I: IntoIterator<Item = MeshPatchRef<'a>>,
-{
-    let mut bounds = BoundsAccumulator::new();
-
-    for patch in patches {
-        for point in patch.control_points() {
-            bounds.include(transformed_point(*point, transform));
-        }
-    }
-
-    bounds.finish()
-}
-
-/// Computes device-space bounds for parsed triangles after applying `transform`.
-pub fn triangle_mesh_bounds<'a, I>(triangles: I, transform: &Transform) -> Option<Rect>
-where
-    I: IntoIterator<Item = &'a MeshTriangle>,
-{
-    let mut bounds = BoundsAccumulator::new();
-
-    for triangle in triangles {
-        for vertex in triangle.vertices {
-            bounds.include(transformed_point(vertex.point, transform));
-        }
-    }
-
-    bounds.finish()
-}
-
-/// Chooses a tessellation subdivision count for one patch in device space.
-pub fn patch_subdivision(patch: MeshPatchRef<'_>, transform: &Transform) -> usize {
-    let Some(bounds) = patch_mesh_bounds(std::iter::once(patch), transform) else {
-        return DEFAULT_SUBDIVISION;
-    };
-
-    let normalized = bounds.normalized();
-    let target = normalized
-        .width()
-        .max(normalized.height())
-        .clamp(8.0, MAX_SUBDIVISION)
-        .round();
-
-    match target.to_usize() {
-        Some(value) => value,
-        None => DEFAULT_SUBDIVISION,
-    }
-}
-
-/// Tessellates a patch into device-space triangles.
-pub fn tessellate_patch(
-    patch: MeshPatchRef<'_>,
-    transform: &Transform,
-    subdivision: usize,
-) -> Vec<[MeshVertex; 3]> {
-    let steps = subdivision.max(1);
-    let rows = build_patch_rows(patch, transform, steps);
-    let mut triangles = Vec::with_capacity(steps.saturating_mul(steps).saturating_mul(2));
-
-    for row_pair in rows.windows(2) {
-        let [top_row, bottom_row] = row_pair else {
-            continue;
+    fn fill(&self, raster: &mut MeshRaster) {
+        let Some(bounds) = self.bounds() else {
+            return;
         };
+        let extent = bounds.width().max(bounds.height());
+        let steps = (MIN_SUBDIVISION..MAX_SUBDIVISION)
+            .find(|steps| f32::from(*steps) >= extent)
+            .unwrap_or(MAX_SUBDIVISION);
 
-        for (top_pair, bottom_pair) in top_row.windows(2).zip(bottom_row.windows(2)) {
-            let [top_left, top_right] = top_pair else {
-                continue;
-            };
-            let [bottom_left, bottom_right] = bottom_pair else {
-                continue;
-            };
-
-            triangles.push([*top_left, *top_right, *bottom_left]);
-            triangles.push([*top_right, *bottom_right, *bottom_left]);
-        }
-    }
-
-    triangles
-}
-
-/// Rasterizes a sequence of mesh patches into an RGBA8 image.
-pub fn rasterize_patch_mesh<'a, I>(
-    patches: I,
-    bounds: Rect,
-    transform: &Transform,
-    max_dimension: usize,
-) -> RasterizedPatchMesh
-where
-    I: IntoIterator<Item = MeshPatchRef<'a>>,
-{
-    let bounds = bounds.normalized();
-    let width = bounded_raster_dimension(bounds.width(), max_dimension);
-    let height = bounded_raster_dimension(bounds.height(), max_dimension);
-    let mut pixels = vec![0_u8; width.saturating_mul(height).saturating_mul(4)];
-
-    for patch in patches {
-        let subdivision = patch_subdivision(patch, transform);
-        let triangles = tessellate_patch(patch, transform, subdivision);
-        for triangle in triangles {
-            rasterize_triangle(&mut pixels, width, height, &bounds, triangle);
-        }
-    }
-
-    RasterizedPatchMesh {
-        pixels,
-        bounds,
-        width,
-        height,
-    }
-}
-
-/// Rasterizes parsed Gouraud-shaded triangles into an RGBA8 image.
-pub fn rasterize_triangle_mesh<'a, I>(
-    triangles: I,
-    bounds: Rect,
-    transform: &Transform,
-    max_dimension: usize,
-) -> RasterizedPatchMesh
-where
-    I: IntoIterator<Item = &'a MeshTriangle>,
-{
-    let bounds = bounds.normalized();
-    let width = bounded_raster_dimension(bounds.width(), max_dimension);
-    let height = bounded_raster_dimension(bounds.height(), max_dimension);
-    let mut pixels = vec![0_u8; width.saturating_mul(height).saturating_mul(4)];
-
-    for triangle in triangles {
-        let vertices = triangle
-            .vertices
-            .map(|vertex| transform_mesh_vertex(vertex, transform));
-        rasterize_triangle(&mut pixels, width, height, &bounds, vertices);
-    }
-
-    RasterizedPatchMesh {
-        pixels,
-        bounds,
-        width,
-        height,
-    }
-}
-
-/// Rasterizes one triangle into an RGBA8 image buffer.
-pub fn rasterize_triangle(
-    pixels: &mut [u8],
-    width: usize,
-    height: usize,
-    bounds: &Rect,
-    triangle: [MeshVertex; 3],
-) {
-    let Some(scan_bounds) = triangle_scan_bounds(triangle, bounds, width, height) else {
-        return;
-    };
-
-    let start_x = scan_bounds.left.max(0.0);
-    let end_x = scan_bounds.right;
-    let start_y = scan_bounds.top.max(0.0);
-    let end_y = scan_bounds.bottom;
-
-    let mut y = start_y;
-    while y < end_y {
-        let mut x = start_x;
-        let sample_y = bounds.top + y + 0.5;
-        while x < end_x {
-            let sample_x = bounds.left + x + 0.5;
-            if let Some((w0, w1, w2)) = barycentric_weights(triangle, sample_x, sample_y) {
-                let color = interpolate_triangle_color(triangle, w0, w1, w2);
-                write_rgba_pixel(pixels, width, x, y, color);
+        let mut upper = self.row(0, steps);
+        for row in 1..=steps {
+            let lower = self.row(row, steps);
+            for (&[top_left, top_right], &[bottom_left, bottom_right]) in
+                upper.array_windows().zip(lower.array_windows())
+            {
+                for vertices in [
+                    [top_left, top_right, bottom_left],
+                    [top_right, bottom_right, bottom_left],
+                ] {
+                    raster.fill_triangle(&MeshTriangle { vertices });
+                }
             }
-
-            x += 1.0;
+            upper = lower;
         }
-
-        y += 1.0;
     }
 }
 
-/// Builds a raster image for mesh shading paint with the default size cap.
-pub fn rasterize_mesh_patches<'a, I>(
-    patches: I,
-    bounds: Rect,
-    transform: &Transform,
-) -> RasterizedPatchMesh
-where
-    I: IntoIterator<Item = MeshPatchRef<'a>>,
-{
-    rasterize_patch_mesh(patches, bounds, transform, MAX_RASTER_DIMENSION)
-}
+impl MeshPatch {
+    fn control_points(&self) -> &[Point] {
+        match self {
+            Self::Coons { control_points, .. } => control_points,
+            Self::Tensor { control_points, .. } => control_points,
+        }
+    }
 
-/// Builds a raster image for triangle mesh shading paint with the default size cap.
-pub fn rasterize_mesh_triangles<'a, I>(
-    triangles: I,
-    bounds: Rect,
-    transform: &Transform,
-) -> RasterizedPatchMesh
-where
-    I: IntoIterator<Item = &'a MeshTriangle>,
-{
-    rasterize_triangle_mesh(triangles, bounds, transform, MAX_RASTER_DIMENSION)
-}
+    /// Evaluates the vertices of one row of a patch divided into `steps` cells per side.
+    fn row(&self, row: u16, steps: u16) -> Vec<MeshVertex> {
+        let parameter = |index: u16| f32::from(index) / f32::from(steps);
+        (0..=steps)
+            .map(|column| self.vertex(parameter(column), parameter(row)))
+            .collect()
+    }
 
-fn transformed_point(point: Point, transform: &Transform) -> Point {
-    let (x, y) = transform.transform_point(point.x, point.y);
-    Point::new(x, y)
-}
-
-fn bilinear_point(
-    top_left: Point,
-    top_right: Point,
-    bottom_right: Point,
-    bottom_left: Point,
-    u: f32,
-    v: f32,
-) -> Point {
-    let one_minus_u = 1.0 - u;
-    let one_minus_v = 1.0 - v;
-
-    Point::new(
-        one_minus_u * one_minus_v * top_left.x
-            + u * one_minus_v * top_right.x
-            + u * v * bottom_right.x
-            + one_minus_u * v * bottom_left.x,
-        one_minus_u * one_minus_v * top_left.y
-            + u * one_minus_v * top_right.y
-            + u * v * bottom_right.y
-            + one_minus_u * v * bottom_left.y,
-    )
-}
-
-fn bilinear_color(corner_colors: &[Color; 4], u: f32, v: f32) -> Color {
-    let [top_left, top_right, bottom_right, bottom_left] = *corner_colors;
-    let one_minus_u = 1.0 - u;
-    let one_minus_v = 1.0 - v;
-
-    Color::from_rgba(
-        one_minus_u * one_minus_v * top_left.r
-            + u * one_minus_v * top_right.r
-            + u * v * bottom_right.r
-            + one_minus_u * v * bottom_left.r,
-        one_minus_u * one_minus_v * top_left.g
-            + u * one_minus_v * top_right.g
-            + u * v * bottom_right.g
-            + one_minus_u * v * bottom_left.g,
-        one_minus_u * one_minus_v * top_left.b
-            + u * one_minus_v * top_right.b
-            + u * v * bottom_right.b
-            + one_minus_u * v * bottom_left.b,
-        one_minus_u * one_minus_v * top_left.a
-            + u * one_minus_v * top_right.a
-            + u * v * bottom_right.a
-            + one_minus_u * v * bottom_left.a,
-    )
-}
-
-fn build_patch_rows(
-    patch: MeshPatchRef<'_>,
-    transform: &Transform,
-    steps: usize,
-) -> Vec<Vec<MeshVertex>> {
-    let mut rows = Vec::with_capacity(steps.saturating_add(1));
-    let Some(steps_f32) = steps.to_f32() else {
-        return rows;
-    };
-
-    for row in 0..=steps {
-        let Some(row_f32) = row.to_f32() else {
-            continue;
+    /// Evaluates the patch at the `(u, v)` parametric coordinate.
+    fn vertex(&self, u: f32, v: f32) -> MeshVertex {
+        // Weights of the corners in the clockwise order of the corner colors.
+        let corner_weights = [(1.0 - u) * (1.0 - v), u * (1.0 - v), u * v, (1.0 - u) * v];
+        let (point, corner_colors) = match self {
+            Self::Coons {
+                control_points,
+                corner_colors,
+            } => {
+                let &[p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11] = control_points;
+                // Both ruled surfaces between opposite sides, less the corners they share.
+                let top = evaluate_cubic_bezier([p0, p1, p2, p3], u);
+                let right = evaluate_cubic_bezier([p3, p4, p5, p6], v);
+                let bottom = evaluate_cubic_bezier([p9, p8, p7, p6], u);
+                let left = evaluate_cubic_bezier([p0, p11, p10, p9], v);
+                let corners = Point::weighted_sum([p0, p3, p6, p9].into_iter().zip(corner_weights));
+                let point = Point::weighted_sum([
+                    (top, 1.0 - v),
+                    (bottom, v),
+                    (left, 1.0 - u),
+                    (right, u),
+                    (corners, -1.0),
+                ]);
+                (point, corner_colors)
+            }
+            Self::Tensor {
+                control_points,
+                corner_colors,
+            } => {
+                let (rows, _) = control_points.as_chunks::<4>();
+                let curve = rows.iter().map(|row| evaluate_cubic_bezier(*row, u));
+                let point = Point::weighted_sum(curve.zip(bernstein_basis(v)));
+                (point, corner_colors)
+            }
         };
-        let v = row_f32 / steps_f32;
-        let mut vertices = Vec::with_capacity(steps.saturating_add(1));
-
-        for column in 0..=steps {
-            let Some(column_f32) = column.to_f32() else {
-                continue;
-            };
-            let u = column_f32 / steps_f32;
-            let vertex = patch.evaluate(u, v);
-            vertices.push(transform_mesh_vertex(vertex, transform));
+        MeshVertex {
+            point,
+            color: Color::weighted_sum(corner_colors.iter().copied().zip(corner_weights)),
         }
-
-        rows.push(vertices);
-    }
-
-    rows
-}
-
-fn transform_mesh_vertex(vertex: MeshVertex, transform: &Transform) -> MeshVertex {
-    MeshVertex {
-        point: transformed_point(vertex.point, transform),
-        color: vertex.color,
     }
 }
 
-fn bounded_raster_dimension(value: f32, max_dimension: usize) -> usize {
-    let ceil_value = value.ceil().max(1.0);
-    match ceil_value.to_usize() {
-        Some(dimension) => dimension.min(max_dimension),
-        None => max_dimension,
-    }
+/// RGBA8 pixels that mesh triangles are painted into, transparent where none was.
+pub(crate) struct MeshRaster {
+    size: Size<u16>,
+    pixels: Vec<[u8; 4]>,
 }
 
-fn interpolate_triangle_color(triangle: [MeshVertex; 3], w0: f32, w1: f32, w2: f32) -> Color {
-    let [v0, v1, v2] = triangle;
-    Color::from_rgba(
-        v0.color.r * w0 + v1.color.r * w1 + v2.color.r * w2,
-        v0.color.g * w0 + v1.color.g * w1 + v2.color.g * w2,
-        v0.color.b * w0 + v1.color.b * w1 + v2.color.b * w2,
-        v0.color.a * w0 + v1.color.a * w1 + v2.color.a * w2,
-    )
-}
-
-fn write_rgba_pixel(pixels: &mut [u8], width: usize, x: f32, y: f32, color: Color) {
-    let Some(x) = x.to_usize() else {
-        return;
-    };
-    let Some(y) = y.to_usize() else {
-        return;
-    };
-
-    let pixel_index = y.saturating_mul(width).saturating_add(x).saturating_mul(4);
-    let end_index = pixel_index.saturating_add(4);
-    let Some(pixel) = pixels.get_mut(pixel_index..end_index) else {
-        return;
-    };
-    let [red, green, blue, alpha] = color.to_rgba8();
-
-    if let [r, g, b, a] = pixel {
-        *r = red;
-        *g = green;
-        *b = blue;
-        *a = alpha;
-    }
-}
-
-fn barycentric_weights(triangle: [MeshVertex; 3], x: f32, y: f32) -> Option<(f32, f32, f32)> {
-    let [a, b, c] = triangle;
-    let denominator = (b.point.y - c.point.y) * (a.point.x - c.point.x)
-        + (c.point.x - b.point.x) * (a.point.y - c.point.y);
-
-    if denominator.abs() <= f32::EPSILON {
-        return None;
+impl MeshRaster {
+    fn new(size: Size<u16>) -> Self {
+        let pixels = usize::from(size.width).saturating_mul(usize::from(size.height));
+        Self {
+            size,
+            pixels: vec![[0; 4]; pixels],
+        }
     }
 
-    let w0 = ((b.point.y - c.point.y) * (x - c.point.x)
-        + (c.point.x - b.point.x) * (y - c.point.y))
-        / denominator;
-    let w1 = ((c.point.y - a.point.y) * (x - c.point.x)
-        + (a.point.x - c.point.x) * (y - c.point.y))
-        / denominator;
-    let w2 = 1.0 - w0 - w1;
-    let epsilon = -0.001;
+    /// Paints every pixel whose center lies in `triangle`, given in pixel coordinates.
+    fn fill_triangle(&mut self, triangle: &MeshTriangle) {
+        let [a, b, c] = triangle.vertices;
+        // Maps an offset from `c` to the barycentric weights of `a` and `b`.
+        let weights = Transform::from_row(
+            a.point.x - c.point.x,
+            a.point.y - c.point.y,
+            b.point.x - c.point.x,
+            b.point.y - c.point.y,
+            0.0,
+            0.0,
+        );
+        let (Ok(weights), Some((columns, rows))) = (
+            weights.try_inverse(),
+            triangle.bounds().and_then(|bounds| self.covered(&bounds)),
+        ) else {
+            return;
+        };
 
-    if w0 >= epsilon && w1 >= epsilon && w2 >= epsilon {
-        Some((w0, w1, w2))
-    } else {
-        None
-    }
-}
-
-fn triangle_scan_bounds(
-    triangle: [MeshVertex; 3],
-    bounds: &Rect,
-    width: usize,
-    height: usize,
-) -> Option<Rect> {
-    let min_x = triangle
-        .iter()
-        .map(|vertex| vertex.point.x)
-        .fold(f32::INFINITY, f32::min)
-        .floor()
-        .max(bounds.left);
-    let max_x = triangle
-        .iter()
-        .map(|vertex| vertex.point.x)
-        .fold(f32::NEG_INFINITY, f32::max)
-        .ceil()
-        .min(bounds.right);
-    let min_y = triangle
-        .iter()
-        .map(|vertex| vertex.point.y)
-        .fold(f32::INFINITY, f32::min)
-        .floor()
-        .max(bounds.top);
-    let max_y = triangle
-        .iter()
-        .map(|vertex| vertex.point.y)
-        .fold(f32::NEG_INFINITY, f32::max)
-        .ceil()
-        .min(bounds.bottom);
-
-    if min_x >= max_x || min_y >= max_y {
-        return None;
+        let lines = self.pixels.chunks_exact_mut(usize::from(self.size.width));
+        for (line, row) in lines.skip(usize::from(rows.start)).zip(rows) {
+            let y = f32::from(row) + PIXEL_CENTER - c.point.y;
+            let pixels = line.iter_mut().skip(usize::from(columns.start));
+            for (pixel, column) in pixels.zip(columns.clone()) {
+                let x = f32::from(column) + PIXEL_CENTER - c.point.x;
+                let Point { x: wa, y: wb } = weights.map_point(Point::new(x, y));
+                let wc = 1.0 - wa - wb;
+                if wa.min(wb).min(wc) >= -EDGE_TOLERANCE {
+                    *pixel = Color::weighted_sum([(a.color, wa), (b.color, wb), (c.color, wc)])
+                        .to_rgba8();
+                }
+            }
+        }
     }
 
-    let max_width = width.to_f32().unwrap_or(f32::MAX);
-    let max_height = height.to_f32().unwrap_or(f32::MAX);
-
-    Some(Rect {
-        left: (min_x - bounds.left).max(0.0).min(max_width),
-        top: (min_y - bounds.top).max(0.0).min(max_height),
-        right: (max_x - bounds.left).max(0.0).min(max_width),
-        bottom: (max_y - bounds.top).max(0.0).min(max_height),
-    })
+    /// Returns the columns and rows of the pixels that `bounds` touches.
+    fn covered(&self, bounds: &Rect) -> Option<(Range<u16>, Range<u16>)> {
+        let span = |min: f32, max: f32, limit: u16| {
+            let pixel = |edge: f32| edge.clamp(0.0, f32::from(limit)).to_u16();
+            Some(pixel(min.floor())?..pixel(max.ceil())?)
+        };
+        Some((
+            span(bounds.left, bounds.right, self.size.width)?,
+            span(bounds.top, bounds.bottom, self.size.height)?,
+        ))
+    }
 }
