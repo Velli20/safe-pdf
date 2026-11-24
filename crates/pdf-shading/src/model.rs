@@ -102,11 +102,8 @@ pub enum Shading {
         /// Parsed mesh patches.
         patches: Vec<MeshPatch>,
     },
-    /// Placeholder for unsupported shading types.
-    Unsupported {
-        /// The unsupported shading type name.
-        name: String,
-    },
+    /// A shading type that is recognized but cannot be painted.
+    Unsupported(ShadingType),
 }
 
 /// A vertex in a PDF triangle mesh.
@@ -156,7 +153,7 @@ impl Shading {
             }
             Self::FreeFormTriangleMesh { color_space, .. }
             | Self::PatchMesh { color_space, .. } => Some(color_space),
-            Self::Unsupported { .. } => None,
+            Self::Unsupported(_) => None,
         }
     }
 
@@ -174,7 +171,7 @@ impl Shading {
             }
             | Self::FreeFormTriangleMesh { bbox, .. }
             | Self::PatchMesh { bbox, .. } => bbox.as_ref(),
-            Self::Unsupported { .. } => None,
+            Self::Unsupported(_) => None,
         }
     }
 }

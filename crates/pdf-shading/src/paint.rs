@@ -1,22 +1,10 @@
 //! Backend-facing shading paint descriptions and builders.
 
-use std::sync::Arc;
-
 use bytes::Bytes;
-use num_traits::ToPrimitive;
-use pdf_graphics::{Image, PixelFormat, color::Color, rect::Rect, transform::Transform};
-
+use pdf_graphics::{Image, PixelFormat, point::Point, transform::Transform};
 use pdf_image::ImageRasterError;
 
-use crate::{
-    color_stops::validate_stops,
-    error::PdfShadingError,
-    mesh::{
-        MeshPatchRef, patch_mesh_bounds, rasterize_mesh_patches, rasterize_mesh_triangles,
-        triangle_mesh_bounds,
-    },
-    model::Shading,
-};
+use crate::{color_stops::ColorStops, error::PdfShadingError, mesh::paint_mesh, model::Shading};
 
 /// A backend-ready representation of a parsed PDF shading.
 ///
@@ -24,155 +12,104 @@ use crate::{
 /// Floating-point fields use ordinary equality, so paints containing NaN may
 /// compare unequal to themselves and this type does not implement `Eq`.
 #[derive(Clone, PartialEq)]
-pub enum ShadingPaint {
-    /// A linear gradient shading paint.
+pub struct ShadingPaint {
+    /// What is painted, in shading or source-pixel coordinates.
+    pub source: ShadingSource,
+    /// Transform mapping the source's coordinates into device space.
+    pub transform: Transform,
+}
+
+/// The colors of a [`ShadingPaint`] before its transform is applied.
+#[derive(Clone, PartialEq)]
+pub enum ShadingSource {
+    /// Colors running along the line from `start` to `end`.
     LinearGradient {
-        /// Gradient start point x-coordinate.
-        x0: f32,
-        /// Gradient start point y-coordinate.
-        y0: f32,
-        /// Gradient end point x-coordinate.
-        x1: f32,
-        /// Gradient end point y-coordinate.
-        y1: f32,
-        /// Transform mapping shading space into device space.
-        transform: Transform,
-        /// Gradient colors.
-        colors: Arc<[Color]>,
-        /// Gradient stop positions.
-        positions: Arc<[f32]>,
+        /// Where the first stop is painted.
+        start: Point,
+        /// Where the last stop is painted.
+        end: Point,
+        /// The colors between both points.
+        stops: ColorStops,
     },
-    /// A radial gradient shading paint.
+    /// Colors blending from one circle into another.
     RadialGradient {
-        /// Start circle center x-coordinate.
-        start_x: f32,
-        /// Start circle center y-coordinate.
-        start_y: f32,
-        /// Start circle radius.
-        start_r: f32,
-        /// End circle center x-coordinate.
-        end_x: f32,
-        /// End circle center y-coordinate.
-        end_y: f32,
-        /// End circle radius.
-        end_r: f32,
-        /// Gradient colors.
-        colors: Arc<[Color]>,
-        /// Gradient stop positions.
-        positions: Arc<[f32]>,
-        /// Transform mapping shading space into device space.
-        transform: Transform,
+        /// Center of the circle painted with the first stop.
+        start: Point,
+        /// Radius of the circle painted with the first stop.
+        start_radius: f32,
+        /// Center of the circle painted with the last stop.
+        end: Point,
+        /// Radius of the circle painted with the last stop.
+        end_radius: f32,
+        /// The colors between both circles.
+        stops: ColorStops,
     },
-    /// A rasterized mesh shading paint.
-    RasterImage {
-        /// Render-ready RGBA8 source image.
-        image: Image,
-        /// Transform mapping source pixel coordinates into device space.
-        transform: Transform,
-    },
+    /// A rasterized shading as render-ready RGBA8 pixels.
+    RasterImage(Image),
 }
 
 impl ShadingPaint {
-    /// Builds a validated linear-gradient paint with normalized colors.
+    /// Builds a validated linear-gradient paint with clamped colors from
+    /// `[x0, y0, x1, y1]`.
     pub fn linear_gradient(
-        coords: [f32; 4],
-        transform: Option<Transform>,
-        positions: Arc<[f32]>,
-        colors: Arc<[Color]>,
+        [x0, y0, x1, y1]: [f32; 4],
+        stops: &ColorStops,
+        transform: Transform,
     ) -> Result<Self, ImageRasterError> {
-        let [x0, y0, x1, y1] = coords;
-        let paint = Self::LinearGradient {
-            x0,
-            y0,
-            x1,
-            y1,
-            transform: prepare_transform(transform)?,
-            positions,
-            colors: normalized_colors(&colors)?,
+        let source = ShadingSource::LinearGradient {
+            start: Point::new(x0, y0),
+            end: Point::new(x1, y1),
+            stops: stops.clamped(),
         };
-        paint.validate()?;
-        Ok(paint)
+        source.into_paint(transform)
     }
 
-    /// Builds a validated radial-gradient paint with normalized colors.
+    /// Builds a validated radial-gradient paint with clamped colors from
+    /// `[x0, y0, r0, x1, y1, r1]`.
     pub fn radial_gradient(
-        coords: [f32; 6],
-        transform: Option<Transform>,
-        positions: Arc<[f32]>,
-        colors: Arc<[Color]>,
+        [x0, y0, start_radius, x1, y1, end_radius]: [f32; 6],
+        stops: &ColorStops,
+        transform: Transform,
     ) -> Result<Self, ImageRasterError> {
-        let [start_x, start_y, start_r, end_x, end_y, end_r] = coords;
-        let paint = Self::RadialGradient {
-            start_x,
-            start_y,
-            start_r,
-            end_x,
-            end_y,
-            end_r,
-            positions,
-            colors: normalized_colors(&colors)?,
-            transform: prepare_transform(transform)?,
+        let source = ShadingSource::RadialGradient {
+            start: Point::new(x0, y0),
+            start_radius,
+            end: Point::new(x1, y1),
+            end_radius,
+            stops: stops.clamped(),
         };
-        paint.validate()?;
-        Ok(paint)
+        source.into_paint(transform)
     }
 
-    /// Builds a validated raster paint and folds destination placement into its transform.
-    pub fn raster_image(
-        image: Image,
-        dest_rect: Rect,
-        transform: Option<Transform>,
-    ) -> Result<Self, ImageRasterError> {
-        if !dest_rect.is_valid() {
-            return Err(ImageRasterError::InvalidInput("raster destination"));
-        }
-        let image_width = image
-            .width
-            .to_f32()
-            .ok_or(ImageRasterError::ResourceLimit)?;
-        let image_height = image
-            .height
-            .to_f32()
-            .ok_or(ImageRasterError::ResourceLimit)?;
-        let placement = Transform::from_row(
-            dest_rect.width().max(1.0) / image_width,
-            0.0,
-            0.0,
-            dest_rect.height().max(1.0) / image_height,
-            dest_rect.left,
-            dest_rect.top,
-        );
-        let paint = Self::RasterImage {
-            image,
-            transform: prepare_transform(transform)?.post_concatenated(&placement),
-        };
-        paint.validate()?;
-        Ok(paint)
+    /// Builds a validated raster paint whose transform maps image pixels into device space.
+    pub fn raster_image(image: Image, transform: Transform) -> Result<Self, ImageRasterError> {
+        ShadingSource::RasterImage(image).into_paint(transform)
     }
 
-    /// Returns the transform mapping shading or source-pixel space into device space.
-    pub fn transform(&self) -> &Transform {
-        match self {
-            Self::LinearGradient { transform, .. }
-            | Self::RadialGradient { transform, .. }
-            | Self::RasterImage { transform, .. } => transform,
+    /// Returns a paint that leaves everything it covers unchanged.
+    pub(crate) fn transparent() -> Self {
+        Self {
+            source: ShadingSource::RasterImage(Image {
+                data: Bytes::from_static(&[0; 4]),
+                width: 1,
+                height: 1,
+                pixel_format: PixelFormat::RGBA8888,
+                interpolate: false,
+            }),
+            transform: Transform::identity(),
         }
     }
 
     /// Returns a shallow clone with `parent` applied after the paint transform.
     pub fn with_parent_transform(&self, parent: &Transform) -> Self {
-        let mut paint = self.clone();
-        match &mut paint {
-            Self::LinearGradient { transform, .. }
-            | Self::RadialGradient { transform, .. }
-            | Self::RasterImage { transform, .. } => {
-                *transform = parent.post_concatenated(transform);
-            }
+        Self {
+            source: self.source.clone(),
+            transform: parent.post_concatenated(&self.transform),
         }
-        paint
     }
 
-    /// Checks gradient geometry and stops, or raster dimensions, data length, and bounds.
+    /// Checks gradient geometry and stops, or raster dimensions, data length, and format,
+    /// and that the transform can be inverted.
     ///
     /// # Errors
     ///
@@ -181,206 +118,99 @@ impl ShadingPaint {
     /// a malformed raster; and [`ImageRasterError::Transform`] for a nonfinite or
     /// singular transform.
     pub fn validate(&self) -> Result<(), ImageRasterError> {
+        self.source.validate()?;
+        self.transform.try_inverse()?;
+        Ok(())
+    }
+}
+
+impl ShadingSource {
+    /// Pairs this source with its transform and validates the paint.
+    fn into_paint(self, transform: Transform) -> Result<ShadingPaint, ImageRasterError> {
+        let paint = ShadingPaint {
+            source: self,
+            transform,
+        };
+        paint.validate()?;
+        Ok(paint)
+    }
+
+    fn validate(&self) -> Result<(), ImageRasterError> {
         match self {
-            Self::LinearGradient {
-                x0,
-                y0,
-                x1,
-                y1,
-                positions,
-                colors,
-                ..
-            } => {
-                if x0 == x1 && y0 == y1 {
+            Self::LinearGradient { start, end, stops } => {
+                if start == end {
                     return Err(ImageRasterError::InvalidInput("degenerate linear gradient"));
                 }
-                if [*x0, *y0, *x1, *y1].iter().any(|v| !v.is_finite()) {
+                if !start.is_finite() || !end.is_finite() {
                     return Err(ImageRasterError::InvalidInput("gradient coordinates"));
                 }
-                validate_stops(positions, colors)?;
+                stops.validate()
             }
             Self::RadialGradient {
-                start_x,
-                start_y,
-                start_r,
-                end_x,
-                end_y,
-                end_r,
-                positions,
-                colors,
-                ..
+                start,
+                start_radius,
+                end,
+                end_radius,
+                stops,
             } => {
-                if *start_r < 0.0
-                    || *end_r < 0.0
-                    || (start_x == end_x && start_y == end_y && start_r == end_r)
+                if *start_radius < 0.0
+                    || *end_radius < 0.0
+                    || (start, start_radius) == (end, end_radius)
                 {
                     return Err(ImageRasterError::InvalidInput("degenerate radial gradient"));
                 }
-                if [*start_x, *start_y, *start_r, *end_x, *end_y, *end_r]
-                    .iter()
-                    .any(|v| !v.is_finite())
+                if !start.is_finite()
+                    || !end.is_finite()
+                    || !start_radius.is_finite()
+                    || !end_radius.is_finite()
                 {
                     return Err(ImageRasterError::InvalidInput("gradient coordinates"));
                 }
-                validate_stops(positions, colors)?;
+                stops.validate()
             }
-            Self::RasterImage { image, .. } => {
+            Self::RasterImage(image) => {
                 image.validate()?;
                 if image.pixel_format != PixelFormat::RGBA8888 {
                     return Err(ImageRasterError::InvalidInput("raster image format"));
                 }
+                Ok(())
             }
         }
-        Ok(self.transform().validate()?)
     }
 }
 
-fn prepare_transform(transform: Option<Transform>) -> Result<Transform, ImageRasterError> {
-    let transform = transform.unwrap_or_else(Transform::identity);
-    transform.try_inverse()?;
-    Ok(transform)
-}
-
-fn normalized_colors(colors: &[Color]) -> Result<Arc<[Color]>, ImageRasterError> {
-    colors
-        .iter()
-        .map(|color| {
-            if [color.r, color.g, color.b, color.a]
-                .iter()
-                .any(|value| !value.is_finite())
-            {
-                return Err(ImageRasterError::InvalidInput("gradient color"));
+impl Shading {
+    /// Builds the backend-facing paint of this shading, mapped into device space by
+    /// `transform`.
+    ///
+    /// Gradients paint `/Background` past each end that does not extend when
+    /// `use_background` is set, and nothing there otherwise. A shading painted with the
+    /// `sh` operator ignores its background, so only pattern fills set it.
+    pub fn paint(
+        &self,
+        transform: &Transform,
+        use_background: bool,
+    ) -> Result<ShadingPaint, PdfShadingError> {
+        let paint = match self {
+            Self::Axial { coords, gradient } => ShadingPaint::linear_gradient(
+                *coords,
+                &gradient.bounded_stops(use_background),
+                *transform,
+            )?,
+            Self::Radial { coords, gradient } => ShadingPaint::radial_gradient(
+                *coords,
+                &gradient.bounded_stops(use_background),
+                *transform,
+            )?,
+            Self::FunctionBased(shading) => shading.paint(transform, use_background)?,
+            Self::FreeFormTriangleMesh {
+                bbox, triangles, ..
+            } => paint_mesh(triangles, *bbox, transform)?,
+            Self::PatchMesh { bbox, patches, .. } => paint_mesh(patches, *bbox, transform)?,
+            Self::Unsupported(shading_type) => {
+                return Err(PdfShadingError::UnsupportedShadingType(*shading_type));
             }
-            Ok(Color::from_rgba(
-                color.r.clamp(0.0, 1.0),
-                color.g.clamp(0.0, 1.0),
-                color.b.clamp(0.0, 1.0),
-                color.a.clamp(0.0, 1.0),
-            ))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Arc::from)
-}
-
-/// Builds backend-facing paint data for a parsed shading and optional transform.
-///
-/// Gradients paint `/Background` past each end that does not extend when
-/// `use_background` is set, and nothing there otherwise. A shading painted with the
-/// `sh` operator ignores its background, so only pattern fills set it.
-pub fn build_shading_paint(
-    shading: &Shading,
-    transform: Option<Transform>,
-    use_background: bool,
-) -> Result<ShadingPaint, PdfShadingError> {
-    match shading {
-        Shading::Axial { coords, gradient } => {
-            let stops = gradient.bounded_stops(use_background);
-            ShadingPaint::linear_gradient(*coords, transform, stops.positions, stops.colors)
-                .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
-        }
-        Shading::Radial { coords, gradient } => {
-            let stops = gradient.bounded_stops(use_background);
-            ShadingPaint::radial_gradient(*coords, transform, stops.positions, stops.colors)
-                .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
-        }
-        Shading::FunctionBased(shading) => shading.paint(transform, use_background),
-        Shading::FreeFormTriangleMesh {
-            bbox, triangles, ..
-        } => {
-            let mesh_transform = match transform {
-                Some(value) => value,
-                None => Transform::identity(),
-            };
-            let bounds = bbox
-                .map(|rect| mesh_transform.map_rect(&rect))
-                .filter(has_paintable_bounds)
-                .or_else(|| triangle_mesh_bounds(triangles, &mesh_transform))
-                .filter(has_paintable_bounds);
-            let Some(bounds) = bounds.map(|value| value.normalized()) else {
-                return Ok(transparent_raster_paint());
-            };
-
-            let raster = rasterize_mesh_triangles(triangles, bounds, &mesh_transform);
-
-            ShadingPaint::raster_image(
-                Image {
-                    data: raster.pixels.into(),
-                    width: raster.width,
-                    height: raster.height,
-                    pixel_format: PixelFormat::RGBA8888,
-                    interpolate: false,
-                },
-                raster.bounds,
-                None,
-            )
-            .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
-        }
-        Shading::PatchMesh { bbox, patches, .. } => {
-            let mesh_transform = match transform {
-                Some(value) => value,
-                None => Transform::identity(),
-            };
-            let mut bounds = bbox.map(|rect| mesh_transform.map_rect(&rect));
-            if bounds.is_none() {
-                bounds = patch_mesh_bounds(
-                    patches.iter().map(MeshPatchRef::from_patch),
-                    &mesh_transform,
-                );
-            }
-            let bounds = bounds.ok_or_else(|| {
-                PdfShadingError::UnsupportedFeature("Patch mesh has no bounds".to_string())
-            })?;
-            let bounds = bounds.normalized();
-            if bounds.width() <= 0.0 || bounds.height() <= 0.0 {
-                return Err(PdfShadingError::UnsupportedFeature(
-                    "Patch mesh bounds are empty".to_string(),
-                ));
-            }
-
-            let raster = rasterize_mesh_patches(
-                patches.iter().map(MeshPatchRef::from_patch),
-                bounds,
-                &mesh_transform,
-            );
-
-            ShadingPaint::raster_image(
-                Image {
-                    data: raster.pixels.into(),
-                    width: raster.width,
-                    height: raster.height,
-                    pixel_format: PixelFormat::RGBA8888,
-                    interpolate: false,
-                },
-                raster.bounds,
-                None,
-            )
-            .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
-        }
-        Shading::Unsupported { name } => Err(PdfShadingError::UnsupportedFeature(format!(
-            "Shading type '{name}' not implemented"
-        ))),
-    }
-}
-
-fn has_paintable_bounds(bounds: &Rect) -> bool {
-    let normalized = bounds.normalized();
-    normalized.left.is_finite()
-        && normalized.top.is_finite()
-        && normalized.right.is_finite()
-        && normalized.bottom.is_finite()
-        && normalized.width() > 0.0
-        && normalized.height() > 0.0
-}
-
-pub(crate) fn transparent_raster_paint() -> ShadingPaint {
-    ShadingPaint::RasterImage {
-        image: Image {
-            data: Bytes::from_static(&[0_u8, 0, 0, 0]),
-            width: 1,
-            height: 1,
-            pixel_format: PixelFormat::RGBA8888,
-            interpolate: false,
-        },
-        transform: Transform::identity(),
+        };
+        Ok(paint)
     }
 }

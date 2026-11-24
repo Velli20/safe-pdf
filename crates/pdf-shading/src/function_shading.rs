@@ -1,29 +1,14 @@
 //! Type 1 function-based shadings, sampled into a raster over their domain.
 
-use num_traits::ToPrimitive;
 use pdf_color_space::color_space::ColorSpace;
-use pdf_function::function::{Function, FunctionImpl};
-use pdf_graphics::{
-    Image, PixelFormat, color::Color, rect::Rect, size::Size, transform::Transform,
-};
+use pdf_function::function::Function;
+use pdf_graphics::{color::Color, point::Point, rect::Rect, transform::Transform};
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-use crate::{
-    error::PdfShadingError,
-    paint::{ShadingPaint, transparent_raster_paint},
-};
+use crate::{error::PdfShadingError, paint::ShadingPaint, pixel_grid::PixelGrid};
 
 /// Largest raster edge sampled for a function-based shading, bounding per-pixel function calls.
-const MAX_RASTER_DIMENSION: f32 = 1024.0;
-
-/// Bytes per pixel in the RGBA8 raster.
-const RGBA_BYTES_PER_PIXEL: usize = 4;
-
-/// Offset from a pixel's corner to its center, where each sample is taken.
-const PIXEL_CENTER: f32 = 0.5;
-
-/// Default `/Domain` of a function-based shading: the unit square.
-const DEFAULT_DOMAIN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+const MAX_RASTER_DIMENSION: u16 = 1024;
 
 /// A Type 1 function-based shading: color is a function of the point `(x, y)` in its domain.
 #[derive(Debug, Clone)]
@@ -36,8 +21,8 @@ pub struct FunctionShading {
     pub bbox: Option<Rect>,
     /// Optional anti-aliasing preference.
     pub anti_alias: Option<bool>,
-    /// The function domain `[x0 x1 y0 y1]`.
-    pub domain: [f32; 4],
+    /// The function domain, whose top edge is its lowest y.
+    pub domain: Rect,
     /// Maps the domain into shading space.
     pub matrix: Transform,
     /// One two-in, n-out function, or n two-in, one-out functions.
@@ -65,10 +50,16 @@ impl FromPdfObject for FunctionShading {
                 .lenient::<Rect>(b"BBox")
                 .map(|bbox| bbox.normalized()),
             anti_alias: context.optional(b"AntiAlias")?,
-            domain: context.optional(b"Domain")?.unwrap_or(DEFAULT_DOMAIN),
-            matrix: context
-                .optional::<[f32; 6]>(b"Matrix")?
-                .map_or_else(Transform::identity, Transform::from),
+            domain: context.optional(b"Domain")?.map_or(
+                Rect::UNIT_RECT,
+                |[left, right, top, bottom]: [f32; 4]| Rect {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                },
+            ),
+            matrix: context.optional(b"Matrix")?.unwrap_or_default(),
             functions,
         })
     }
@@ -82,138 +73,58 @@ impl FunctionShading {
     /// paints nothing.
     pub fn paint(
         &self,
-        transform: Option<Transform>,
+        transform: &Transform,
         use_background: bool,
     ) -> Result<ShadingPaint, PdfShadingError> {
-        let domain = self.domain_rect();
-        if !domain.is_valid() {
-            return Ok(transparent_raster_paint());
+        if !self.domain.is_valid() {
+            return Ok(ShadingPaint::transparent());
         }
         let background = self.background.filter(|_| use_background);
-        let area = match (background, &self.bbox) {
-            (Some(_), Some(bbox)) => self.domain_with_bbox(&domain, bbox),
-            _ => domain,
-        };
-        let to_device = transform
-            .unwrap_or_else(Transform::identity)
-            .post_concatenated(&self.matrix);
+        let area = background
+            .and(self.bbox)
+            .map_or(self.domain, |bbox| self.domain_with_bbox(&bbox));
         let outside = background.unwrap_or(Color::TRANSPARENT);
-        let image = self.rasterize(
-            &domain,
-            &area,
-            Self::raster_size(&area, &to_device),
-            outside,
-        )?;
-        ShadingPaint::raster_image(image, area, Some(to_device))
-            .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
+
+        let to_device = transform.post_concatenated(&self.matrix);
+        let grid = PixelGrid::new(area, to_device.axis_scales(), MAX_RASTER_DIMENSION);
+        let pixels = grid
+            .centers()
+            .map(|center| {
+                let color = if self.domain.contains(center) {
+                    self.color_at(center)?
+                } else {
+                    outside
+                };
+                Ok(color.to_rgba8())
+            })
+            .collect::<Result<_, PdfShadingError>>()?;
+        Ok(ShadingPaint::raster_image(
+            grid.image(pixels, true),
+            to_device.post_concatenated(&grid.placement()),
+        )?)
     }
 
     /// Returns the smallest rectangle in domain space holding the domain and `bbox`.
     ///
     /// `bbox` is in shading space, so it is mapped back through `/Matrix`. A singular
     /// matrix or a nonfinite result leaves the domain alone.
-    fn domain_with_bbox(&self, domain: &Rect, bbox: &Rect) -> Rect {
-        let Ok(bbox) = self
-            .matrix
+    fn domain_with_bbox(&self, bbox: &Rect) -> Rect {
+        self.matrix
             .try_inverse()
             .and_then(|inverse| inverse.try_map_rect(bbox))
-        else {
-            return *domain;
-        };
-        let area = Rect {
-            left: domain.left.min(bbox.left),
-            top: domain.top.min(bbox.top),
-            right: domain.right.max(bbox.right),
-            bottom: domain.bottom.max(bbox.bottom),
-        };
-        if area.is_valid() { area } else { *domain }
+            .map(|bbox| self.domain.union(&bbox))
+            .ok()
+            .filter(Rect::<f32>::is_valid)
+            .unwrap_or(self.domain)
     }
 
-    /// Returns the domain as a rectangle whose top edge is `y0`.
-    fn domain_rect(&self) -> Rect {
-        let [left, right, top, bottom] = self.domain;
-        Rect {
-            left,
-            top,
-            right,
-            bottom,
-        }
-    }
-
-    /// Returns the whole-pixel size the domain covers once mapped by `to_device`.
-    ///
-    /// Each edge is clamped to `1..=MAX_RASTER_DIMENSION`. A NaN extent stays NaN, which
-    /// [`Self::rasterize`] rejects.
-    fn raster_size(domain: &Rect, to_device: &Transform) -> Size {
-        let Size {
-            width: scale_x,
-            height: scale_y,
-        } = to_device.axis_scales();
-        let pixels = |extent: f32| extent.ceil().clamp(1.0, MAX_RASTER_DIMENSION);
-        Size::new(
-            pixels(domain.width() * scale_x),
-            pixels(domain.height() * scale_y),
-        )
-    }
-
-    /// Samples the shading at pixel centers over `area`, row 0 nearest `area.top`.
-    ///
-    /// `size` holds whole pixel counts from [`Self::raster_size`]. Samples outside
-    /// `domain` take `outside`.
-    fn rasterize(
-        &self,
-        domain: &Rect,
-        area: &Rect,
-        size: Size,
-        outside: Color,
-    ) -> Result<Image, PdfShadingError> {
-        let (Some(width), Some(height)) = (size.width.to_usize(), size.height.to_usize()) else {
-            return Err(PdfShadingError::UnsupportedFeature(
-                "invalid raster size".to_string(),
-            ));
-        };
-        let mut data = Vec::with_capacity(
-            width
-                .saturating_mul(height)
-                .saturating_mul(RGBA_BYTES_PER_PIXEL),
-        );
-
-        // Area units per pixel. `row` and `column` count pixels, advancing one at a time.
-        let step_x = area.width() / size.width;
-        let step_y = area.height() / size.height;
-        let mut row = PIXEL_CENTER;
-        while row < size.height {
-            let y = area.top + row * step_y;
-            let mut column = PIXEL_CENTER;
-            while column < size.width {
-                let x = area.left + column * step_x;
-                let color = if domain.contains_point(x, y) {
-                    self.color_at(x, y)?
-                } else {
-                    outside
-                };
-                data.extend_from_slice(&color.to_rgba8());
-                column += 1.0;
-            }
-            row += 1.0;
-        }
-
-        Ok(Image {
-            data: data.into(),
-            width,
-            height,
-            pixel_format: PixelFormat::RGBA8888,
-            interpolate: true,
-        })
-    }
-
-    /// Evaluates the shading functions at `(x, y)` and converts the result to a color.
-    fn color_at(&self, x: f32, y: f32) -> Result<Color, PdfShadingError> {
+    /// Evaluates the shading functions at a domain point and converts the result to a color.
+    fn color_at(&self, Point { x, y }: Point) -> Result<Color, PdfShadingError> {
         let components = match self.functions.as_slice() {
-            [function] => function.interpolate(&[x, y])?,
+            [function] => function.apply(&[x, y])?,
             functions => functions
                 .iter()
-                .map(|function| function.interpolate(&[x, y]))
+                .map(|function| function.apply(&[x, y]))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .flatten()

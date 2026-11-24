@@ -54,6 +54,45 @@ impl Color {
             .all(|value| (0.0..=1.0).contains(value))
     }
 
+    /// Returns the color with every channel, alpha included, clamped to `[0.0, 1.0]`.
+    ///
+    /// A NaN channel stays NaN.
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            r: self.r.clamp(0.0, 1.0),
+            g: self.g.clamp(0.0, 1.0),
+            b: self.b.clamp(0.0, 1.0),
+            a: self.a.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Interpolates every channel linearly from this color at `0.0` to `to` at `1.0`.
+    #[must_use]
+    pub fn lerp(self, to: Self, t: f32) -> Self {
+        Self::from_rgba(
+            self.r + (to.r - self.r) * t,
+            self.g + (to.g - self.g) * t,
+            self.b + (to.b - self.b) * t,
+            self.a + (to.a - self.a) * t,
+        )
+    }
+
+    /// Returns the sum of `colors`, each scaled by its weight, channel by channel.
+    pub fn weighted_sum(colors: impl IntoIterator<Item = (Self, f32)>) -> Self {
+        let [r, g, b, a] = colors
+            .into_iter()
+            .fold([0.0; 4], |[r, g, b, a], (color, weight)| {
+                [
+                    r + color.r * weight,
+                    g + color.g * weight,
+                    b + color.b * weight,
+                    a + color.a * weight,
+                ]
+            });
+        Self::from_rgba(r, g, b, a)
+    }
+
     /// Converts the color to 8-bit RGBA channel values.
     ///
     /// Each channel is clamped to `[0.0, 1.0]`, scaled to `[0, 255]`, and

@@ -35,7 +35,6 @@ use pdf_resources::{
     pattern::{PaintType, Pattern},
     resources::Resources,
 };
-use pdf_shading::{model::Shading, paint::build_shading_paint};
 use pdf_text_engine::FontSystem;
 
 /// How the active pattern paints a fill or stroke.
@@ -436,29 +435,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(outline)
     }
 
-    /// Builds a shader from a parsed shading definition.
-    ///
-    /// # Parameters
-    ///
-    /// - `shading`: The shading pattern definition.
-    /// - `matrix`: Optional transformation matrix for the shading.
-    /// - `use_background`: Whether the shading's `/Background` fills uncovered areas,
-    ///   which applies to shading patterns but not to the `sh` operator.
-    ///
-    /// # Returns
-    ///
-    /// An appropriate `Shader` if supported, or an error if not implemented.
-    pub(crate) fn build_shading_shader(
-        &mut self,
-        shading: &Shading,
-        transform: &Option<Transform>,
-        use_background: bool,
-    ) -> Result<Shader, PdfCanvasError> {
-        build_shading_paint(shading, *transform, use_background)
-            .map(Shader::Shading)
-            .map_err(|error| PdfCanvasError::UnsupportedFeature(error.to_string()))
-    }
-
     /// Returns the transform that maps `pattern` space into logical device space.
     ///
     /// Patterns are anchored to their parent stream's default user space,
@@ -509,7 +485,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 {
                     return Ok(PatternPaint::Shader(shader.clone()));
                 }
-                let shader = self.build_shading_shader(shading, &Some(transform), true)?;
+                let shader = Shader::Shading(shading.paint(&transform, true)?);
                 self.pattern_shading_cache =
                     Some((Arc::clone(&pattern), transform, shader.clone()));
                 Ok(PatternPaint::Shader(shader))

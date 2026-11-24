@@ -36,9 +36,7 @@ impl FromPdfObject for Shading {
             ShadingType::TensorProductPatchMesh => context
                 .read::<MeshConfig>(object)?
                 .patch_mesh(PatchKind::Tensor)?,
-            unsupported @ ShadingType::LatticeFormTriangleMesh => Shading::Unsupported {
-                name: unsupported.to_string(),
-            },
+            unsupported @ ShadingType::LatticeFormTriangleMesh => Shading::Unsupported(unsupported),
         };
         Ok(shading)
     }

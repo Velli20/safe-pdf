@@ -36,4 +36,13 @@ impl Point<f32> {
     pub fn lerp(self, to: Self, t: f32) -> Self {
         Self::new(self.x + (to.x - self.x) * t, self.y + (to.y - self.y) * t)
     }
+
+    /// Returns the sum of `points`, each scaled by its weight.
+    pub fn weighted_sum(points: impl IntoIterator<Item = (Self, f32)>) -> Self {
+        points
+            .into_iter()
+            .fold(Self::default(), |sum, (point, weight)| {
+                Self::new(sum.x + point.x * weight, sum.y + point.y * weight)
+            })
+    }
 }

@@ -1,8 +1,12 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_decode::DecodeError;
 use pdf_function::function_interpolation_error::FunctionInterpolationError;
+use pdf_graphics::Interval;
+use pdf_image::ImageRasterError;
 use pdf_object_reader::{ObjectReadError, object_error::ObjectError};
 use thiserror::Error;
+
+use crate::model::ShadingType;
 
 pub use crate::{
     free_form_mesh::FreeFormMeshError, mesh_decoder::MeshDecoderError, patch_mesh::PatchMeshError,
@@ -31,8 +35,12 @@ pub enum PdfShadingError {
     FreeFormMesh(#[from] FreeFormMeshError),
     #[error("invalid shading mesh data: {0}")]
     PatchMesh(#[from] PatchMeshError),
-    #[error("unsupported shading feature: {0}")]
-    UnsupportedFeature(String),
+    #[error("invalid shading /Domain: [{} {}]", .0.min, .0.max)]
+    InvalidDomain(Interval),
+    #[error("unsupported shading type: {0}")]
+    UnsupportedShadingType(ShadingType),
+    #[error(transparent)]
+    Raster(#[from] ImageRasterError),
 }
 
 impl From<PdfShadingError> for ObjectReadError {

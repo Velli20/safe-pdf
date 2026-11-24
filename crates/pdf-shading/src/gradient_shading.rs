@@ -48,7 +48,7 @@ impl FromPdfObject for GradientShading {
             .unwrap_or(Interval::UNIT);
         let function = context.required::<Function>(b"Function")?;
         Ok(Self {
-            color_stops: ColorStops::from_function_domain(&function, &color_space, domain)?,
+            color_stops: ColorStops::from_function(&function, &color_space, domain)?,
             extend: context.optional(b"Extend")?.unwrap_or_default(),
             background: context
                 .optional::<Vec<f32>>(b"Background")?
