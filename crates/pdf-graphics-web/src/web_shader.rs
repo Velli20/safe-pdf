@@ -73,7 +73,6 @@ struct PatternTile<'a> {
     surface: Surface,
     step: [f32; 2],
     transform: Transform,
-    inverse: Transform,
 }
 
 impl<'a> PatternTile<'a> {
@@ -81,7 +80,6 @@ impl<'a> PatternTile<'a> {
         let plan = pattern
             .raster_plan(parent.viewport.device_to_backing())
             .map_err(PdfCanvasError::from)?;
-        let inverse = plan.pattern_to_backing.try_inverse()?;
         let step = pattern.repeat_step();
         let surface = parent.surfaces.acquire(plan.size)?;
         {
@@ -108,7 +106,6 @@ impl<'a> PatternTile<'a> {
             surface,
             step,
             transform: plan.pattern_to_backing,
-            inverse,
         })
     }
 
@@ -121,7 +118,9 @@ impl<'a> PatternTile<'a> {
         web_paint::set_transform(context, &self.transform)?;
         context.set_image_smoothing_enabled(false);
         // Enumerate inverse-mapped corners so rotation and shear leave no gaps.
-        let bounds = self.inverse.map_rect(&raster_bounds(output.size())?);
+        let bounds = self
+            .transform
+            .inverse_map_rect(&raster_bounds(output.size())?)?;
         let grid = TileGrid::new(&bounds, self.step)?;
         let [step_x, step_y] = self.step;
         for [x, y] in grid.origins() {

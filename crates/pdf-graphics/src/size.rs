@@ -1,3 +1,5 @@
+use num_traits::ToPrimitive;
+
 /// A generic two-dimensional size value with a `f32` default coordinate type.
 ///
 /// The type stores the width and height as a width/height pair and is intended
@@ -36,6 +38,13 @@ impl Size<f32> {
     /// Returns `true` when the width and height are finite and strictly positive.
     pub fn validate(&self) -> bool {
         self.width.is_finite() && self.height.is_finite() && self.width > 0.0 && self.height > 0.0
+    }
+
+    /// Rounds both dimensions up to whole pixels, or returns `None` unless both are
+    /// positive and representable.
+    pub fn to_pixels(&self) -> Option<Size<u32>> {
+        let pixels = |extent: f32| extent.ceil().to_u32().filter(|pixels| *pixels > 0);
+        Some(Size::new(pixels(self.width)?, pixels(self.height)?))
     }
 }
 

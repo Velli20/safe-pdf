@@ -86,6 +86,12 @@ impl Transform {
         Ok(self.map_rect(&rect).normalized())
     }
 
+    /// Maps `rect` back through the inverse of this transform and returns its normalized
+    /// bounds, rejecting a transform that cannot be inverted or a nonfinite result.
+    pub fn inverse_map_rect(&self, rect: &Rect) -> Result<Rect, TransformError> {
+        self.try_inverse()?.try_map_rect(rect)
+    }
+
     /// Checks that every affine component is finite.
     pub fn validate(&self) -> Result<(), TransformError> {
         if [self.sx, self.ky, self.kx, self.sy, self.tx, self.ty]
@@ -483,6 +489,14 @@ impl Transform {
     /// input unit spans along x and along y, including any rotation or shear.
     pub fn axis_scales(&self) -> Size<f32> {
         Size::new(self.sx.hypot(self.ky), self.kx.hypot(self.sy))
+    }
+
+    /// Returns the lengths of the edges of an axis-aligned box of `size` once mapped,
+    /// including any rotation or shear: the extent needed to sample the box at the
+    /// output's density.
+    pub fn map_edge_lengths(&self, size: Size) -> Size {
+        let scales = self.axis_scales();
+        Size::new(size.width * scales.width, size.height * scales.height)
     }
 
     /// Returns the larger of the two axis scales.

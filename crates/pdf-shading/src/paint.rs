@@ -86,7 +86,7 @@ impl ShadingPaint {
             y0,
             x1,
             y1,
-            transform: prepare_transform(transform)?,
+            transform: transform.unwrap_or_default(),
             positions,
             colors: normalized_colors(&colors)?,
         };
@@ -111,7 +111,7 @@ impl ShadingPaint {
             end_r,
             positions,
             colors: normalized_colors(&colors)?,
-            transform: prepare_transform(transform)?,
+            transform: transform.unwrap_or_default(),
         };
         paint.validate()?;
         Ok(paint)
@@ -144,7 +144,7 @@ impl ShadingPaint {
         );
         let paint = Self::RasterImage {
             image,
-            transform: prepare_transform(transform)?.post_concatenated(&placement),
+            transform: transform.unwrap_or_default().post_concatenated(&placement),
         };
         paint.validate()?;
         Ok(paint)
@@ -172,7 +172,8 @@ impl ShadingPaint {
         paint
     }
 
-    /// Checks gradient geometry and stops, or raster dimensions, data length, and bounds.
+    /// Checks gradient geometry and stops, or raster dimensions, format, and data length,
+    /// and that the transform can be inverted.
     ///
     /// # Errors
     ///
@@ -231,14 +232,10 @@ impl ShadingPaint {
                 }
             }
         }
-        Ok(self.transform().validate()?)
+        // Sampling maps device points back into shading or source-pixel space.
+        self.transform().try_inverse()?;
+        Ok(())
     }
-}
-
-fn prepare_transform(transform: Option<Transform>) -> Result<Transform, ImageRasterError> {
-    let transform = transform.unwrap_or_else(Transform::identity);
-    transform.try_inverse()?;
-    Ok(transform)
 }
 
 fn normalized_colors(colors: &[Color]) -> Result<Arc<[Color]>, ImageRasterError> {

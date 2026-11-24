@@ -9,6 +9,7 @@ pub mod dash_pattern;
 pub mod geometry;
 mod image;
 pub mod interval;
+pub mod invertible_transform;
 pub mod mask_mode;
 pub mod pdf_path;
 pub mod point;
