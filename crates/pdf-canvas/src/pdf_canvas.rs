@@ -11,10 +11,9 @@ use crate::{
     canvas_state::CanvasState,
     content_stream_render_state::ContentStreamRenderState,
     error::PdfCanvasError,
-    recording_canvas::RecordingCanvas,
+    recording_canvas::{RecordingCanvas, fits_offscreen_recording},
     stroke_style::StrokeStyle,
     text::TextGlyph,
-    text_state::TextState,
     tiling_shader::{TilingShader, TilingShaderError, validate_geometry},
 };
 use pdf_content_stream::ContentStream;
@@ -31,6 +30,7 @@ use pdf_optional_content::OptionalContentState;
 use crate::image_cache::ImageCache;
 use crate::optional_content_filter::OptionalContentFilter;
 use pdf_resources::{
+    form::FormXObject,
     image_xobject::ImageXObject,
     pattern::{PaintType, Pattern},
     resources::Resources,
@@ -166,7 +166,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let state = CanvasState {
             transform,
             pattern_parent_transform: transform,
-            text_state: TextState::default(),
             ..Default::default()
         };
 
@@ -238,28 +237,28 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         self.text_glyphs.take().unwrap_or_default()
     }
 
-    /// Returns whether a form or pattern bbox is safe to materialize as an offscreen recording.
-    ///
-    /// PDFs in the wild sometimes contain malformed `/BBox` values for Form XObjects or tiling
-    /// patterns, including inverted coordinates, zero-sized boxes, non-finite values, or sentinel
-    /// coordinates near `±32768` that would expand into enormous temporary surfaces. This guard
-    /// keeps those cases from turning into backend allocation failures by requiring a finite,
-    /// positive bbox whose dimensions and total area stay within conservative offscreen limits.
-    pub(crate) fn can_record_offscreen_bbox(bbox: &Rect) -> bool {
-        const MAX_OFFSCREEN_RECORDING_DIMENSION: f32 = 8_192.0;
-        const MAX_OFFSCREEN_RECORDING_AREA: f32 =
-            MAX_OFFSCREEN_RECORDING_DIMENSION * MAX_OFFSCREEN_RECORDING_DIMENSION;
+    /// Returns the backend's logical device area, `[0, width] x [0, height]`.
+    pub(crate) fn device_rect(&self) -> Rect {
+        Rect::new(self.canvas.width(), self.canvas.height())
+    }
 
-        let width = bbox.width();
-        let height = bbox.height();
-
-        width.is_finite()
-            && height.is_finite()
-            && width > 0.0
-            && height > 0.0
-            && width <= MAX_OFFSCREEN_RECORDING_DIMENSION
-            && height <= MAX_OFFSCREEN_RECORDING_DIMENSION
-            && (width * height) <= MAX_OFFSCREEN_RECORDING_AREA
+    /// Runs a form's content stream under `matrix`, clipped to the form's bounds and
+    /// drawn with its resources.
+    pub(crate) fn render_form(
+        &mut self,
+        form: &FormXObject,
+        matrix: Option<Transform>,
+    ) -> Result<(), PdfCanvasError> {
+        self.render_content_stream(
+            &form.content_stream,
+            matrix,
+            form.bbox.as_ref(),
+            form.resources
+                .as_ref()
+                .map(|resources| resources.get())
+                .transpose()?,
+            None,
+        )
     }
 
     /// Records a PDF content stream into an offscreen [`RecordingCanvas`].
@@ -305,12 +304,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         cell_color: Option<Color>,
     ) -> Result<RecordingCanvas, PdfCanvasError> {
         let size = mat.map_or(*bbox, |mat| mat.map_rect(bbox)).size();
-        let mut initial_state = CanvasState {
-            transform: Transform::identity(),
-            pattern_parent_transform: Transform::identity(),
-            text_state: TextState::default(),
-            ..Default::default()
-        };
+        let mut initial_state = CanvasState::default();
         if let Some(color) = cell_color {
             initial_state.paint.set_fill_color(color);
             initial_state.paint.set_stroke_color(color);
@@ -545,7 +539,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 if validate_geometry(&bbox, step).is_err() {
                     return Ok(PatternPaint::Nothing);
                 }
-                if !Self::can_record_offscreen_bbox(&bbox) {
+                if !fits_offscreen_recording(&bbox) {
                     return Ok(PatternPaint::Color);
                 }
 
@@ -1109,7 +1103,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 #[cfg(test)]
 mod tests {
     use pdf_document::page::PdfPage;
-    use pdf_graphics::rect::Rect;
     use pdf_text_engine::bundled_font_system;
 
     use super::PdfCanvas;
@@ -1218,19 +1211,6 @@ mod tests {
         }
 
         assert!(canvas.state.clip_path.is_some());
-    }
-
-    #[test]
-    /// Verifies that rejects absurd offscreen recording bbox.
-    fn rejects_absurd_offscreen_recording_bbox() {
-        assert!(!PdfCanvas::<RecordingCanvas>::can_record_offscreen_bbox(
-            &Rect {
-                left: -32768.0,
-                top: -32768.0,
-                right: 32767.0,
-                bottom: 32767.0,
-            }
-        ));
     }
 
     #[test]

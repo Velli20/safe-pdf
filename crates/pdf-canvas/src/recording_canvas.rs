@@ -11,7 +11,7 @@ use crate::{
     verb_buffer::{VerbBuffer, VerbRange},
 };
 use pdf_graphics::{
-    BlendMode, Image as BackendImage, PathFillType, color::Color, transform::Transform,
+    BlendMode, Image as BackendImage, PathFillType, color::Color, rect::Rect, transform::Transform,
 };
 
 /// A path kept by a recording.
@@ -168,6 +168,27 @@ pub struct RecordingCanvas {
 /// Backends replay nested recordings recursively, so this bounds their stack use
 /// and temporary surface count independently of the target.
 pub const MAX_NESTING: usize = 64;
+
+/// Returns whether a form or pattern bbox is safe to materialize as an offscreen recording.
+///
+/// PDFs in the wild sometimes contain malformed `/BBox` values for Form XObjects or tiling
+/// patterns, including inverted coordinates, zero-sized boxes, non-finite values, or sentinel
+/// coordinates near `±32768` that would expand into enormous temporary surfaces. This guard
+/// keeps those cases from turning into backend allocation failures by requiring a finite,
+/// positive bbox whose dimensions and total area stay within conservative offscreen limits.
+pub(crate) fn fits_offscreen_recording(bbox: &Rect) -> bool {
+    const MAX_OFFSCREEN_RECORDING_DIMENSION: f32 = 8_192.0;
+    const MAX_OFFSCREEN_RECORDING_AREA: f32 =
+        MAX_OFFSCREEN_RECORDING_DIMENSION * MAX_OFFSCREEN_RECORDING_DIMENSION;
+
+    let width = bbox.width();
+    let height = bbox.height();
+
+    bbox.is_valid()
+        && width <= MAX_OFFSCREEN_RECORDING_DIMENSION
+        && height <= MAX_OFFSCREEN_RECORDING_DIMENSION
+        && (width * height) <= MAX_OFFSCREEN_RECORDING_AREA
+}
 
 impl RecordingCanvas {
     /// Creates a new recording canvas with the given logical dimensions.
@@ -648,6 +669,17 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    #[test]
+    /// Verifies that rejects absurd offscreen recording bbox.
+    fn rejects_absurd_offscreen_recording_bbox() {
+        assert!(!fits_offscreen_recording(&Rect {
+            left: -32768.0,
+            top: -32768.0,
+            right: 32767.0,
+            bottom: 32767.0,
+        }));
     }
     /// Nested masks occupy the same command buffer and failed callbacks remove their complete body.
     #[test]

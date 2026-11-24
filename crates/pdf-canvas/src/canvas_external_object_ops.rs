@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use pdf_graphics::{
     BlendMode, Image, MaskMode, PathFillType, PixelFormat, pdf_path::PdfPath, rect::Rect,
-    size::Size, transform::Transform,
+    transform::Transform,
 };
 use pdf_image::{
     InlineImage,
@@ -79,7 +79,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                     Some(FormGroup::Transparency { isolated }) => {
                         self.render_transparency_group(&form, isolated)?;
                     }
-                    _ => self.render_form(&form)?,
+                    _ => self.render_form(&form, form.matrix)?,
                 }
             }
             _ => {
@@ -90,20 +90,6 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         }
 
         Ok(())
-    }
-
-    /// Runs a form's content stream under its matrix, bounds and resources.
-    fn render_form(&mut self, form: &FormXObject) -> Result<(), PdfCanvasError> {
-        self.render_content_stream(
-            &form.content_stream,
-            form.matrix,
-            form.bbox.as_ref(),
-            form.resources
-                .as_ref()
-                .map(|resources| resources.get())
-                .transpose()?,
-            None,
-        )
     }
 
     /// Paints a transparency group as one object under the soft mask, nonstroking alpha
@@ -132,7 +118,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         // A non-isolated group's contents painted straight onto the backdrop composite
         // the same way.
         if !isolated && mask.is_none() && alpha >= 1.0 && blend_mode.is_none() {
-            return self.render_form(form);
+            return self.render_form(form, form.matrix);
         }
         // A nested canvas restarts its optional content, so hidden content stops here.
         if self.content_hidden() {
@@ -143,10 +129,10 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         initial_state.paint.fill_color.a = 1.0;
         initial_state.paint.stroke_color.a = 1.0;
         initial_state.paint.blend_mode = None;
-        let size = Size::new(self.canvas.width(), self.canvas.height());
+        let size = self.device_rect().size();
         let text_glyphs = self.text_glyphs.take();
         let group = self.record_nested(size, initial_state, text_glyphs, |canvas| {
-            canvas.render_form(form)
+            canvas.render_form(form, form.matrix)
         })?;
         // The layer encloses the mask so that its blend mode meets the real backdrop.
         self.canvas

@@ -8,7 +8,7 @@ use pdf_resources::soft_mask::SoftMask;
 
 use crate::{
     canvas_backend::CanvasBackend, canvas_state::CanvasState, error::PdfCanvasError,
-    mask_layer::MaskLayer, pdf_canvas::PdfCanvas, text_state::TextState,
+    mask_layer::MaskLayer, pdf_canvas::PdfCanvas, recording_canvas::fits_offscreen_recording,
 };
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
@@ -33,7 +33,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         };
         let matrix = form.matrix.unwrap_or_else(Transform::identity);
         let bounds = matrix.map_rect(bbox);
-        if !Self::can_record_offscreen_bbox(bbox) || !Self::can_record_offscreen_bbox(&bounds) {
+        if !fits_offscreen_recording(bbox) || !fits_offscreen_recording(&bounds) {
             return Ok(None);
         }
         let backdrop = match smask.mask_type {
@@ -44,38 +44,21 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         // recording needs to cover only those bounds.
         let region = match backdrop {
             Some(_) => self
-                .visible_user_area()?
-                .filter(Self::can_record_offscreen_bbox)
+                .visible_user_area()
+                .filter(fits_offscreen_recording)
                 .unwrap_or(bounds),
             None => bounds,
-        };
-        let resources = form
-            .resources
-            .as_ref()
-            .map(|resources| resources.get())
-            .transpose()?;
-        let initial_state = CanvasState {
-            transform: Transform::identity(),
-            pattern_parent_transform: Transform::identity(),
-            text_state: TextState::default(),
-            ..Default::default()
         };
         let size = region.size();
         // Backends cover only `[0, w] x [0, h]` of mask space, so mask space starts at
         // the region's origin in the current user space.
-        let recording = self.record_nested(size, initial_state, None, |canvas| {
+        let mask_matrix =
+            Transform::from_translate(-region.left, -region.top).post_concatenated(&matrix);
+        let recording = self.record_nested(size, CanvasState::default(), None, |canvas| {
             if let Some(color) = backdrop {
                 canvas.paint_backdrop(color, size)?;
             }
-            canvas.render_content_stream(
-                &form.content_stream,
-                Some(
-                    Transform::from_translate(-region.left, -region.top).post_concatenated(&matrix),
-                ),
-                Some(bbox),
-                resources,
-                None,
-            )
+            canvas.render_form(&form, Some(mask_matrix))
         })?;
         let transform = self
             .state
@@ -91,19 +74,9 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 
     /// Maps the backend's visible area into the current user space, or `None` when the
     /// current transform is singular.
-    fn visible_user_area(&self) -> Result<Option<Rect>, PdfCanvasError> {
-        let device = Rect {
-            left: 0.0,
-            top: 0.0,
-            right: self.canvas.width(),
-            bottom: self.canvas.height(),
-        };
-        Ok(self
-            .state
-            .transform
-            .try_inverse()
-            .ok()
-            .map(|inverse| inverse.map_rect(&device)))
+    fn visible_user_area(&self) -> Option<Rect> {
+        let inverse = self.state.transform.try_inverse().ok()?;
+        Some(inverse.map_rect(&self.device_rect()))
     }
 
     /// Fills `[0, width] x [0, height]` with an opaque backdrop `color`, leaving the
