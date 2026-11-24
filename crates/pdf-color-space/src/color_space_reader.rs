@@ -17,17 +17,17 @@ impl FromPdfObject for ColorSpace {
     ) -> ReadResult<Self> {
         let object = context.object();
         let ObjectVariant::Array(array) = object else {
-            return match &*context.decode::<Arc<[u8]>>()? {
-                b"DeviceRGB" => Ok(Self::DeviceRGB),
-                b"DeviceCMYK" => Ok(Self::DeviceCMYK),
-                b"DeviceGray" => Ok(Self::DeviceGray),
+            let name = context.decode::<Arc<[u8]>>()?;
+            if let Some(space) = Self::from_reserved_name(&name) {
+                return Ok(space);
+            }
+            return match &*name {
                 // Default color spaces substitute for the device spaces when a resource-level
                 // override is not available. Without access to the resource dictionary here,
                 // fall back to the corresponding device space.
                 b"DefaultGray" => Ok(Self::DeviceGray),
                 b"DefaultRGB" => Ok(Self::DeviceRGB),
                 b"DefaultCMYK" => Ok(Self::DeviceCMYK),
-                b"Pattern" => Ok(Self::Pattern(None)),
                 unknown => Err(ColorSpaceError::InvalidColorSpace {
                     description: format!("unsupported color space name: /{unknown:?}"),
                 }
@@ -47,12 +47,12 @@ impl FromPdfObject for ColorSpace {
 
         let family = context.read::<Arc<[u8]>>(first)?;
         match &*family {
-            b"Indexed" => context.read(object).map(Self::Indexed),
-            b"Separation" => context.read(object).map(Self::Separation),
-            b"DeviceN" => context.read(object).map(Self::DeviceN),
+            b"Indexed" => context.read(object).map(Arc::new).map(Self::Indexed),
+            b"Separation" => context.read(object).map(Arc::new).map(Self::Separation),
+            b"DeviceN" => context.read(object).map(Arc::new).map(Self::DeviceN),
             // The second element is the underlying color space used with uncolored
             // tiling patterns.
-            b"Pattern" => Ok(Self::Pattern(Some(Box::new(context.array()?.at(1)?)))),
+            b"Pattern" => Ok(Self::Pattern(Some(Arc::new(context.array()?.at(1)?)))),
             family @ (b"ICCBased" | b"Lab" | b"CalGray" | b"CalRGB") => {
                 let mut array = context.array()?;
                 let found = array.array().len();
@@ -66,10 +66,10 @@ impl FromPdfObject for ColorSpace {
                     .into());
                 }
                 match family {
-                    b"ICCBased" => array.at(1).map(Self::ICCBased),
-                    b"Lab" => array.at(1).map(Self::Lab),
-                    b"CalGray" => array.at(1).map(Self::CalGray),
-                    _ => array.at(1).map(Self::CalRGB),
+                    b"ICCBased" => array.at(1).map(Arc::new).map(Self::ICCBased),
+                    b"Lab" => array.at(1).map(Arc::new).map(Self::Lab),
+                    b"CalGray" => array.at(1).map(Arc::new).map(Self::CalGray),
+                    _ => array.at(1).map(Arc::new).map(Self::CalRGB),
                 }
             }
             unknown => Err(ColorSpaceError::InvalidColorSpace {

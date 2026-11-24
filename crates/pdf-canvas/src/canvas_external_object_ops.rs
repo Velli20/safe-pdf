@@ -26,6 +26,7 @@ use pdf_resources::{
 use crate::{
     CanvasPath,
     canvas_backend::{CanvasBackend, Shader},
+    current_color::PaintTarget,
     error::PdfCanvasError,
     mask_layer::MaskLayer,
     pdf_canvas::{PatternPaint, PdfCanvas},
@@ -214,7 +215,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         inline_image: bool,
     ) -> Result<(), PdfCanvasError> {
         if image.pixel_format == PixelFormat::Alpha8 {
-            match self.compute_shader(false)? {
+            match self.compute_shader(PaintTarget::Fill)? {
                 PatternPaint::Shader(shader) => {
                     return self.paint_image_mask_with_pattern(image, inline_image, &shader);
                 }
@@ -267,7 +268,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         inline_image: bool,
         shader: &Shader,
     ) -> Result<(), PdfCanvasError> {
-        let clip = self.pattern_bbox_clip(false)?;
+        let clip = self.pattern_bbox_clip(PaintTarget::Fill)?;
         let stencil = self.image_mask_layer(image, inline_image)?;
         let state = &self.state;
         let unit_square = PdfPath::from(&Rect::new(1.0, 1.0));

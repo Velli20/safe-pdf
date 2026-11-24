@@ -237,7 +237,7 @@ mod tests {
         let mut res = Resources::default();
         res.color_spaces.insert(
             PdfName::from_bytes(name),
-            Resource::ColorSpace(Arc::new(ColorSpace::DeviceGray)),
+            Resource::ColorSpace(ColorSpace::DeviceGray),
         );
         res
     }
@@ -283,11 +283,11 @@ mod tests {
         let mut child_res = Resources::default();
         child_res.color_spaces.insert(
             PdfName::from(b"CS1"),
-            Resource::ColorSpace(Arc::new(ColorSpace::DeviceRGB)),
+            Resource::ColorSpace(ColorSpace::DeviceRGB),
         );
         child_res.color_spaces.insert(
             PdfName::from(b"CS2"),
-            Resource::ColorSpace(Arc::new(ColorSpace::DeviceGray)),
+            Resource::ColorSpace(ColorSpace::DeviceGray),
         );
 
         let child_res = Arc::new(child_res);
@@ -318,7 +318,7 @@ mod tests {
         assert!(
             matches!(
                 result.color_spaces.get(b"CS1".as_slice()),
-                Some(Resource::ColorSpace(cs)) if matches!(cs.as_ref(), ColorSpace::DeviceRGB)
+                Some(Resource::ColorSpace(cs)) if matches!(cs, ColorSpace::DeviceRGB)
             ),
             "child CS1 should not be overwritten by the parent"
         );
@@ -336,7 +336,7 @@ mod tests {
         let mut parent = resources_with_color_space("CS1");
         parent.color_spaces.insert(
             PdfName::from(b"CS2"),
-            Resource::ColorSpace(Arc::new(ColorSpace::DeviceRGB)),
+            Resource::ColorSpace(ColorSpace::DeviceRGB),
         );
         let parent = Arc::new(parent);
 
@@ -344,7 +344,7 @@ mod tests {
         let mut child_res = Resources::default();
         child_res.color_spaces.insert(
             PdfName::from(b"CS1"),
-            Resource::ColorSpace(Arc::new(ColorSpace::DeviceRGB)),
+            Resource::ColorSpace(ColorSpace::DeviceRGB),
         );
 
         let mut page = PdfPage {
@@ -369,7 +369,7 @@ mod tests {
         assert!(
             matches!(
                 result.color_spaces.get(b"CS1".as_slice()),
-                Some(Resource::ColorSpace(cs)) if matches!(cs.as_ref(), ColorSpace::DeviceRGB)
+                Some(Resource::ColorSpace(cs)) if matches!(cs, ColorSpace::DeviceRGB)
             ),
             "child CS1 should not be overwritten by the parent"
         );

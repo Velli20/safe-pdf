@@ -1,137 +1,104 @@
 use pdf_color_space::color_space::ColorSpace;
-
-use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 use pdf_graphics::color::Color;
 
+use crate::{
+    canvas_backend::CanvasBackend, current_color::PaintTarget, error::PdfCanvasError,
+    pdf_canvas::PdfCanvas,
+};
+
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
-    /// Handles `SC`/`SCN` without a pattern: sets the stroking color.
-    pub(crate) fn set_stroking_color(&mut self, components: &[f32]) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        state.stroke_pattern = None;
-        let color = state.stroke_color_space.color_from_operands(components)?;
-        state.paint.set_stroke_color(color);
+    /// Handles `G`/`g`, `RG`/`rg` and `K`/`k`: selects a device color space and a color in it.
+    pub(crate) fn set_device_color(
+        &mut self,
+        target: PaintTarget,
+        space: ColorSpace,
+        color: Color,
+    ) -> Result<(), PdfCanvasError> {
+        self.state.set_paint_color(target, color);
+        let current = self.state.current_color_mut(target);
+        current.pattern = None;
+        current.space = space;
         Ok(())
     }
 
-    /// Handles `sc`/`scn` without a pattern: sets the non-stroking color.
-    pub(crate) fn set_non_stroking_color(
+    /// Handles `SC`/`sc` and `SCN`/`scn` without a pattern: sets the current color.
+    pub(crate) fn set_color(
         &mut self,
+        target: PaintTarget,
         components: &[f32],
     ) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        state.fill_pattern = None;
-        let color = state.fill_color_space.color_from_operands(components)?;
-        state.paint.set_fill_color(color);
+        let current = self.state.current_color_mut(target);
+        current.pattern = None;
+        let color = current.space.color_from_operands(components)?;
+        self.state.set_paint_color(target, color);
         Ok(())
     }
 
-    /// Handles `scn` with a pattern name: sets the non-stroking pattern.
-    pub(crate) fn set_non_stroking_color_extended(
+    /// Handles `SCN`/`scn` with a pattern name: selects the pattern, and the color of an
+    /// uncolored one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the components do not fit the color space, or if the pattern is
+    /// not found in the resources.
+    pub(crate) fn set_pattern_color(
         &mut self,
-        components: &[f32],
-        pattern_name: &[u8],
-    ) -> Result<(), PdfCanvasError> {
-        if !components.is_empty() {
-            let state = &mut self.state;
-            state.fill_pattern = None;
-            let space = state.fill_color_space.pattern_component_space();
-            let color = space.color_from_operands(components)?;
-            state.paint.set_fill_color(color);
-        }
-
-        self.set_fill_pattern(pattern_name)
-    }
-
-    /// Handles `SCN` with a pattern name: sets the stroking pattern.
-    pub(crate) fn set_stroking_color_extended(
-        &mut self,
+        target: PaintTarget,
         components: &[f32],
         pattern_name: &[u8],
     ) -> Result<(), PdfCanvasError> {
         if !components.is_empty() {
-            let state = &mut self.state;
-            state.stroke_pattern = None;
-            let space = state.stroke_color_space.pattern_component_space();
+            let current = self.state.current_color_mut(target);
+            current.pattern = None;
+            let space = current.space.pattern_component_space();
             let color = space.color_from_operands(components)?;
-            state.paint.set_stroke_color(color);
+            self.state.set_paint_color(target, color);
         }
 
-        self.set_stroke_pattern(pattern_name)
-    }
-
-    /// Handles `G`: sets a DeviceGray stroking color.
-    pub(crate) fn set_stroking_gray(&mut self, gray: f32) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        state.paint.set_stroke_color(Color::from_gray(gray));
-        state.stroke_pattern = None;
-        state.select_device_color_space(true, ColorSpace::DeviceGray);
+        let Some(pattern) = self
+            .state
+            .resources
+            .as_ref()
+            .and_then(|resources| resources.pattern(pattern_name))
+        else {
+            return Err(PdfCanvasError::PatternNotFound(
+                String::from_utf8_lossy(pattern_name).into_owned(),
+            ));
+        };
+        self.state.current_color_mut(target).pattern = Some(pattern);
         Ok(())
     }
 
-    /// Handles `g`: sets a DeviceGray non-stroking color.
-    pub(crate) fn set_non_stroking_gray(&mut self, gray: f32) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        state.paint.set_fill_color(Color::from_gray(gray));
-        state.fill_pattern = None;
-        state.select_device_color_space(false, ColorSpace::DeviceGray);
-        Ok(())
-    }
-
-    /// Handles `RG`: sets a DeviceRGB stroking color.
-    pub(crate) fn set_stroking_rgb(
+    /// Handles `CS`/`cs`: selects a color space by name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the name is neither reserved nor found in the resources.
+    pub(crate) fn set_color_space(
         &mut self,
-        r: f32,
-        g: f32,
-        b: f32,
+        target: PaintTarget,
+        name: &[u8],
     ) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        state.paint.set_stroke_color(Color::from_rgb(r, g, b));
-        state.stroke_pattern = None;
-        state.select_device_color_space(true, ColorSpace::DeviceRGB);
-        Ok(())
-    }
+        self.state.current_color_mut(target).pattern = None;
 
-    /// Handles `rg`: sets a DeviceRGB non-stroking color.
-    pub(crate) fn set_non_stroking_rgb(
-        &mut self,
-        r: f32,
-        g: f32,
-        b: f32,
-    ) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        state.paint.set_fill_color(Color::from_rgb(r, g, b));
-        state.fill_pattern = None;
-        state.select_device_color_space(false, ColorSpace::DeviceRGB);
-        Ok(())
-    }
-
-    /// Handles `K`: sets a DeviceCMYK stroking color.
-    pub(crate) fn set_stroking_cmyk(
-        &mut self,
-        c: f32,
-        m: f32,
-        y: f32,
-        k: f32,
-    ) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        state.paint.set_stroke_color(Color::from_cmyk(c, m, y, k));
-        state.stroke_pattern = None;
-        state.select_device_color_space(true, ColorSpace::DeviceCMYK);
-        Ok(())
-    }
-
-    /// Handles `k`: sets a DeviceCMYK non-stroking color.
-    pub(crate) fn set_non_stroking_cmyk(
-        &mut self,
-        c: f32,
-        m: f32,
-        y: f32,
-        k: f32,
-    ) -> Result<(), PdfCanvasError> {
-        let state = &mut self.state;
-        state.paint.set_fill_color(Color::from_cmyk(c, m, y, k));
-        state.fill_pattern = None;
-        state.select_device_color_space(false, ColorSpace::DeviceCMYK);
+        let space = match ColorSpace::from_reserved_name(name) {
+            // Per PDF spec §8.6.8 selecting a device space also sets the current color to
+            // its initial value.
+            Some(ColorSpace::DeviceCMYK) => {
+                let black = Color::from_cmyk(0.0, 0.0, 0.0, 1.0);
+                return self.set_device_color(target, ColorSpace::DeviceCMYK, black);
+            }
+            Some(space @ (ColorSpace::DeviceGray | ColorSpace::DeviceRGB)) => {
+                return self.set_device_color(target, space, Color::from_gray(0.0));
+            }
+            reserved => reserved.or_else(|| self.state.resources.as_ref()?.color_space(name)),
+        };
+        let Some(space) = space else {
+            return Err(PdfCanvasError::ColorSpaceNotFound(
+                String::from_utf8_lossy(name).into_owned(),
+            ));
+        };
+        self.state.current_color_mut(target).space = space;
         Ok(())
     }
 }

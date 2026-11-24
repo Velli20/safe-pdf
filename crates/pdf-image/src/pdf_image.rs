@@ -126,7 +126,7 @@ impl InlineImage {
     /// Returns an error if the image's entries do not fit the resolved color space.
     pub fn resolve(
         &self,
-        color_space: impl FnOnce(&[u8]) -> Option<Arc<ColorSpace>>,
+        color_space: impl FnOnce(&[u8]) -> Option<ColorSpace>,
     ) -> Result<Option<Cow<'_, PdfImage>>, PdfImageError> {
         match self {
             Self::Ready(image) => Ok(Some(Cow::Borrowed(image))),
@@ -139,7 +139,7 @@ impl InlineImage {
                     return Ok(None);
                 };
                 Ok(Some(Cow::Owned(PdfImage {
-                    metadata: ImageMetadata::new(entries.clone(), Some((*resolved).clone()))?,
+                    metadata: ImageMetadata::new(entries.clone(), Some(resolved))?,
                     payload: payload.clone(),
                 })))
             }
@@ -563,7 +563,7 @@ mod tests {
                 .is_none()
         );
         let resolved = image
-            .resolve(|resource| (resource == b"CS0").then(|| std::sync::Arc::new(indexed)))
+            .resolve(|resource| (resource == b"CS0").then_some(indexed))
             .expect("image should fit the indexed color space")
             .expect("color space resource should be found");
         let decoded = resolved.decode(None).expect("image should decode");

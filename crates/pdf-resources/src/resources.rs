@@ -53,7 +53,7 @@ impl FromPdfObject for Resources {
             color_spaces: context.optional_entries(
                 b"ColorSpace",
                 |color_space: ObjectHandle<ColorSpace>| {
-                    Ok(Resource::ColorSpace(color_space.get()?))
+                    Ok(Resource::ColorSpace(color_space.get()?.as_ref().clone()))
                 },
             )?,
             // Other property lists, such as tagged content's, are skipped.
@@ -150,7 +150,7 @@ impl Resources {
         self.shadings.get(name.as_ref())?.as_shading()
     }
 
-    /// Returns a reference to a color space resource by name, if it exists.
+    /// Returns a color space resource by name, if it exists.
     ///
     /// # Parameters
     ///
@@ -158,9 +158,9 @@ impl Resources {
     ///
     /// # Returns
     ///
-    /// An `Option` containing a reference to the [`ColorSpace`] if found, or `None`
+    /// An `Option` containing the [`ColorSpace`] if found, or `None`
     /// if not present or not a color space.
-    pub fn color_space<N: AsRef<[u8]>>(&self, name: N) -> Option<Arc<ColorSpace>> {
+    pub fn color_space<N: AsRef<[u8]>>(&self, name: N) -> Option<ColorSpace> {
         self.color_spaces.get(name.as_ref())?.as_color_space()
     }
 

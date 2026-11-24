@@ -174,7 +174,7 @@ fn inherited_resources_and_media_box_apply_to_leaf_pages() {
         .as_ref()
         .expect("page should inherit resources");
     assert!(matches!(
-        resources.color_space("CS1").as_deref(),
+        resources.color_space("CS1"),
         Some(ColorSpace::DeviceGray)
     ));
 
@@ -225,11 +225,11 @@ fn child_resources_keep_their_own_entries_while_inheriting_missing_ones() {
     let resources = page.resources.as_ref().expect("page should have resources");
 
     assert!(matches!(
-        resources.color_space("CS1").as_deref(),
+        resources.color_space("CS1"),
         Some(ColorSpace::DeviceRGB)
     ));
     assert!(matches!(
-        resources.color_space("CS2").as_deref(),
+        resources.color_space("CS2"),
         Some(ColorSpace::DeviceRGB)
     ));
 

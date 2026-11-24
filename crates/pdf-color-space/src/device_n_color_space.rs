@@ -18,7 +18,7 @@ pub struct DeviceNColorSpace {
     /// Ordered list of colorant names (e.g., `["Cyan", "Magenta"]`).
     pub names: Vec<Arc<[u8]>>,
     /// Fallback color space used when the colorants are not available.
-    pub alternate_space: Box<ColorSpace>,
+    pub alternate_space: ColorSpace,
     /// Tint transform function used to map DeviceN components into the alternate space.
     pub tint_transform: Function,
 }
@@ -41,7 +41,7 @@ impl FromPdfObject for DeviceNColorSpace {
 
         Ok(Self {
             names: array.at(1)?,
-            alternate_space: Box::new(array.at(2)?),
+            alternate_space: array.at(2)?,
             tint_transform: array.at(3)?,
         })
     }
@@ -164,7 +164,7 @@ mod tests {
             device_n.names,
             vec![Arc::from(&b"Cyan"[..]), Arc::from(&b"Magenta"[..])]
         );
-        assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceRGB));
+        assert!(matches!(device_n.alternate_space, ColorSpace::DeviceRGB));
         assert!(matches!(
             device_n.tint_transform,
             Function::PostScriptCalculator(_)
@@ -188,7 +188,7 @@ mod tests {
         };
 
         assert_eq!(device_n.names, vec![Arc::from(&b"Spot"[..])]);
-        assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceCMYK));
+        assert!(matches!(device_n.alternate_space, ColorSpace::DeviceCMYK));
     }
 
     #[test]

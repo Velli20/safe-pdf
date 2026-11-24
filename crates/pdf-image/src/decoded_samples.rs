@@ -1,7 +1,7 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
-use pdf_color_space::color_space::ColorSpace;
+use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
 use pdf_decode::{
     DecodeError, DecodeMap, DecodeRange, SampleLayout, decode_sample_bytes, decode_sample_codes,
     expand_indexed_values,
@@ -221,7 +221,7 @@ impl DecodedSamples {
     fn decode_indexed_rgba(
         raw_data: Bytes,
         metadata: &ImageMetadata,
-        indexed: &pdf_color_space::indexed_color_space::IndexedColorSpace,
+        indexed: &Arc<IndexedColorSpace>,
     ) -> Result<Self, PdfImageError> {
         let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
         let sample_max = Self::sample_max(metadata.sample_bits())?;
@@ -230,7 +230,7 @@ impl DecodedSamples {
             None => sample_codes,
         };
 
-        let indexed_color_space = ColorSpace::Indexed(indexed.clone());
+        let indexed_color_space = ColorSpace::Indexed(Arc::clone(indexed));
         let mut palette = Vec::with_capacity(usize::from(indexed.hival).saturating_add(1));
         for index in 0..=indexed.hival {
             palette.push(indexed_color_space.apply(&[f32::from(index)])?.to_rgba8());
