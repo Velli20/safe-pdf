@@ -50,7 +50,10 @@ impl FromPdfObject for LabColorSpace {
 impl LabColorSpace {
     pub(crate) fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
         let [l, a, b] = components else {
-            return Err(ColorSpaceError::InsufficientComponents(3, components.len()));
+            return Err(ColorSpaceError::ComponentCountMismatch {
+                expected: 3,
+                found: components.len(),
+            });
         };
         let [amin, amax, bmin, bmax] = self.range;
         Ok(Color::from_lab(

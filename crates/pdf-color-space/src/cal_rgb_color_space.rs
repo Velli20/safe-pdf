@@ -48,7 +48,10 @@ impl FromPdfObject for CalRGBColorSpace {
 impl CalRGBColorSpace {
     pub(crate) fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
         let [a, b, c] = components else {
-            return Err(ColorSpaceError::InsufficientComponents(3, components.len()));
+            return Err(ColorSpaceError::ComponentCountMismatch {
+                expected: 3,
+                found: components.len(),
+            });
         };
         let [ga, gb, gc] = self.gamma;
         // Apply per-component gamma correction

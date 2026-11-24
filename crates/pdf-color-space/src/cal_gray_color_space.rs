@@ -38,7 +38,10 @@ impl FromPdfObject for CalGrayColorSpace {
 impl CalGrayColorSpace {
     pub(crate) fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
         let [a] = components else {
-            return Err(ColorSpaceError::InsufficientComponents(1, components.len()));
+            return Err(ColorSpaceError::ComponentCountMismatch {
+                expected: 1,
+                found: components.len(),
+            });
         };
         // The gray level is used as is; the white point and gamma do not tint it.
         let a = a.clamp(0.0, 1.0);

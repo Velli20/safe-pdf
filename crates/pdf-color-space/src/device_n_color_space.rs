@@ -57,10 +57,10 @@ impl DeviceNColorSpace {
     pub(crate) fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
         let expected_components = self.names.len();
         if components.len() != expected_components {
-            return Err(ColorSpaceError::InsufficientComponents(
-                expected_components,
-                components.len(),
-            ));
+            return Err(ColorSpaceError::ComponentCountMismatch {
+                expected: expected_components,
+                found: components.len(),
+            });
         }
 
         let alternate_components = self.tint_transform.apply(components).map_err(|e| {
@@ -252,7 +252,13 @@ mod tests {
 
         let err = device_n.apply(&[0.25]).unwrap_err();
 
-        assert!(matches!(err, ColorSpaceError::InsufficientComponents(2, 1)));
+        assert!(matches!(
+            err,
+            ColorSpaceError::ComponentCountMismatch {
+                expected: 2,
+                found: 1
+            }
+        ));
     }
 
     #[test]

@@ -73,10 +73,10 @@ impl ICCBasedColorSpace {
 
     pub(crate) fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
         if components.len() != self.num_components {
-            return Err(ColorSpaceError::InsufficientComponents(
-                self.num_components,
-                components.len(),
-            ));
+            return Err(ColorSpaceError::ComponentCountMismatch {
+                expected: self.num_components,
+                found: components.len(),
+            });
         }
         // ICC colour management is not yet implemented.
         // Use the alternate space if present; otherwise use the device-equivalent.

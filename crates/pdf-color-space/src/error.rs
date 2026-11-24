@@ -9,8 +9,8 @@ pub enum ColorSpaceError {
     InvalidColorSpace { description: String },
     #[error("Indexed color space error: {0}")]
     IndexedColorSpaceError(String),
-    #[error("Insufficient color components: expected {0}, found {1}")]
-    InsufficientComponents(usize, usize),
+    #[error("Color component count mismatch: expected {expected}, found {found}")]
+    ComponentCountMismatch { expected: usize, found: usize },
     #[error("Unsupported color space: {0}")]
     Unsupported(String),
 }
