@@ -173,6 +173,15 @@ impl WebCanvasBackend {
         Ok(backend)
     }
 
+    /// Verifies that all scopes have been closed, then removes the clips, so that the
+    /// surface can be composited as a whole.
+    pub(crate) fn finish_surface(self) -> WebResult<()> {
+        self.state.ensure_balanced()?;
+        // Clips are installed above the baseline save.
+        self.context.restore();
+        Ok(())
+    }
+
     /// Replays a recording and balances or aborts its browser scopes.
     pub(crate) fn replay_balanced(&mut self, recording: &RecordingCanvas) -> WebResult<()> {
         self.finish_page()?;
