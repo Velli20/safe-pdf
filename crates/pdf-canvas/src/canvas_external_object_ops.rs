@@ -270,8 +270,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let clip = self.pattern_bbox_clip(false)?;
         let stencil = self.image_mask_layer(image, inline_image)?;
         let state = &self.state;
-        let area = CanvasPath::transformed(&PdfPath::from(&Rect::new(1.0, 1.0)), state.transform)?
-            .into_owned();
+        let unit_square = PdfPath::from(&Rect::new(1.0, 1.0));
+        let area = CanvasPath::transformed(&unit_square, state.transform)?;
         let (color, blend_mode) = (state.paint.fill_color, state.paint.blend_mode);
         self.with_soft_mask(|backend| {
             backend.with_mask_layer(&stencil, |backend| {

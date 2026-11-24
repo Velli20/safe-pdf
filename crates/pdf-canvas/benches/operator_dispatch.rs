@@ -57,6 +57,44 @@ fn dashed_stroke_stream(count: usize) -> ContentStream {
     parse(data)
 }
 
+/// Appends a path of `segments` line segments, ended by `operator`.
+fn push_polyline(data: &mut String, y: usize, segments: usize, operator: &str) {
+    write!(data, "0 {y} m").expect("writing to a string should succeed");
+    for x in 1..=segments {
+        write!(data, " {x} {} l", y + x % 7).expect("writing to a string should succeed");
+    }
+    writeln!(data, " {operator}").expect("writing to a string should succeed");
+}
+
+/// Builds a stream that fills, then strokes, `count` paths of 100 line segments each.
+fn long_path_stream(count: usize) -> ContentStream {
+    let mut data = String::new();
+    for index in 0..count {
+        push_polyline(&mut data, index % 1000, 100, "f");
+        push_polyline(&mut data, index % 1000, 100, "S");
+    }
+    parse(data)
+}
+
+/// Builds a stream that paints `count` paths of 20 line segments with one fill-and-stroke.
+fn fill_and_stroke_stream(count: usize) -> ContentStream {
+    let mut data = String::new();
+    for index in 0..count {
+        push_polyline(&mut data, index % 1000, 20, "B");
+    }
+    parse(data)
+}
+
+/// Builds a stream that strokes `count` pairs of a 1,000-segment and a one-segment path.
+fn alternating_path_stream(count: usize) -> ContentStream {
+    let mut data = String::new();
+    for index in 0..count {
+        push_polyline(&mut data, index % 1000, 1_000, "S");
+        push_polyline(&mut data, index % 1000, 1, "S");
+    }
+    parse(data)
+}
+
 /// Builds a stream that selects the tiling pattern `P0`, then fills `count` rectangles with it.
 fn tiling_fill_stream(count: usize) -> ContentStream {
     let mut data = String::from("/Pattern cs /P0 scn\n");
@@ -113,6 +151,17 @@ fn benchmark(c: &mut Criterion) {
         (
             "dispatch/dashed_strokes_5000",
             dashed_stroke_stream(5_000),
+            None,
+        ),
+        ("dispatch/long_paths_1000", long_path_stream(1_000), None),
+        (
+            "dispatch/fill_and_stroke_2000",
+            fill_and_stroke_stream(2_000),
+            None,
+        ),
+        (
+            "dispatch/alternating_paths_200",
+            alternating_path_stream(200),
             None,
         ),
         (

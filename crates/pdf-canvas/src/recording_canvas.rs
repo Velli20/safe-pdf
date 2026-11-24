@@ -1,15 +1,51 @@
 //! Flat drawing commands with validated mask bodies and operation-local replay cleanup.
 
+use std::borrow::Cow;
+
 use crate::{
     CanvasPath,
     canvas_backend::{CanvasBackend, Shader},
     error::PdfCanvasError,
     mask_layer::MaskLayer,
     stroke_style::StrokeStyle,
+    verb_buffer::{VerbBuffer, VerbRange},
 };
 use pdf_graphics::{
     BlendMode, Image as BackendImage, PathFillType, color::Color, transform::Transform,
 };
+
+/// A path kept by a recording.
+#[derive(Clone)]
+enum RecordedPath {
+    /// Verbs copied into the recording's verb buffer.
+    Verbs {
+        /// Position of the verbs in the buffer.
+        range: VerbRange,
+        /// Validated source-to-device mapping, or `None` for device coordinates.
+        transform: Option<Transform>,
+    },
+    /// Shared geometry that keeps its original allocation and deferred mapping.
+    Shared(CanvasPath<'static>),
+}
+
+impl RecordedPath {
+    /// Returns the path to replay, reading copied verbs from the recording's buffer `verbs`.
+    ///
+    /// # Errors
+    /// Returns an error if the path lies outside `verbs`.
+    fn resolve<'a>(
+        &'a self,
+        verbs: &'a VerbBuffer,
+    ) -> Result<Cow<'a, CanvasPath<'a>>, RecordingError> {
+        match self {
+            Self::Verbs { range, transform } => {
+                let verbs = verbs.get(range).ok_or(RecordingError::InvalidPathRange)?;
+                Ok(Cow::Owned(CanvasPath::from_verbs(verbs, *transform)))
+            }
+            Self::Shared(path) => Ok(Cow::Borrowed(path)),
+        }
+    }
+}
 
 /// Enum representing each drawing command that can be recorded.
 #[derive(Clone)]
@@ -17,7 +53,7 @@ enum RecordingCommand {
     /// Fill device-space path geometry.
     FillPath {
         /// Geometry to paint or clip, retaining shared sources and deferred mappings.
-        path: CanvasPath<'static>,
+        path: RecordedPath,
         /// Rule determining the path interior.
         fill_type: PathFillType,
         /// Solid paint color, including opacity.
@@ -30,7 +66,7 @@ enum RecordingCommand {
     /// Stroke device-space path geometry.
     StrokePath {
         /// Geometry to paint or clip, retaining shared sources and deferred mappings.
-        path: CanvasPath<'static>,
+        path: RecordedPath,
         /// Solid paint color, including opacity.
         color: Color,
         /// Stroke width in device units.
@@ -45,7 +81,7 @@ enum RecordingCommand {
     /// Stroke device-space path geometry, replacing the destination under the stroke.
     KnockoutStroke {
         /// Geometry to paint, retaining shared sources and deferred mappings.
-        path: CanvasPath<'static>,
+        path: RecordedPath,
         /// Solid paint color, including opacity.
         color: Color,
         /// Stroke width in device units.
@@ -58,7 +94,7 @@ enum RecordingCommand {
     /// Intersect the current clipping region.
     SetClipRegion {
         /// Geometry to paint or clip, retaining shared sources and deferred mappings.
-        path: CanvasPath<'static>,
+        path: RecordedPath,
         /// Rule determining the clip interior.
         mode: PathFillType,
     },
@@ -119,6 +155,8 @@ pub struct RecordingCanvas {
     pub height: f32,
     /// Ordered list of recorded drawing commands.
     commands: Vec<RecordingCommand>,
+    /// Verbs of every recorded path that is not shared, in recording order.
+    verbs: VerbBuffer,
     /// Deepest chain of mask and tiling recordings replayed beneath this one.
     nesting: usize,
     /// Commands replayed for the mask and tiling recordings used by this one.
@@ -138,6 +176,7 @@ impl RecordingCanvas {
             width,
             height,
             commands: Vec::new(),
+            verbs: VerbBuffer::default(),
             nesting: 0,
             nested_cost: 0,
         }
@@ -164,6 +203,24 @@ impl RecordingCanvas {
         self.nested_cost = self.nested_cost.saturating_add(cost);
     }
 
+    /// Raises the nesting depth and replay cost for a use of `shader`'s tiling cell, if any.
+    fn nest_shader(&mut self, shader: Option<&Shader>) {
+        if let Some(Shader::TilingPatternImage(pattern)) = shader {
+            self.nest(pattern.recording(), pattern.replay_cost());
+        }
+    }
+
+    /// Keeps `path` for replay, sharing shared geometry and copying borrowed verbs.
+    fn keep_path(&mut self, path: &CanvasPath<'_>) -> RecordedPath {
+        if let Some(shared) = path.to_shared() {
+            return RecordedPath::Shared(shared);
+        }
+        RecordedPath::Verbs {
+            range: self.verbs.push(path.source()),
+            transform: path.transform(),
+        }
+    }
+
     /// Validates save balance and mask-body boundaries before any destination is touched.
     pub fn validate(&self) -> Result<(), RecordingError> {
         validate_commands(&self.commands)
@@ -187,7 +244,130 @@ impl RecordingCanvas {
     /// - An error of type `PdfCanvasError` if any command fails during replay.
     pub fn replay<B: CanvasBackend>(&self, backend: &mut B) -> Result<(), PdfCanvasError> {
         self.validate()?;
-        replay_commands(&self.commands, backend)
+        self.replay_commands(&self.commands, backend)
+    }
+
+    /// Replays an already validated body and explicitly restores only its own outstanding saves.
+    fn replay_commands<B: CanvasBackend>(
+        &self,
+        mut commands: &[RecordingCommand],
+        backend: &mut B,
+    ) -> Result<(), PdfCanvasError> {
+        let mut saves = 0_usize;
+        let mut result = (|| {
+            use RecordingCommand::*;
+            while let Some((cmd, rest)) = commands.split_first() {
+                commands = rest;
+                match cmd {
+                    FillPath {
+                        path,
+                        fill_type,
+                        color,
+                        shader,
+                        blend_mode,
+                    } => {
+                        backend.fill_path(
+                            path.resolve(&self.verbs)?.as_ref(),
+                            *fill_type,
+                            *color,
+                            shader.as_ref(),
+                            *blend_mode,
+                        )?;
+                    }
+                    StrokePath {
+                        path,
+                        color,
+                        line_width,
+                        stroke_style,
+                        shader,
+                        blend_mode,
+                    } => {
+                        backend.stroke_path(
+                            path.resolve(&self.verbs)?.as_ref(),
+                            *color,
+                            *line_width,
+                            stroke_style,
+                            shader.as_ref(),
+                            *blend_mode,
+                        )?;
+                    }
+                    KnockoutStroke {
+                        path,
+                        color,
+                        line_width,
+                        stroke_style,
+                        shader,
+                    } => backend.knockout_stroke(
+                        path.resolve(&self.verbs)?.as_ref(),
+                        *color,
+                        *line_width,
+                        stroke_style,
+                        shader.as_ref(),
+                    )?,
+                    SetClipRegion { path, mode } => {
+                        backend.set_clip_region(path.resolve(&self.verbs)?.as_ref(), *mode)?
+                    }
+                    Save => {
+                        backend.save()?;
+                        saves = saves.checked_add(1).ok_or(RecordingError::UnbalancedSave)?;
+                    }
+                    Restore => {
+                        saves = saves.checked_sub(1).ok_or(RecordingError::UnbalancedSave)?;
+                        backend.restore()?;
+                    }
+                    DrawImage {
+                        image,
+                        blend_mode,
+                        alpha,
+                        transform,
+                    } => {
+                        backend.draw_image(image, *blend_mode, *alpha, *transform)?;
+                    }
+                    DrawInlineImage {
+                        image,
+                        blend_mode,
+                        alpha,
+                        transform,
+                    } => {
+                        backend.draw_inline_image(image, *blend_mode, *alpha, *transform)?;
+                    }
+                    Mask { mask, len } => {
+                        let (body, rest) = commands
+                            .split_at_checked(*len)
+                            .ok_or(RecordingError::InvalidLayerBody)?;
+                        backend
+                            .with_mask_layer(mask, |backend| self.replay_commands(body, backend))?;
+                        commands = rest;
+                    }
+                    Group {
+                        alpha,
+                        blend_mode,
+                        len,
+                    } => {
+                        let (body, rest) = commands
+                            .split_at_checked(*len)
+                            .ok_or(RecordingError::InvalidLayerBody)?;
+                        backend.with_group_layer(*alpha, *blend_mode, |backend| {
+                            self.replay_commands(body, backend)
+                        })?;
+                        commands = rest;
+                    }
+                }
+            }
+            Ok(())
+        })();
+        for _ in 0..saves {
+            let cleanup = backend.restore();
+            result = match (result, cleanup) {
+                (Ok(()), restored) => restored,
+                (Err(primary), Ok(())) => Err(primary),
+                (Err(primary), Err(cleanup)) => Err(PdfCanvasError::Cleanup {
+                    primary: Box::new(primary),
+                    cleanup: Box::new(cleanup),
+                }),
+            };
+        }
+        result
     }
 }
 
@@ -200,6 +380,9 @@ pub enum RecordingError {
     /// A mask or group body extends outside its enclosing command slice.
     #[error("invalid layer body in recording")]
     InvalidLayerBody,
+    /// A path's verbs lie outside the recording's verb buffer.
+    #[error("invalid path range in recording")]
+    InvalidPathRange,
 }
 
 /// Checks each lexical body independently, preventing restores of caller-owned scopes.
@@ -231,119 +414,6 @@ fn validate_commands(mut commands: &[RecordingCommand]) -> Result<(), RecordingE
     }
 }
 
-/// Replays an already validated body and explicitly restores only its own outstanding saves.
-fn replay_commands<B: CanvasBackend>(
-    mut commands: &[RecordingCommand],
-    backend: &mut B,
-) -> Result<(), PdfCanvasError> {
-    let mut saves = 0_usize;
-    let mut result = (|| {
-        use RecordingCommand::*;
-        while let Some((cmd, rest)) = commands.split_first() {
-            commands = rest;
-            match cmd {
-                FillPath {
-                    path,
-                    fill_type,
-                    color,
-                    shader,
-                    blend_mode,
-                } => {
-                    backend.fill_path(path, *fill_type, *color, shader.as_ref(), *blend_mode)?;
-                }
-                StrokePath {
-                    path,
-                    color,
-                    line_width,
-                    stroke_style,
-                    shader,
-                    blend_mode,
-                } => {
-                    backend.stroke_path(
-                        path,
-                        *color,
-                        *line_width,
-                        stroke_style,
-                        shader.as_ref(),
-                        *blend_mode,
-                    )?;
-                }
-                KnockoutStroke {
-                    path,
-                    color,
-                    line_width,
-                    stroke_style,
-                    shader,
-                } => backend.knockout_stroke(
-                    path,
-                    *color,
-                    *line_width,
-                    stroke_style,
-                    shader.as_ref(),
-                )?,
-                SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
-                Save => {
-                    backend.save()?;
-                    saves = saves.checked_add(1).ok_or(RecordingError::UnbalancedSave)?;
-                }
-                Restore => {
-                    saves = saves.checked_sub(1).ok_or(RecordingError::UnbalancedSave)?;
-                    backend.restore()?;
-                }
-                DrawImage {
-                    image,
-                    blend_mode,
-                    alpha,
-                    transform,
-                } => {
-                    backend.draw_image(image, *blend_mode, *alpha, *transform)?;
-                }
-                DrawInlineImage {
-                    image,
-                    blend_mode,
-                    alpha,
-                    transform,
-                } => {
-                    backend.draw_inline_image(image, *blend_mode, *alpha, *transform)?;
-                }
-                Mask { mask, len } => {
-                    let (body, rest) = commands
-                        .split_at_checked(*len)
-                        .ok_or(RecordingError::InvalidLayerBody)?;
-                    backend.with_mask_layer(mask, |backend| replay_commands(body, backend))?;
-                    commands = rest;
-                }
-                Group {
-                    alpha,
-                    blend_mode,
-                    len,
-                } => {
-                    let (body, rest) = commands
-                        .split_at_checked(*len)
-                        .ok_or(RecordingError::InvalidLayerBody)?;
-                    backend.with_group_layer(*alpha, *blend_mode, |backend| {
-                        replay_commands(body, backend)
-                    })?;
-                    commands = rest;
-                }
-            }
-        }
-        Ok(())
-    })();
-    for _ in 0..saves {
-        let cleanup = backend.restore();
-        result = match (result, cleanup) {
-            (Ok(()), restored) => restored,
-            (Err(primary), Ok(())) => Err(primary),
-            (Err(primary), Err(cleanup)) => Err(PdfCanvasError::Cleanup {
-                primary: Box::new(primary),
-                cleanup: Box::new(cleanup),
-            }),
-        };
-    }
-    result
-}
-
 impl CanvasBackend for RecordingCanvas {
     /// Fills the supplied device-space path using the requested paint and fill rule.
     fn fill_path(
@@ -354,11 +424,10 @@ impl CanvasBackend for RecordingCanvas {
         shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        if let Some(Shader::TilingPatternImage(pattern)) = shader {
-            self.nest(pattern.recording(), pattern.replay_cost());
-        }
+        self.nest_shader(shader);
+        let path = self.keep_path(path);
         self.commands.push(RecordingCommand::FillPath {
-            path: path.clone().into_owned(),
+            path,
             fill_type,
             color,
             shader: shader.cloned(),
@@ -377,11 +446,10 @@ impl CanvasBackend for RecordingCanvas {
         shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        if let Some(Shader::TilingPatternImage(pattern)) = shader {
-            self.nest(pattern.recording(), pattern.replay_cost());
-        }
+        self.nest_shader(shader);
+        let path = self.keep_path(path);
         self.commands.push(RecordingCommand::StrokePath {
-            path: path.clone().into_owned(),
+            path,
             color,
             line_width,
             stroke_style: stroke_style.clone(),
@@ -400,11 +468,10 @@ impl CanvasBackend for RecordingCanvas {
         stroke_style: &StrokeStyle,
         shader: Option<&Shader>,
     ) -> Result<(), PdfCanvasError> {
-        if let Some(Shader::TilingPatternImage(pattern)) = shader {
-            self.nest(pattern.recording(), pattern.replay_cost());
-        }
+        self.nest_shader(shader);
+        let path = self.keep_path(path);
         self.commands.push(RecordingCommand::KnockoutStroke {
-            path: path.clone().into_owned(),
+            path,
             color,
             line_width,
             stroke_style: stroke_style.clone(),
@@ -419,10 +486,9 @@ impl CanvasBackend for RecordingCanvas {
         path: &CanvasPath<'_>,
         mode: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        self.commands.push(RecordingCommand::SetClipRegion {
-            path: path.clone().into_owned(),
-            mode,
-        });
+        let path = self.keep_path(path);
+        self.commands
+            .push(RecordingCommand::SetClipRegion { path, mode });
         Ok(())
     }
 
@@ -532,6 +598,7 @@ impl RecordingCanvas {
     {
         self.commands.try_reserve(1)?;
         let start = self.commands.len();
+        let verbs_mark = self.verbs.mark();
         self.commands.push(header);
         let body_start = self.commands.len();
         let result = paint(self).and_then(|()| {
@@ -557,6 +624,7 @@ impl RecordingCanvas {
         });
         if result.is_err() {
             self.commands.truncate(start);
+            self.verbs.truncate(&verbs_mark);
         }
         result
     }
@@ -642,6 +710,7 @@ mod tests {
                 width: 8.0,
                 height: 8.0,
                 commands,
+                verbs: VerbBuffer::default(),
                 nesting: 0,
                 nested_cost: 0,
             };
@@ -792,8 +861,8 @@ mod tests {
 
         assert!(matches!(
             canvas.commands.first(),
-            Some(RecordingCommand::FillPath { path, .. })
-                if std::ptr::eq(path.source(), source.as_ref())
+            Some(RecordingCommand::FillPath { path: RecordedPath::Shared(path), .. })
+                if std::ptr::eq(path.source(), source.verbs.as_slice())
         ));
     }
 }
