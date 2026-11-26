@@ -75,14 +75,11 @@ pub enum ObjectReadError {
         /// The permitted number of simultaneously active decoder calls.
         maximum: usize,
     },
-    /// Internal typed-cache synchronization or checked type recovery failed.
+    /// The typed cache's lock was poisoned, or an entry had an inconsistent type.
     #[error("typed cache failed during {operation}")]
     TypedCache {
         /// The operation whose lock or checked downcast failed.
         operation: &'static str,
-        /// The underlying cache failure.
-        #[source]
-        source: BoxedError,
     },
     /// Value access required completion while another decoder owns the entry.
     #[error("typed object {object_id:?} is still being decoded")]

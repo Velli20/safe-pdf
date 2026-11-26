@@ -335,10 +335,10 @@ where
         match self.reader.typed_cache.reserve::<T>(id)? {
             Reservation::Existing(handle) => Ok(handle),
             Reservation::Vacant(reservation) => match self.read(object) {
-                Ok(value) => reservation.publish(Arc::new(value)),
+                Ok(value) => Ok(reservation.publish(Arc::new(value))),
                 Err(error) => {
                     let source = Arc::new(error);
-                    reservation.fail(Arc::clone(&source))?;
+                    reservation.fail(Arc::clone(&source));
                     Err(ObjectReadError::CachedDecode {
                         object_id: id,
                         target: std::any::type_name::<T>(),
