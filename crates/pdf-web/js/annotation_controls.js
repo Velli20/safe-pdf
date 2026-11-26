@@ -23,13 +23,14 @@ export class FormControl extends AnnotationComponent {
     this.layer = layer;
     /** @type {import('./annotation_sessions.js').EditState} */
     this.phase = EditPhase.Clean;
-    /** @type {string | undefined} */
+    /** @type {number | undefined} */
     this.revision = undefined;
     /** @type {number | undefined} */
     this.viewportRevision = undefined;
     /** @type {HTMLDataListElement | undefined} */
     this.datalist = undefined;
-    this.optionsRevision = '';
+    /** @type {number | undefined} */
+    this.optionsRevision = undefined;
     this.initialScroll = false;
     this.commitAfterComposition = false;
     const node = this.node;

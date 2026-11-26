@@ -53,8 +53,6 @@ mod source_kind;
 mod source_note_appearance;
 mod source_properties;
 
-mod wire;
-
 /// Triggers that run annotation actions.
 pub mod actions;
 mod annotation_display;

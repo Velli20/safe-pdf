@@ -11,7 +11,6 @@ pub mod ocg_state;
 pub mod optional_content;
 /// `/VE` visibility expressions of optional content membership dictionaries.
 pub mod visibility_expression;
-mod wire;
 
 pub use error::OptionalContentError;
 pub use ocg_state::{OcgOperation, OcgState, OcgStateChange, OcgTarget};

@@ -70,9 +70,9 @@ export class VisualComponent extends AnnotationComponent {
     } else if (kind === AnnotationKind.Stamp) {
       if (entry.artwork) this.drawArtwork();
       else { node.textContent = entry.label; node.classList.add('native-stamp'); this.signature = ''; }
-    } else if (this.signature !== entry.modified_revision) {
+    } else if (this.signature !== String(entry.modified_revision)) {
       node.replaceChildren(drawSvg(entry));
-      this.signature = entry.modified_revision;
+      this.signature = String(entry.modified_revision);
     }
   }
 }

@@ -219,8 +219,8 @@ impl WidgetAnnotation {
     /// Inferred values use the first matching export value, then sort and deduplicate
     /// the indices. Core value commands intentionally require
     /// ordered distinct option identities instead. Returns `IndexOverflow` if a
-    /// platform index cannot fit u64; does not mutate state or panic.
-    pub fn selected_option_indices(&self) -> Result<Vec<u64>, SourceAdoptionError> {
+    /// platform index cannot fit u32; does not mutate state or panic.
+    pub fn selected_option_indices(&self) -> Result<Vec<u32>, SourceAdoptionError> {
         if let Some(indices) = &self.selected_indices {
             return Ok(indices.clone());
         }
@@ -239,7 +239,7 @@ impl WidgetAnnotation {
                     .iter()
                     .position(|option| option.export_value == *value)
             {
-                indices.push(u64::try_from(index).map_err(|_| {
+                indices.push(u32::try_from(index).map_err(|_| {
                     SourceAdoptionError::IndexOverflow {
                         field: "choice index",
                     }

@@ -40,7 +40,7 @@ impl PdfPage {
     pub const KEY: &'static [u8] = b"Page";
 
     /// Returns an annotation by its stable page-scoped identifier.
-    pub fn annotation(&self, id: u64) -> Option<&SourceAnnotation> {
+    pub fn annotation(&self, id: u32) -> Option<&SourceAnnotation> {
         self.annotations
             .as_deref()?
             .iter()
@@ -49,7 +49,7 @@ impl PdfPage {
 
     /// Returns a mutable annotation by its stable page-scoped identifier.
     #[doc(hidden)]
-    pub fn annotation_mut(&mut self, id: u64) -> Option<&mut SourceAnnotation> {
+    pub fn annotation_mut(&mut self, id: u32) -> Option<&mut SourceAnnotation> {
         self.annotations
             .as_deref_mut()?
             .iter_mut()
@@ -58,16 +58,16 @@ impl PdfPage {
 
     /// Reserves a new identifier that will not be reused during this page's lifetime.
     #[doc(hidden)]
-    pub fn reserve_annotation_id(&mut self) -> Option<u64> {
+    pub fn reserve_annotation_id(&mut self) -> Option<u32> {
         let next = self.annotation_id_high_watermark.checked_add(1)?;
-        let id = u64::try_from(self.annotation_id_high_watermark).ok()?;
+        let id = u32::try_from(self.annotation_id_high_watermark).ok()?;
         self.annotation_id_high_watermark = next;
         Some(id)
     }
 
     /// Attaches an already materialized annotation to this page.
     #[doc(hidden)]
-    pub fn push_annotation(&mut self, mut annotation: SourceAnnotation, id: u64) {
+    pub fn push_annotation(&mut self, mut annotation: SourceAnnotation, id: u32) {
         annotation.id = id;
         self.annotations
             .get_or_insert_with(Vec::new)
@@ -76,7 +76,7 @@ impl PdfPage {
 
     /// Removes an annotation by identifier.
     #[doc(hidden)]
-    pub fn take_annotation(&mut self, id: u64) -> Option<SourceAnnotation> {
+    pub fn take_annotation(&mut self, id: u32) -> Option<SourceAnnotation> {
         let annotations = self.annotations.as_mut()?;
         let index = annotations
             .iter()

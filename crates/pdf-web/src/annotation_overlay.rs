@@ -36,9 +36,9 @@ impl PreparedAnnotationOverlay {
         self.prepared.page_index()
     }
 
-    /// Returns the lossless decimal Core revision these entries are valid for.
-    pub fn content_revision(&self) -> String {
-        self.prepared.revision().0.to_string()
+    /// Returns the Core revision these entries are valid for.
+    pub fn content_revision(&self) -> u32 {
+        self.prepared.revision().0
     }
 
     /// Returns the captured host viewport revision.
@@ -102,9 +102,9 @@ impl WebAnnotationOverlay {
         Ok(serde_json::to_string(self.diagnostics())?)
     }
 
-    /// Returns the current lossless decimal document revision, independent of mounted pages.
-    pub fn revision(&self) -> String {
-        self.overlay.revision().0.to_string()
+    /// Returns the current document revision, independent of mounted pages.
+    pub fn revision(&self) -> u32 {
+        self.overlay.revision().0
     }
 
     /// Projects a complete page into the supplied browser viewport.

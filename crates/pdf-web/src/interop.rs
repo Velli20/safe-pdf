@@ -33,7 +33,7 @@ impl WebAnnotationSnapshot {
     }
 
     /// Orders complete snapshots, including annotation removals and visibility changes.
-    pub fn content_revision(&self) -> String {
+    pub fn content_revision(&self) -> u32 {
         self.snapshot.content_revision()
     }
 
@@ -44,8 +44,8 @@ impl WebAnnotationSnapshot {
 
     /// Exports one JSON array of `WebAnnotationEntry` values. Each entry carries its
     /// identity, subtype, decoded text, device bounds, typed native presentation,
-    /// control model, local shapes, and ready-to-assign CSS. IDs use lossless
-    /// decimal strings; text is host text content, never trusted HTML.
+    /// control model, local shapes, and ready-to-assign CSS. Text is host text
+    /// content, never trusted HTML.
     pub fn entries_json(&self) -> Result<String, JsValue> {
         self.snapshot.entries_json().map_err(js_error)
     }
@@ -226,8 +226,8 @@ pub struct WebAnnotationEvent {
 }
 #[wasm_bindgen]
 impl WebAnnotationEvent {
-    /// Decodes a command envelope with decimal 64-bit identities and revisions.
-    /// Returns a JavaScript error for invalid JSON or invalid decimal values.
+    /// Decodes a JSON command envelope.
+    /// Returns a JavaScript error for invalid JSON or out-of-range identities and revisions.
     #[wasm_bindgen(constructor)]
     pub fn new(json: &str) -> Result<WebAnnotationEvent, JsValue> {
         Ok(Self {

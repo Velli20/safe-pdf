@@ -21,7 +21,7 @@ pub(crate) type Engine = AnnotationEngine<SessionStore>;
 
 /// Widgets sharing a terminal field group together; a widget without one stands alone
 /// under its page and source identity.
-type SourceFieldKey = (Option<usize>, u32, u64);
+type SourceFieldKey = (Option<u32>, u32, u32);
 
 /// Source layout retained beside a Core annotation. Presentation text, style, and
 /// subtype are read from the annotation's retained source instead.
@@ -43,7 +43,7 @@ impl LayoutHint {
 
 pub(crate) struct ImportedDocument {
     pub engine: Engine,
-    pub hints: BTreeMap<u64, LayoutHint>,
+    pub hints: BTreeMap<u32, LayoutHint>,
     pub diagnostics: Vec<PdfReadDiagnostic>,
 }
 
@@ -62,6 +62,7 @@ impl SourceRecord<'_> {
         let object = self
             .source
             .object_number
+            .and_then(|number| usize::try_from(number).ok())
             .map(|number| ObjectId::new(number, 0));
         PdfReadDiagnostic::new(PdfReadDiagnosticKind::AnnotationImport, None, object, error)
             .on_page(self.page)
@@ -79,12 +80,12 @@ impl SourceRecord<'_> {
 /// field groups, then popups, which need their parents' Core identities.
 struct Importer<'a> {
     engine: Engine,
-    hints: BTreeMap<u64, LayoutHint>,
+    hints: BTreeMap<u32, LayoutHint>,
     diagnostics: Vec<PdfReadDiagnostic>,
     /// Core identity of each adopted source by page and object number, for popup parents.
-    objects: BTreeMap<(u32, usize), AnnotationId>,
+    objects: BTreeMap<(u32, u32), AnnotationId>,
     groups: BTreeMap<SourceFieldKey, Vec<SourceRecord<'a>>>,
-    popups: Vec<(SourceRecord<'a>, Option<usize>)>,
+    popups: Vec<(SourceRecord<'a>, Option<u32>)>,
 }
 
 impl<'a> Importer<'a> {

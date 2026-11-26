@@ -125,30 +125,26 @@ impl WebDocument {
         self.render_viewport(page_index, canvas, viewport)
     }
 
-    /// Paints the widget `annotation` (a decimal Core id) held down, or releases the
+    /// Paints the widget `annotation` (a Core id) held down, or releases the
     /// pressed widget when `None`, and repaints `page_index`.
     pub fn press(
         &mut self,
         page_index: u32,
         canvas: web_sys::HtmlCanvasElement,
-        annotation: Option<String>,
+        annotation: Option<u32>,
     ) -> Result<WebAnnotationSnapshot, JsValue> {
-        let pressed = annotation
-            .map(|id| id.parse().map(AnnotationId))
-            .transpose()
-            .map_err(error)?;
-        self.overlay.set_pressed(pressed);
+        self.overlay.set_pressed(annotation.map(AnnotationId));
         self.repaint(page_index, canvas)
     }
 
-    /// Returns the font the text entry `annotation` (a decimal Core id) on `page_index`
+    /// Returns the font the text entry `annotation` (a Core id) on `page_index`
     /// paints its value in, or `undefined` when no browser font can be built for it.
     pub fn field_font(
         &self,
         page_index: u32,
-        annotation: &str,
+        annotation: u32,
     ) -> Result<Option<WebFieldFont>, JsValue> {
-        let id = AnnotationId(annotation.parse().map_err(error)?);
+        let id = AnnotationId(annotation);
         Ok(self
             .renderer
             .field_font(&self.overlay, page_index, id)
@@ -156,34 +152,30 @@ impl WebDocument {
             .map(WebFieldFont))
     }
 
-    /// Marks the text entry `annotation` (a decimal Core id) as being edited, or ends
+    /// Marks the text entry `annotation` (a Core id) as being edited, or ends
     /// editing when `None`, and repaints `page_index`: the edited entry is painted
     /// without its value, which its control shows instead.
     pub fn edit(
         &mut self,
         page_index: u32,
         canvas: web_sys::HtmlCanvasElement,
-        annotation: Option<String>,
+        annotation: Option<u32>,
     ) -> Result<WebAnnotationSnapshot, JsValue> {
-        let editing = annotation
-            .map(|id| id.parse().map(AnnotationId))
-            .transpose()
-            .map_err(error)?;
-        self.overlay.set_editing(editing);
+        self.overlay.set_editing(annotation.map(AnnotationId));
         self.repaint(page_index, canvas)
     }
 
-    /// Draws the source artwork of `annotation` (a decimal Core id) into `canvas`, sized
+    /// Draws the source artwork of `annotation` (a Core id) into `canvas`, sized
     /// to the annotation's local box at its mounted page's pixel density. The host shows
     /// the canvas inside the annotation, so the artwork moves with it while dragged.
     /// Leaves `canvas` untouched when the annotation has no artwork.
     pub fn render_artwork(
         &self,
         page_index: u32,
-        annotation: &str,
+        annotation: u32,
         canvas: web_sys::HtmlCanvasElement,
     ) -> Result<(), JsValue> {
-        let id = AnnotationId(annotation.parse().map_err(error)?);
+        let id = AnnotationId(annotation);
         let Some(artwork) = self.overlay.artwork(id) else {
             return Ok(());
         };
@@ -304,10 +296,10 @@ impl WebDocument {
     }
 
     /// Runs the action `trigger` (a JSON `ActionTrigger` string) selects on
-    /// `annotation` (a decimal Core id), returning the `ActionReceipt` as JSON: the
+    /// `annotation` (a Core id), returning the `ActionReceipt` as JSON: the
     /// pages the host must request again and the actions it performs itself.
-    pub fn perform_action(&mut self, annotation: &str, trigger: &str) -> Result<String, JsValue> {
-        let id = AnnotationId(annotation.parse().map_err(error)?);
+    pub fn perform_action(&mut self, annotation: u32, trigger: &str) -> Result<String, JsValue> {
+        let id = AnnotationId(annotation);
         let trigger: ActionTrigger = serde_json::from_str(trigger).map_err(error)?;
         let receipt = self.overlay.perform_action(id, trigger).map_err(error)?;
         serde_json::to_string(&receipt).map_err(error)
@@ -319,8 +311,8 @@ impl WebDocument {
         self.overlay.diagnostics_json().map_err(error)
     }
 
-    /// Current decimal Core revision, independent of mounted DOM.
-    pub fn annotation_revision(&self) -> String {
+    /// Current Core revision, independent of mounted DOM.
+    pub fn annotation_revision(&self) -> u32 {
         self.overlay.revision()
     }
 

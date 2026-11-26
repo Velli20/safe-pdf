@@ -30,9 +30,7 @@ pub enum OptionalContentGroupId {
     /// A group identified by the indirect object number of its `/OCG` dictionary.
     Object {
         /// PDF object number of the group's dictionary.
-        #[serde(with = "crate::wire")]
-        #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        number: u64,
+        number: u32,
     },
     /// A group that has no object number, identified by its `/Name` bytes.
     Name {
@@ -50,7 +48,7 @@ impl OptionalContentGroupId {
     ) -> Result<Self, OptionalContentError> {
         match (object_number, name) {
             (Some(number), _) => Ok(Self::Object {
-                number: u64::try_from(number).map_err(|_| OptionalContentError::ResourceLimit)?,
+                number: u32::try_from(number).map_err(|_| OptionalContentError::ResourceLimit)?,
             }),
             (None, Some(name)) => Ok(Self::Name {
                 name: Arc::from(name),

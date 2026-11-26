@@ -101,7 +101,9 @@ impl FromPdfObject for HideTarget {
             return Ok(Self::FieldName(context.decode()?));
         }
         Ok(match context.dictionary()?.object_number() {
-            Some(number) => Self::Object { number },
+            Some(number) => Self::Object {
+                number: u32::try_from(number).map_err(|_| SourceDecodeError::ResourceLimit)?,
+            },
             None => Self::Unresolved,
         })
     }
@@ -202,11 +204,12 @@ impl TryFrom<&ObjectVariant> for DestinationTarget {
     fn try_from(value: &ObjectVariant) -> ReadResult<Self> {
         Ok(match value {
             ObjectVariant::Reference(id) => Self::Reference {
-                number: id.number,
-                generation: id.generation,
+                number: u32::try_from(id.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
+                generation: u16::try_from(id.generation)
+                    .map_err(|_| SourceDecodeError::ResourceLimit)?,
             },
             ObjectVariant::Integer(index) => Self::PageIndex {
-                index: u64::try_from(*index).map_err(|_| SourceDecodeError::ResourceLimit)?,
+                index: u32::try_from(*index).map_err(|_| SourceDecodeError::ResourceLimit)?,
             },
             ObjectVariant::Dictionary(_) => Self::Dictionary,
             other => {

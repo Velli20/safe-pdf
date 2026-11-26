@@ -230,13 +230,13 @@ class PdfViewer {
         onPress: (entry, pressed) => this.pressAnnotation(entry, pressed),
         onEdit: (entry, editing) => this.editAnnotation(entry, editing),
         loadFont: entry => {
-          const font = this.pdf.field_font(entry.page, String(entry.id));
+          const font = this.pdf.field_font(entry.page, entry.id);
           if (!font) return undefined;
           const result = { family: font.family, data: font.data, lineHeight: font.line_height };
           font.free();
           return result;
         },
-        renderArtwork: (entry, canvas) => this.pdf.render_artwork(entry.page, String(entry.id), canvas),
+        renderArtwork: (entry, canvas) => this.pdf.render_artwork(entry.page, entry.id, canvas),
         onError: error => this.showError(error),
       });
     }
@@ -304,7 +304,7 @@ class PdfViewer {
     const page = this.pages.get(entry.page);
     if (!page?.snapshot) return;
     try {
-      const snapshot = this.pdf.edit(entry.page, page.canvas, editing ? String(entry.id) : undefined);
+      const snapshot = this.pdf.edit(entry.page, page.canvas, editing ? entry.id : undefined);
       page.snapshot.free();
       page.snapshot = snapshot;
       this.updateAnnotations(page);

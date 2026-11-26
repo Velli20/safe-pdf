@@ -143,19 +143,19 @@ pub enum SourceAdoptionError {
     #[error("source button {source_id} has no on-state")]
     MissingButtonOnState {
         /// Page-local source annotation identity, not a Core ID.
-        source_id: u64,
+        source_id: u32,
     },
     /// Source annotation has no `/Rect` although its kind requires one.
     #[error("source annotation {source_id} has no rectangle")]
     MissingRect {
         /// Page-local source annotation identity, not a Core ID.
-        source_id: u64,
+        source_id: u32,
     },
     /// Source `/Rect` is empty or nonfinite once its edges are ordered.
     #[error("source annotation {source_id} has an unusable rectangle")]
     InvalidRect {
         /// Page-local source annotation identity, not a Core ID.
-        source_id: u64,
+        source_id: u32,
     },
     /// A retained PDF text string has no Unicode interpretation.
     #[error("undecodable PDF text string: {0}")]

@@ -175,7 +175,7 @@ name: Array<number>, } } | { "Explicit": ExplicitDestination };
 /**
  * Engine-allocated identity, unique within a document and never reused there.
  */
-export type AnnotationId = string;
+export type AnnotationId = number;
 
 /**
  * Core-owned annotation vocabulary; future variants can extend the boundary.
@@ -488,15 +488,15 @@ export type DestinationTarget = "Null" | "Dictionary" | { "Reference": {
 /**
  * PDF object number, distinct from Core annotation and field identities.
  */
-number: string,
+number: number,
 /**
  * PDF generation number.
  */
-generation: string, } } | { "PageIndex": {
+generation: number, } } | { "PageIndex": {
 /**
  * Page index within the target document.
  */
-index: string, } };
+index: number, } };
 
 /**
  * A committed edit result; failures produce an error instead of an event.
@@ -595,7 +595,7 @@ left: number | null, } };
 /**
  * Core-allocated document-local identity, distinct from an annotation identity.
  */
-export type FieldId = string;
+export type FieldId = number;
 
 /**
  * Typed field configuration and value; field kinds cannot change through edits.
@@ -724,7 +724,7 @@ export type HideTarget = { "FieldName": Array<number> } | { "Object": {
 /**
  * The object number.
  */
-number: string, } } | "Unresolved";
+number: number, } } | "Unresolved";
 
 /**
  * Selected regions supplied by the host's text-selection system.
@@ -1020,11 +1020,11 @@ export type OcgTarget = { "Reference": {
 /**
  * PDF object number of the group's dictionary.
  */
-number: string,
+number: number,
 /**
  * PDF generation number.
  */
-generation: string, } } | { "Dictionary": {
+generation: number, } } | { "Dictionary": {
 /**
  * The group's `/Name` bytes.
  */
@@ -1154,7 +1154,7 @@ export type OptionalContentGroupId = { "Object": {
 /**
  * PDF object number of the group's dictionary.
  */
-number: string, } } | { "Name": {
+number: number, } } | { "Name": {
 /**
  * The group's `/Name` bytes.
  */
@@ -1319,7 +1319,7 @@ export type PopupAnnotation = {
 /**
  * The required parent annotation reference.
  */
-parent: string | null,
+parent: number | null,
 /**
  * Whether the popup is open.
  */
@@ -1418,7 +1418,7 @@ alignment: Alignment, };
 /**
  * Monotonically increasing document edit revision; overflow must be rejected.
  */
-export type Revision = string;
+export type Revision = number;
 
 /**
  * One primitive in annotation-local top-left units.
@@ -1489,11 +1489,11 @@ export type SourceAnnotation = {
 /**
  * Original page-local runtime identity; never used as a Core identity.
  */
-id: string,
+id: number,
 /**
  * Original indirect object number, used to resolve annotation relationships.
  */
-object_number: string | null,
+object_number: number | null,
 /**
  * Opacity applied by native presentation.
  */
@@ -1539,7 +1539,7 @@ color: Color | null,
 /**
  * The optional structure parent index from `/StructParent`.
  */
-struct_parent: string | null,
+struct_parent: number | null,
 /**
  * The optional `/OC` optional content membership governing display.
  * Defaulted on load so sidecars written before this entry still deserialize.
@@ -1939,7 +1939,7 @@ export type WidgetAnnotation = {
  * Widgets belonging to the same logical field share this identifier even
  * when other field properties are inherited from higher ancestors.
  */
-field_id: string | null,
+field_id: number | null,
 /**
  * The form field type.
  */
@@ -1993,11 +1993,11 @@ options: Array<WidgetChoiceOption> | null,
 /**
  * Explicitly selected choice option indices from `/I`.
  */
-selected_indices: Array<string> | null,
+selected_indices: Array<number> | null,
 /**
  * Index of the first visible listbox option from `/TI`.
  */
-top_index: string | null,
+top_index: number | null,
 /**
  * The appearance characteristics.
  */

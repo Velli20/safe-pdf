@@ -6,11 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
-pub struct FieldId(
-    #[serde(with = "crate::wire")]
-    #[cfg_attr(feature = "typescript", ts(type = "string"))]
-    pub u64,
-);
+pub struct FieldId(pub u32);
 
 /// Field-local option identity, independent of its display order or export value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -287,20 +287,14 @@ pub enum DestinationTarget {
     /// A page reference into the containing source PDF.
     Reference {
         /// PDF object number, distinct from Core annotation and field identities.
-        #[serde(with = "crate::wire")]
-        #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        number: usize,
+        number: u32,
         /// PDF generation number.
-        #[serde(with = "crate::wire")]
-        #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        generation: usize,
+        generation: u16,
     },
     /// A zero-based page index, used by remote (`GoToR`) destinations.
     PageIndex {
         /// Page index within the target document.
-        #[serde(with = "crate::wire")]
-        #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        index: u64,
+        index: u32,
     },
 }
 
@@ -383,9 +377,7 @@ pub enum HideTarget {
     /// The indirect object number of an annotation or field dictionary.
     Object {
         /// The object number.
-        #[serde(with = "crate::wire")]
-        #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        number: usize,
+        number: u32,
     },
     /// A direct dictionary, which has no identity to match an annotation by.
     Unresolved,
@@ -692,9 +684,7 @@ pub struct PolyLineAnnotation {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct PopupAnnotation {
     /// The required parent annotation reference.
-    #[serde(with = "crate::wire::optional")]
-    #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub parent: Option<usize>,
+    pub parent: Option<u32>,
     /// Whether the popup is open.
     pub open: Option<bool>,
 }
@@ -808,9 +798,7 @@ pub struct WidgetAnnotation {
     ///
     /// Widgets belonging to the same logical field share this identifier even
     /// when other field properties are inherited from higher ancestors.
-    #[serde(with = "crate::wire::optional")]
-    #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub field_id: Option<usize>,
+    pub field_id: Option<u32>,
     /// The form field type.
     pub field_type: Option<Arc<[u8]>>,
     /// The field name.
@@ -840,13 +828,9 @@ pub struct WidgetAnnotation {
     /// Options available to a choice field.
     pub options: Option<Vec<WidgetChoiceOption>>,
     /// Explicitly selected choice option indices from `/I`.
-    #[serde(with = "crate::wire::optional_vec")]
-    #[cfg_attr(feature = "typescript", ts(type = "Array<string> | null"))]
-    pub selected_indices: Option<Vec<u64>>,
+    pub selected_indices: Option<Vec<u32>>,
     /// Index of the first visible listbox option from `/TI`.
-    #[serde(with = "crate::wire::optional")]
-    #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub top_index: Option<u64>,
+    pub top_index: Option<u32>,
     /// The appearance characteristics.
     pub appearance_characteristics: Option<AppearanceCharacteristics>,
     /// The border style.
@@ -915,13 +899,9 @@ pub struct PageAnnotations(pub Option<Vec<SourceAnnotation>>);
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct SourceAnnotation {
     /// Original page-local runtime identity; never used as a Core identity.
-    #[serde(with = "crate::wire")]
-    #[cfg_attr(feature = "typescript", ts(type = "string"))]
-    pub id: u64,
+    pub id: u32,
     /// Original indirect object number, used to resolve annotation relationships.
-    #[serde(with = "crate::wire::optional")]
-    #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub object_number: Option<usize>,
+    pub object_number: Option<u32>,
     /// Opacity applied by native presentation.
     pub opacity: f32,
     /// The annotation subtype name.
@@ -953,9 +933,7 @@ pub struct SourceAnnotation {
     /// transparent color (alpha `0.0`), distinct from an absent entry.
     pub color: Option<Color>,
     /// The optional structure parent index from `/StructParent`.
-    #[serde(with = "crate::wire::optional")]
-    #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
-    pub struct_parent: Option<u64>,
+    pub struct_parent: Option<u32>,
     /// The optional `/OC` optional content membership governing display.
     /// Defaulted on load so sidecars written before this entry still deserialize.
     #[serde(default)]
