@@ -38,16 +38,6 @@ pub fn decode(bytes: &[u8]) -> Result<String, TextStringError> {
     decode_pdf_doc_encoding(bytes)
 }
 
-/// Encodes Unicode as a byte-order-marked UTF-16BE PDF text string.
-pub fn encode(text: &str) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(text.len().saturating_mul(2).saturating_add(2));
-    bytes.extend_from_slice(UTF16_BIG_ENDIAN_BOM);
-    for unit in text.encode_utf16() {
-        bytes.extend_from_slice(&unit.to_be_bytes());
-    }
-    bytes
-}
-
 fn decode_utf16_big_endian(bytes: &[u8]) -> Result<String, TextStringError> {
     let units = Utf16BeUnits::from(bytes);
     if units.trailing_byte().is_some() {
@@ -66,63 +56,45 @@ fn decode_pdf_doc_encoding(bytes: &[u8]) -> Result<String, TextStringError> {
 
 fn decode_pdf_doc_byte(byte: u8) -> Result<char, TextStringError> {
     let character = match byte {
-        0x18 => '\u{02D8}',
-        0x19 => '\u{02C7}',
-        0x1A => '\u{02C6}',
-        0x1B => '\u{02D9}',
-        0x1C => '\u{02DD}',
-        0x1D => '\u{02DB}',
-        0x1E => '\u{02DA}',
-        0x1F => '\u{02DC}',
-        0x7F | 0x9F | 0xAD => {
-            return Err(TextStringError::UndefinedPdfDocEncodingByte { byte });
-        }
-        0x80 => '\u{2022}',
-        0x81 => '\u{2020}',
-        0x82 => '\u{2021}',
-        0x83 => '\u{2026}',
-        0x84 => '\u{2014}',
-        0x85 => '\u{2013}',
-        0x86 => '\u{0192}',
-        0x87 => '\u{2044}',
-        0x88 => '\u{2039}',
-        0x89 => '\u{203A}',
-        0x8A => '\u{2212}',
-        0x8B => '\u{2030}',
-        0x8C => '\u{201E}',
-        0x8D => '\u{201C}',
-        0x8E => '\u{201D}',
-        0x8F => '\u{2018}',
-        0x90 => '\u{2019}',
-        0x91 => '\u{201A}',
-        0x92 => '\u{2122}',
-        0x93 => '\u{FB01}',
-        0x94 => '\u{FB02}',
-        0x95 => '\u{0141}',
-        0x96 => '\u{0152}',
-        0x97 => '\u{0160}',
-        0x98 => '\u{0178}',
-        0x99 => '\u{017D}',
-        0x9A => '\u{0131}',
-        0x9B => '\u{0142}',
-        0x9C => '\u{0153}',
-        0x9D => '\u{0161}',
-        0x9E => '\u{017E}',
-        0xA0 => '\u{20AC}',
-        _ => char::from_u32(u32::from(byte))
-            .ok_or(TextStringError::UndefinedPdfDocEncodingByte { byte })?,
+        0x18..=0x1F => byte
+            .checked_sub(0x18)
+            .and_then(|offset| PDF_DOC_DIACRITICS.get(usize::from(offset))),
+        0x80..=0x9E => byte
+            .checked_sub(0x80)
+            .and_then(|offset| PDF_DOC_PUNCTUATION.get(usize::from(offset))),
+        0xA0 => Some(&'\u{20AC}'),
+        0x7F | 0x9F | 0xAD => None,
+        _ => return Ok(char::from(byte)),
     };
-    Ok(character)
+    character
+        .copied()
+        .ok_or(TextStringError::UndefinedPdfDocEncodingByte { byte })
 }
+
+/// PDFDocEncoding characters for bytes 0x18 through 0x1F.
+const PDF_DOC_DIACRITICS: [char; 8] = [
+    '\u{02D8}', '\u{02C7}', '\u{02C6}', '\u{02D9}', '\u{02DD}', '\u{02DB}', '\u{02DA}', '\u{02DC}',
+];
+
+/// PDFDocEncoding characters for bytes 0x80 through 0x9E.
+const PDF_DOC_PUNCTUATION: [char; 31] = [
+    '\u{2022}', '\u{2020}', '\u{2021}', '\u{2026}', '\u{2014}', '\u{2013}', '\u{0192}', '\u{2044}',
+    '\u{2039}', '\u{203A}', '\u{2212}', '\u{2030}', '\u{201E}', '\u{201C}', '\u{201D}', '\u{2018}',
+    '\u{2019}', '\u{201A}', '\u{2122}', '\u{FB01}', '\u{FB02}', '\u{0141}', '\u{0152}', '\u{0160}',
+    '\u{0178}', '\u{017D}', '\u{0131}', '\u{0142}', '\u{0153}', '\u{0161}', '\u{017E}',
+];
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn utf16_big_endian_round_trips_bmp_and_supplementary_characters() {
-        let text = "caf\u{e9} \u{1f642}";
-        assert_eq!(decode(&encode(text)), Ok(text.to_owned()));
+    fn decodes_utf16_big_endian_bmp_and_supplementary_characters() {
+        let bytes = [
+            0xFE, 0xFF, 0x00, 0x63, 0x00, 0x61, 0x00, 0x66, 0x00, 0xE9, 0x00, 0x20, 0xD8, 0x3D,
+            0xDE, 0x42,
+        ];
+        assert_eq!(decode(&bytes), Ok("caf\u{e9} \u{1f642}".to_owned()));
     }
 
     #[test]

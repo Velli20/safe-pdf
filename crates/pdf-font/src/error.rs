@@ -3,7 +3,6 @@ use pdf_content_stream_operators::error::PdfOperatorError;
 use pdf_object_reader::object_error::ObjectError;
 use thiserror::Error;
 
-use crate::base_encoding::BaseEncoding;
 use crate::glyph_widths_map::GlyphWidthsMapError;
 
 /// Defines errors that can occur while reading a font object.
@@ -47,12 +46,6 @@ pub enum FontError {
     InvalidDescendantFonts(&'static str),
     #[error("Unsupported /BaseEncoding value '{0}'")]
     UnsupportedBaseEncoding(String),
-    #[error("unsupported text encoding {0:?}")]
-    UnsupportedTextEncoding(BaseEncoding),
-    #[error("character {character:?} is not representable in WinAnsi")]
-    UnsupportedWinAnsiCharacter { character: char },
-    #[error("byte 0x{byte:02X} is undefined in WinAnsi")]
-    InvalidWinAnsiByte { byte: u8 },
     #[error("{0}")]
     CMapError(#[from] CMapError),
 }

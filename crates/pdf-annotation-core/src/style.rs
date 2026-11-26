@@ -205,7 +205,8 @@ impl WidgetAnnotation {
             .then_some(self.appearance_characteristics.as_ref())
             .flatten()
             .and_then(|mk| mk.normal_caption.as_deref())
-            .map(|caption| String::from_utf8_lossy(caption).chars().count())
+            .and_then(|caption| pdf_object_reader::text_string::decode(caption).ok())
+            .map(|caption| caption.chars().count())
             .and_then(|count| count.to_f32())
             .filter(|count| *count > 0.0);
         if let Some(count) = caption_chars {
