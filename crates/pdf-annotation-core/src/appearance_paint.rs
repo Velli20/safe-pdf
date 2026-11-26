@@ -45,10 +45,10 @@ impl PaintedAppearance {
     ///
     /// Widgets whose control is `painted` draw their live state: checkboxes and radio
     /// options their on-state while live Core state selects them and `Off` otherwise, push
-    /// buttons, read-only text fields and list boxes whose selection is still the source
-    /// one their source `/AS`, and editable text fields and
-    /// editable combo boxes their normal appearance with the live value, drawn as it is
-    /// while a text field's value is still its source `/V`. The widget
+    /// buttons, read-only text fields, combo boxes whose value is still the source `/V` and
+    /// list boxes whose selection is still the source one their source `/AS`, and editable
+    /// text fields and editable combo boxes their normal appearance with the live value,
+    /// drawn as it is while the value is still its source `/V`. The widget
     /// `presentation` marks pressed draws its down appearance when it has one for that
     /// state, and the text entry it marks editing draws without its value. Ink without
     /// strokes, and squares and circles that still show their source shape, draw their
@@ -243,6 +243,7 @@ mod tests {
     use crate::{
         AnnotationCommandRequest, AnnotationOverlay, PresentationState,
         commands::{AnnotationCommand, Operation},
+        fields::{ComboValue, OptionId},
         pdf_data::{
             AppearanceDictionary, AppearanceStreams, NativeAnnotation, SourceAnnotation,
             SquareAnnotation, TextAnnotation,
@@ -336,6 +337,98 @@ mod tests {
                 assert_eq!(text.value, "Ipsum");
                 assert_eq!(text.font.as_ref(), b"Helv");
             }
+        }
+    }
+
+    #[test]
+    fn combo_box_draws_its_appearance_as_is_until_its_value_changes() {
+        let name = |bytes: &[u8]| PdfString::from(bytes, StringKind::Name);
+        let literal = |bytes: &[u8]| PdfString::from(bytes, StringKind::Literal);
+        // The appearance shows `/V` as its format action laid it out: `3.00`, not `3`.
+        let appearance = StreamObject::new(
+            2,
+            0,
+            Dictionary::from_entries([]),
+            b"/Tx BMC BT /Helv 12 Tf (3.00) Tj ET EMC".to_vec(),
+        );
+        // `/Ff 131072` is a closed combo box, shown by a select. The second holds a value a
+        // calculation stored outside its (absent) options.
+        let options: [&[&[u8]]; 2] = [&[b"1", b"2", b"3"], &[]];
+        for (options, value) in options.into_iter().zip([b"3", b"6"]) {
+            let opt: Vec<_> = options.iter().map(|option| literal(option)).collect();
+            let widget = ObjectVariant::Dictionary(Dictionary::from_entries([
+                (b"Subtype".as_slice(), name(b"Widget")),
+                (b"FT".as_slice(), name(b"Ch")),
+                (b"Ff".as_slice(), ObjectVariant::Integer(131_072)),
+                (b"Opt".as_slice(), ObjectVariant::Array(PdfArray::new(opt))),
+                (b"V".as_slice(), literal(value)),
+                (b"DA".as_slice(), literal(b"/Helv 12 Tf 0 g")),
+                (
+                    b"Rect".as_slice(),
+                    ObjectVariant::Array(PdfArray::new(
+                        [255, 631, 372, 703].map(ObjectVariant::Integer),
+                    )),
+                ),
+                (
+                    b"AP".as_slice(),
+                    ObjectVariant::Dictionary(Dictionary::from_entries([(
+                        b"N".as_slice(),
+                        ObjectVariant::Stream(appearance.clone()),
+                    )])),
+                ),
+            ]));
+            let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&widget).unwrap();
+            let mut overlay =
+                AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
+            let page = Rect {
+                left: 0.0,
+                top: 0.0,
+                right: 612.0,
+                bottom: 792.0,
+            };
+            let viewport = PageViewport::new(page, 0, Size::new(612.0, 792.0)).unwrap();
+            let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+            let control = prepared.entries().first().unwrap().control.clone().unwrap();
+            assert!(control.painted);
+            let appearances = overlay
+                .painted_appearances(0, PresentationState::default())
+                .unwrap();
+            let painted = appearances.first().unwrap();
+            assert_eq!(appearances.len(), 1);
+            assert_eq!(
+                painted.stream.value(),
+                &ObjectVariant::Stream(appearance.clone())
+            );
+            assert!(painted.text.is_none());
+            if options.is_empty() {
+                continue;
+            }
+
+            // Another option no longer matches the appearance, so the select shows it.
+            let request = AnnotationCommandRequest {
+                target: None,
+                command: AnnotationCommand {
+                    expected_revision: overlay.revision(),
+                    operation: Operation::SetComboValue {
+                        field: control.field,
+                        value: ComboValue::Option(OptionId(0)),
+                    },
+                },
+            };
+            overlay.accept_event(request, None, None).unwrap();
+            let appearances = overlay
+                .painted_appearances(0, PresentationState::default())
+                .unwrap();
+            assert!(appearances.is_empty());
+            let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+            let control = prepared
+                .entries()
+                .first()
+                .unwrap()
+                .control
+                .as_ref()
+                .unwrap();
+            assert!(!control.painted);
         }
     }
 

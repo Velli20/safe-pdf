@@ -150,8 +150,8 @@ impl Annotation {
 
     /// How this widget, bound to `field`, selects its appearance state; `None` for
     /// non-widgets and fields whose control presents their value instead: edited text
-    /// fields, changed list box selections and combo boxes. Signature and unknown-type fields have no control, so
-    /// their source appearance stays current.
+    /// fields and combo boxes, and changed list box selections. Signature and unknown-type
+    /// fields have no control, so their source appearance stays current.
     pub(crate) fn painted_state(&self, field: &Field) -> Option<PaintedState> {
         let AnnotationKind::Widget(widget) = &self.content else {
             return None;
@@ -160,10 +160,11 @@ impl Annotation {
         let selects = |selected: Option<OptionId>| option.is_some() && selected == option;
         Some(match &field.definition.content {
             FieldKind::Button(_) | FieldKind::Unsupported(_) => PaintedState::Source,
-            // A read-only value never changes, so its source appearance stays current.
             // The source appearance stays current while the value is still the source `/V`,
-            // which a read-only value always is.
-            FieldKind::Text(_) if field.definition.read_only || self.shows_source_value(field) => {
+            // which a read-only value always is, and shows it formatted as its author did.
+            FieldKind::Text(_) | FieldKind::ComboBox(_)
+                if field.definition.read_only || self.shows_source_value(field) =>
+            {
                 PaintedState::Source
             }
             // A list box's source appearance stays current while its selection is still the

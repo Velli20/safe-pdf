@@ -61,8 +61,8 @@ export class FormControl extends AnnotationComponent {
     };
     this.listen(this.node, 'pointerdown', event => {
       const control = this.control();
-      // Text entries and list boxes have no down appearance; only buttons are pressed.
-      if (event.button !== 0 || !control.painted || FormControl.isTextEntry(control) || control.list_box || !this.entry.editable && control.kind !== ControlKind.Button) return;
+      // Text entries and choice lists have no down appearance; only buttons are pressed.
+      if (event.button !== 0 || !control.painted || FormControl.isTextEntry(control) || control.tag === 'select' || !this.entry.editable && control.kind !== ControlKind.Button) return;
       pressed = true;
       this.layer.onPress(this.entry, true);
     });
@@ -77,9 +77,10 @@ export class FormControl extends AnnotationComponent {
     this.listen(this.node, 'blur', () => { if (edits()) this.layer.onEdit(this.entry, false); });
   }
 
-  /** Whether `control` takes typed text: a text field or a combo box.
+  /** Whether `control` takes typed text: a text field or an editable combo box. A combo box
+   * that only picks an option is a select, as a list box is.
    * @param {import('./annotation_contract').WidgetControl} control */
-  static isTextEntry(control) { return control.kind === ControlKind.Text || control.kind === ControlKind.ComboBox; }
+  static isTextEntry(control) { return control.kind === ControlKind.Text || control.kind === ControlKind.ComboBox && control.tag === 'input'; }
 
   /** Whether the canvas paints `control`'s value, which the control shows only while edited.
    * @param {import('./annotation_contract').WidgetControl | null | undefined} control */

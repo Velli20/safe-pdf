@@ -186,7 +186,8 @@ impl FieldValue for ListBoxField {
     }
 }
 
-/// Options must exist; custom text requires an editable combo and one line.
+/// Options must exist; custom text requires one line, and an editable combo unless a
+/// closed combo already holds it, as when a calculation stored a value outside its options.
 impl FieldValue for ComboBoxField {
     type Value = ComboValue;
 
@@ -201,7 +202,7 @@ impl FieldValue for ComboBoxField {
     fn validate_value(&self, value: &ComboValue) -> Result<(), FieldValidationError> {
         match value {
             ComboValue::Option(id) => self.validate_selected(Some(*id)),
-            ComboValue::Text(_) if !self.editable => {
+            ComboValue::Text(_) if !self.editable && *value != self.value => {
                 Err(FieldValidationError::CustomTextNotAllowed)
             }
             ComboValue::Text(text) if text.contains(['\r', '\n']) => {

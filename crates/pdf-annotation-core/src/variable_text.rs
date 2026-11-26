@@ -124,15 +124,19 @@ impl Annotation {
             .filter(|cells| *cells > 0)
     }
 
-    /// Whether `field`, this widget's bound text field, still holds the source `/V`, which
-    /// the widget's source appearance shows.
+    /// Whether `field`, this widget's bound text field or combo box, still holds the source
+    /// `/V`, which the widget's source appearance shows as its author formatted it.
     pub(crate) fn shows_source_value(&self, field: &Field) -> bool {
-        let FieldKind::Text(text) = &field.definition.content else {
+        let Some(widget) = self.source_widget() else {
             return false;
         };
-        self.source_widget()
-            .and_then(|widget| widget.text_value().ok())
-            .is_some_and(|value| value == text.value)
+        match &field.definition.content {
+            FieldKind::Text(text) => widget.text_value().is_ok_and(|value| value == text.value),
+            FieldKind::ComboBox(_) => widget
+                .choice_field()
+                .is_ok_and(|source| source == field.definition.content),
+            _ => false,
+        }
     }
 
     /// Whether `field`, this widget's bound list box, still holds the source selection,
