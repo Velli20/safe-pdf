@@ -37,13 +37,18 @@ impl Annotation {
         }
     }
 
-    /// Whether this square or circle still holds the payload adopted from its source, whose
-    /// normal appearance then shows it as authored, including blend modes an overlay above
-    /// the page cannot reproduce. Moving or restyling it ends this.
+    /// Whether this shape annotation (square, circle, line, polygon or polyline) still holds
+    /// the payload adopted from its source, whose normal appearance then shows it as
+    /// authored, including cloudy borders, line endings and blend modes an overlay above the
+    /// page cannot reproduce. Moving or restyling it ends this.
     pub(crate) fn shows_source_shape(&self) -> bool {
         matches!(
             self.content,
-            AnnotationKind::Square(_) | AnnotationKind::Circle(_)
+            AnnotationKind::Square(_)
+                | AnnotationKind::Circle(_)
+                | AnnotationKind::Line(_)
+                | AnnotationKind::Polygon(_)
+                | AnnotationKind::PolyLine(_)
         ) && self.has_normal_appearance()
             && self
                 .source()
@@ -52,7 +57,7 @@ impl Annotation {
     }
 
     /// Whether the page canvas paints this annotation's source appearance at its source
-    /// rectangle: always for [`Self::is_drawn_from_appearance`], and for squares and circles
+    /// rectangle: always for [`Self::is_drawn_from_appearance`], and for shape annotations
     /// while they show their source shape.
     pub(crate) fn paints_source_appearance(&self) -> bool {
         self.is_drawn_from_appearance() || self.shows_source_shape()
