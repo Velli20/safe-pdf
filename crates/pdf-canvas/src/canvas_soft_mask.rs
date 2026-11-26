@@ -72,7 +72,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             Arc::new(recording),
             transform,
             smask.mask_type.clone(),
-            smask.transfer.table().cloned(),
+            smask.transfer.clone(),
         )?))
     }
 

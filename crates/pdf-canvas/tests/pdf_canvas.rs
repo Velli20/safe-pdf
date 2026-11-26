@@ -21,7 +21,7 @@ use pdf_resources::{
     pattern::{PaintType, Pattern, TilingType},
     resource::Resource,
     resources::Resources,
-    soft_mask::{MaskTransfer, SoftMask},
+    soft_mask::SoftMask,
 };
 use pdf_text_engine::bundled_font_system;
 
@@ -339,7 +339,7 @@ fn image_soft_mask_replaces_the_graphics_state_soft_mask() {
             params: vec![ExternalGraphicsStateKey::SoftMask(Some(
                 ObjectHandle::from(SoftMask {
                     mask_type: MaskMode::Luminosity,
-                    transfer: MaskTransfer::Identity,
+                    transfer: None,
                     backdrop: None,
                     shape: empty_group.into(),
                 }),
