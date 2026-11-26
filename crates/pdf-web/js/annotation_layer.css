@@ -13,8 +13,8 @@
    previews a drag until the move commits. */
 .native-canvas-painted:not(.native-dragging) svg { visibility: hidden; }
 /* The canvas paints a list box's options and selection from its appearance; the control only
-   takes input over it. */
-select.native-control.native-painted option, select.native-control.native-painted option:checked { color: transparent; background: transparent; }
+   takes input over it. A combo box's dropdown (`size` 1) still lists its options. */
+select.native-control.native-painted:not([size="1"]) option, select.native-control.native-painted:not([size="1"]) option:checked { color: transparent; background: transparent; }
 /* The canvas paints a text entry's value in its PDF font; while focused, the host paints the
    entry without its value and the control shows the value being edited. */
 .native-control.native-painted:is(input,textarea):focus { color: var(--native-field-color) !important; }
