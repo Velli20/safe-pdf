@@ -15,7 +15,7 @@ use pdf_resources::{
     form::{FormGroup, FormXObject},
     resource::Resource,
     resources::Resources,
-    soft_mask::{MaskTransfer, SoftMask},
+    soft_mask::SoftMask,
 };
 use pdf_text_engine::bundled_font_system;
 
@@ -104,7 +104,7 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
     let resources = Arc::new(graphics_state_resource(vec![
         ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
             mask_type: MaskMode::Alpha,
-            transfer: MaskTransfer::Identity,
+            transfer: None,
             backdrop: None,
             shape: form.into(),
         }))),
@@ -143,7 +143,7 @@ fn soft_mask_applies_to_a_transparency_group_as_one_object() {
     let mut resources = graphics_state_resource(vec![ExternalGraphicsStateKey::SoftMask(Some(
         pdf_object_reader::ObjectHandle::from(SoftMask {
             mask_type: MaskMode::Alpha,
-            transfer: MaskTransfer::Identity,
+            transfer: None,
             backdrop: None,
             shape: mask_group.into(),
         }),
@@ -180,7 +180,7 @@ fn luminosity_soft_mask_backdrop_covers_the_area_outside_the_group() {
     let resources = Arc::new(graphics_state_resource(vec![
         ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
             mask_type: MaskMode::Luminosity,
-            transfer: MaskTransfer::Identity,
+            transfer: None,
             backdrop: Some(Color::from_rgb(1.0, 1.0, 1.0)),
             shape: mask_group.into(),
         }))),

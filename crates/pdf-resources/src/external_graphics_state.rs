@@ -4,7 +4,10 @@ use pdf_object_reader::{
 };
 
 use crate::{
-    color_transfer::ColorTransfer, error::PdfPagesError, resource::Resource, soft_mask::SoftMask,
+    error::PdfPagesError,
+    resource::Resource,
+    soft_mask::SoftMask,
+    transfer_function::{ColorTransfer, ColorTransferTables},
 };
 use pdf_graphics::{AlphaConstant, BlendMode, DashPattern, LineCap, LineJoin};
 use std::sync::Arc;
@@ -44,8 +47,8 @@ pub enum ExternalGraphicsStateKey {
     /// Non-stroking alpha constant (`ca`): the opacity of all other painting operations.
     NonStrokingAlpha(AlphaConstant),
     /// Transfer function (`TR2`, or `TR` when `TR2` is absent) applied to device color
-    /// components. A malformed entry is ignored.
-    Transfer(ColorTransfer),
+    /// components; `None` leaves them unchanged. A malformed entry is ignored.
+    Transfer(Option<Arc<ColorTransferTables>>),
 }
 
 pub struct ExternalGraphicsState {
@@ -90,9 +93,9 @@ impl FromPdfObject for ExternalGraphicsState {
                 .optional(b"ca")?
                 .map(ExternalGraphicsStateKey::NonStrokingAlpha),
             context
-                .lenient(b"TR2")
+                .lenient::<ColorTransfer>(b"TR2")
                 .or_else(|| context.lenient(b"TR"))
-                .map(ExternalGraphicsStateKey::Transfer),
+                .map(|ColorTransfer(tables)| ExternalGraphicsStateKey::Transfer(tables)),
         ];
         Ok(Self {
             params: params.into_iter().flatten().collect(),
@@ -294,7 +297,6 @@ mod tests {
 
     #[test]
     fn transfer_function_entry_is_sampled_per_component() {
-        use crate::color_transfer::ColorTransfer;
         use pdf_object_reader::stream::StreamObject;
 
         let unit = || {
@@ -322,7 +324,7 @@ mod tests {
             }
         };
 
-        let ColorTransfer::Tables(tables) = transfer(ObjectVariant::Array(
+        let Some(tables) = transfer(ObjectVariant::Array(
             vec![invert.clone(), identity(), invert, identity()].into(),
         )) else {
             panic!("an inverting transfer should produce tables");
@@ -332,7 +334,7 @@ mod tests {
         {
             assert_eq!((*red, *green, *blue), (255 - input, input, 255 - input));
         }
-        assert!(matches!(transfer(identity()), ColorTransfer::Identity));
+        assert!(transfer(identity()).is_none());
     }
 
     #[test]

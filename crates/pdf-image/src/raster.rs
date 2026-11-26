@@ -177,8 +177,8 @@ pub fn stencil_image(coverage: &Image, [r, g, b]: [u8; 3]) -> Result<Image, Imag
     map_pixels(coverage, |[_, _, _, alpha]| [r, g, b, alpha])
 }
 
-/// Looks up a byte in a 256-entry table.
-fn lookup(table: &[u8; 256], value: u8) -> u8 {
+/// Maps a byte through a 256-entry lookup table, such as a sampled transfer function.
+pub fn lookup(table: &[u8; 256], value: u8) -> u8 {
     table.get(usize::from(value)).copied().unwrap_or(value)
 }
 

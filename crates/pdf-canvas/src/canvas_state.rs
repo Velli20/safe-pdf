@@ -1,6 +1,6 @@
 //! PDF graphics-state values retained across saved states.
 use pdf_graphics::{CanvasPaint, color::Color, transform::Transform};
-use pdf_resources::{color_transfer::ColorTransferTables, resources::Resources};
+use pdf_resources::{resources::Resources, transfer_function::ColorTransferTables};
 use std::sync::Arc;
 
 use crate::{

@@ -183,8 +183,7 @@ impl MaskLayer {
             _ => alpha,
         };
         self.transfer()
-            .and_then(|table| table.get(usize::from(coverage)).copied())
-            .unwrap_or(coverage)
+            .map_or(coverage, |table| pdf_image::raster::lookup(table, coverage))
     }
 }
 

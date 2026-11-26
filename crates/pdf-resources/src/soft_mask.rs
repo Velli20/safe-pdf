@@ -1,7 +1,8 @@
 //! External graphics-state soft mask decoding.
-use crate::{error::PdfPagesError, form::FormXObject, xobject::XObjectSubtype};
-use num_traits::ToPrimitive;
-use pdf_function::function::Function;
+use crate::{
+    error::PdfPagesError, form::FormXObject, transfer_function::TransferTable,
+    xobject::XObjectSubtype,
+};
 use pdf_graphics::{MaskMode, color::Color};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ObjectReadError, ReadResult,
@@ -15,8 +16,8 @@ pub struct SoftMask {
     pub mask_type: MaskMode,
     /// The transparency group. Recursive groups remain deferred until painting.
     pub shape: ObjectHandle<FormXObject>,
-    /// The `/TR` mapping applied to the mask coverage.
-    pub transfer: MaskTransfer,
+    /// The `/TR` lookup table applied to the mask coverage; `None` leaves it unchanged.
+    pub transfer: Option<Arc<[u8; 256]>>,
     /// The `/BC` backdrop the group composites over before its luminosity is taken; it
     /// also sets the mask outside the group's bounds. Only `/Luminosity` masks use it, and
     /// a malformed `/BC` is ignored, leaving the default black backdrop.
@@ -31,7 +32,9 @@ impl FromPdfObject for SoftMask {
         Ok(Self {
             mask_type: context.required(b"S")?,
             shape,
-            transfer: context.optional(b"TR")?.unwrap_or_default(),
+            transfer: context
+                .optional::<TransferTable>(b"TR")?
+                .and_then(TransferTable::into_lookup),
             backdrop: context.lenient::<Color>(b"BC"),
         })
     }
@@ -61,56 +64,6 @@ impl FromPdfObject for SoftMaskGroup {
     }
 }
 
-/// A soft mask's `/TR` transfer function.
-#[derive(Default)]
-pub enum MaskTransfer {
-    /// `/Identity` leaves coverage unchanged, so it needs no table.
-    #[default]
-    Identity,
-    /// The function sampled for the renderer's 8-bit mask coverage.
-    Table(Arc<[u8; 256]>),
-}
-
-impl FromPdfObject for MaskTransfer {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let object = context.object();
-        match object {
-            ObjectVariant::String(name) if name.as_bytes() == b"Identity" => Ok(Self::Identity),
-            _ => Ok(Self::Table(Arc::new(Self::sample(&context.read(object)?)?))),
-        }
-    }
-}
-
-impl MaskTransfer {
-    /// Returns the lookup table, or `None` when coverage is unchanged.
-    pub fn table(&self) -> Option<&Arc<[u8; 256]>> {
-        match self {
-            Self::Identity => None,
-            Self::Table(table) => Some(table),
-        }
-    }
-
-    /// Samples a transfer function into an 8-bit lookup table.
-    pub(crate) fn sample(function: &Function) -> Result<[u8; 256], PdfPagesError> {
-        let mut table = [0; 256];
-        for (input, output) in (0_u8..=255).zip(&mut table) {
-            *output = Self::sample_one(function, input)?;
-        }
-        Ok(table)
-    }
-
-    /// Maps one 8-bit value through the transfer function.
-    fn sample_one(function: &Function, input: u8) -> Result<u8, PdfPagesError> {
-        match function.apply(&[f32::from(input) / 255.0])?.as_slice() {
-            [value] if value.is_finite() => (value.clamp(0.0, 1.0) * 255.0).round().to_u8(),
-            _ => None,
-        }
-        .ok_or(PdfPagesError::InvalidTransferFunction)
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
@@ -123,7 +76,7 @@ mod tests {
 
     use crate::error::PdfPagesError;
 
-    use super::{MaskTransfer, SoftMask};
+    use super::SoftMask;
 
     fn soft_mask_dictionary(stream_object_number: usize, subtype: &str) -> Dictionary {
         let form_dictionary = Dictionary::from_iter(BTreeMap::from([
@@ -189,7 +142,7 @@ mod tests {
         let mask = reader
             .read::<SoftMask>(&ObjectVariant::Dictionary(dictionary))
             .unwrap();
-        let table = mask.transfer.table().unwrap();
+        let table = mask.transfer.as_deref().unwrap();
         for (input, output) in (0_u8..=255).zip(table.iter()) {
             assert_eq!(*output, 255 - input);
         }
@@ -203,7 +156,7 @@ mod tests {
         let mask = reader
             .read::<SoftMask>(&ObjectVariant::Dictionary(dictionary))
             .unwrap();
-        assert!(matches!(mask.transfer, MaskTransfer::Identity));
+        assert!(mask.transfer.is_none());
     }
 
     #[test]
