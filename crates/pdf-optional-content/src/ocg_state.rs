@@ -11,13 +11,9 @@ pub enum OcgTarget {
     /// resource is not resolved, preserving the reference identity.
     Reference {
         /// PDF object number of the group's dictionary.
-        #[serde(with = "crate::wire")]
-        #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        number: u64,
+        number: u32,
         /// PDF generation number.
-        #[serde(with = "crate::wire")]
-        #[cfg_attr(feature = "typescript", ts(type = "string"))]
-        generation: u64,
+        generation: u16,
     },
     /// A direct `/OCG` dictionary; only its `/Name` is retained.
     Dictionary {

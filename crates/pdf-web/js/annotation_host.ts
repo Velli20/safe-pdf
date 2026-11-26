@@ -3,12 +3,12 @@ import type { ActionTrigger, Operation, WebAnnotationEntry } from './annotation_
 
 export interface AnnotationLayerSnapshot {
   entries: WebAnnotationEntry[];
-  annotationRevision: string;
+  annotationRevision: number;
   viewportRevision: number;
 }
 
 export interface AnnotationLayerCallbacks {
-  onCommand(entry: WebAnnotationEntry, command: Operation, revision: string, viewportRevision: number): void | Promise<void>;
+  onCommand(entry: WebAnnotationEntry, command: Operation, revision: number, viewportRevision: number): void | Promise<void>;
   /** Converts a container CSS displacement into a PDF page displacement for drags. */
   toPageDelta(entry: WebAnnotationEntry, dx: number, dy: number): [number, number];
   /** Reports an interaction that runs the entry's action; only listed `entry.triggers`

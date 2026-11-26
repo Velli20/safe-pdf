@@ -111,7 +111,10 @@ impl FromPdfObject for PageAnnotations {
             let object_number = match value {
                 ObjectVariant::Reference(id) => Some(id.number),
                 _ => dictionary.object_number,
-            };
+            }
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| SourceDecodeError::ResourceLimit)?;
             let defines_field = dictionary.get(b"T").is_some();
             let mut annotation: SourceAnnotation = annots.read(value)?;
             // A merged field/widget with its own partial name is a terminal
@@ -121,7 +124,7 @@ impl FromPdfObject for PageAnnotations {
                 widget.field_id = object_number;
             }
             annotation.id =
-                u64::try_from(annotations.len()).map_err(|_| SourceDecodeError::ResourceLimit)?;
+                u32::try_from(annotations.len()).map_err(|_| SourceDecodeError::ResourceLimit)?;
             annotation.object_number = object_number;
             annotations.push(annotation);
         }

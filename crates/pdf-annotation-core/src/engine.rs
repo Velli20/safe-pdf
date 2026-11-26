@@ -558,13 +558,13 @@ impl<S: AnnotationStore> AnnotationEngine<S> {
 }
 
 /// Return the successor of an allocation counter, or report it exhausted.
-fn next_counter<E: std::error::Error + 'static>(value: u64) -> Result<u64, CoreError<E>> {
+fn next_counter<E: std::error::Error + 'static>(value: u32) -> Result<u32, CoreError<E>> {
     value.checked_add(1).ok_or(CoreError::CounterExhausted)
 }
 
 /// Take the counter's current value as a new identity and advance it past that value.
 /// An exhausted counter is left unchanged.
-fn allocate<E: std::error::Error + 'static>(counter: &mut u64) -> Result<u64, CoreError<E>> {
+fn allocate<E: std::error::Error + 'static>(counter: &mut u32) -> Result<u32, CoreError<E>> {
     let id = *counter;
     *counter = next_counter(id)?;
     Ok(id)

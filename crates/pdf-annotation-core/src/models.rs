@@ -9,7 +9,7 @@ use crate::{AnnotationLayerResult, fields::Field};
 use pdf_graphics::polyline::Polyline;
 
 /// Current sidecar schema; version seven stores one live style per styled payload.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// Host-supplied identity associating a sidecar with one PDF document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,11 +21,7 @@ pub struct DocumentId(pub String);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
-pub struct AnnotationId(
-    #[serde(with = "crate::wire")]
-    #[cfg_attr(feature = "typescript", ts(type = "string"))]
-    pub u64,
-);
+pub struct AnnotationId(pub u32);
 
 /// Zero-based index into the host document's pages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,11 +33,7 @@ pub struct PageIndex(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
-pub struct Revision(
-    #[serde(with = "crate::wire")]
-    #[cfg_attr(feature = "typescript", ts(type = "string"))]
-    pub u64,
-);
+pub struct Revision(pub u32);
 
 /// Position in unrotated PDF page user space, before any viewport transform.
 pub type Point = pdf_graphics::point::Point<f32>;
@@ -141,13 +133,9 @@ pub struct DocumentData {
     /// Revision represented by this complete snapshot.
     pub revision: Revision,
     /// Next unused ID, greater than every allocated ID, including deleted IDs.
-    #[serde(with = "crate::wire")]
-    #[cfg_attr(feature = "typescript", ts(type = "string"))]
-    pub next_annotation_id: u64,
+    pub next_annotation_id: u32,
     /// Next unused field ID, greater than all allocated field IDs, including deleted IDs.
-    #[serde(with = "crate::wire")]
-    #[cfg_attr(feature = "typescript", ts(type = "string"))]
-    pub next_field_id: u64,
+    pub next_field_id: u32,
     /// Shared fields in insertion order with unique identities; unused fields are allowed.
     pub fields: Vec<Field>,
     /// Annotation records in stable insertion order, with unique identities.

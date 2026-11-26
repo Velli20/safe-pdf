@@ -116,10 +116,7 @@ impl Annotation {
                 model.multiple = matches!(list.selection, ListSelection::Multiple(_));
                 model.list_box = true;
                 model.selected = indices(&list.options, &ids);
-                model.top_index = source
-                    .and_then(|w| w.top_index)
-                    .and_then(|index| index.to_u32())
-                    .unwrap_or(0);
+                model.top_index = source.and_then(|w| w.top_index).unwrap_or(0);
                 model.options = Some(list.options.clone());
             }
             FieldKind::ComboBox(combo) => {

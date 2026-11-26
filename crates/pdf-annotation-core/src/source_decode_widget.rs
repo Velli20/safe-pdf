@@ -11,7 +11,11 @@ impl FromPdfObject for WidgetAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let object = context.object();
         let mut dictionary = context.dictionary()?;
-        let field_id = dictionary.reference(b"Parent").map(|parent| parent.number);
+        let field_id = dictionary
+            .reference(b"Parent")
+            .map(|parent| u32::try_from(parent.number))
+            .transpose()
+            .map_err(|_| SourceDecodeError::ResourceLimit)?;
         let fields: FieldProperties = dictionary.read(object)?;
 
         Ok(Self {
@@ -53,8 +57,8 @@ struct FieldProperties {
     quadding: Option<i32>,
     max_length: Option<u32>,
     options: Option<Vec<WidgetChoiceOption>>,
-    selected_indices: Option<Vec<u64>>,
-    top_index: Option<u64>,
+    selected_indices: Option<Vec<u32>>,
+    top_index: Option<u32>,
 }
 
 /// Reads the field entries of a widget or field node, inheriting each absent entry from

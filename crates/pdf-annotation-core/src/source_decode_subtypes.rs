@@ -237,7 +237,9 @@ impl FromPdfObject for PopupAnnotation {
         Ok(Self {
             // The parent is identified by its object number and never resolved.
             parent: match dictionary.reference(b"Parent") {
-                Some(parent) => Some(parent.number),
+                Some(parent) => Some(
+                    u32::try_from(parent.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
+                ),
                 None if dictionary.contains(b"Parent") => {
                     return Err(SourceDecodeError::InvalidEntry {
                         entry: b"Parent",

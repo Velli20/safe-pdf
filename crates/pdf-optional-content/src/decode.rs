@@ -224,8 +224,8 @@ impl OcgTarget {
             return items.at(index);
         };
         Ok(Self::Reference {
-            number: u64::try_from(id.number).map_err(|_| OptionalContentError::ResourceLimit)?,
-            generation: u64::try_from(id.generation)
+            number: u32::try_from(id.number).map_err(|_| OptionalContentError::ResourceLimit)?,
+            generation: u16::try_from(id.generation)
                 .map_err(|_| OptionalContentError::ResourceLimit)?,
         })
     }

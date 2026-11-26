@@ -64,7 +64,7 @@ pub struct AnnotationOverlay {
     document: ImportedDocument,
     pages: BTreeMap<u32, PreparedAnnotations>,
     /// Revision of the last edit touching each annotation; absent means unedited.
-    modified: BTreeMap<u64, Revision>,
+    modified: BTreeMap<u32, Revision>,
     /// Revision every imported annotation was last changed at.
     imported: Revision,
     /// Runtime optional content visibility. Disposable presentation state that is
@@ -567,7 +567,7 @@ impl AnnotationOverlay {
 }
 
 /// Identities named as a parent by a popup among `annotations`.
-fn popup_parents(annotations: &[&Annotation]) -> BTreeSet<u64> {
+fn popup_parents(annotations: &[&Annotation]) -> BTreeSet<u32> {
     annotations
         .iter()
         .filter_map(|annotation| annotation.content.popup_parent())
