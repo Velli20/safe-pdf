@@ -113,7 +113,6 @@
 //! fn read_resource<S: ObjectSource>(source: S) -> ReadResult<()> {
 //!     let reader = ObjectReader::new(source);
 //!     let resource = reader.read_shared_indirect::<Resource>(ObjectId::new(7, 0))?;
-//!     let _phase = resource.state()?;
 //!     let _value_if_ready = resource.try_get()?;
 //!     // Keep reader alive while following indirect graph edges.
 //!     Ok(())
@@ -178,7 +177,7 @@ pub use content_stream_id_allocator::{ContentStreamIdAllocator, ContentStreamIdE
 pub use context::{ArrayContext, DictionaryContext, ObjectContext, StreamContext};
 pub use decode::FromPdfObject;
 pub use error::{BoxedError, ObjectReadError, ReadLocation, ReadResult};
-pub use handle::{HandleState, ObjectHandle};
+pub use handle::ObjectHandle;
 pub use reader::{ObjectAccess, ObjectReader, ReadLimits, ReadSession};
 pub use source::{EmptySource, ObjectSource};
 

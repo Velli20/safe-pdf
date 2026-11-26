@@ -6,7 +6,7 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use thiserror::Error;
 
@@ -138,9 +138,6 @@ impl TypedObjectCache {
             .write()
             .map_err(|_| ObjectReadError::TypedCache {
                 operation: "reserve",
-                source: Box::new(ConcurrentObjectCacheError::LockPoisoned {
-                    operation: "reserve",
-                }),
             })?;
         let key = TypedKey {
             object_id,
@@ -150,25 +147,21 @@ impl TypedObjectCache {
             let entry = Arc::clone(entry).downcast::<TypedEntry<T>>().map_err(|_| {
                 ObjectReadError::TypedCache {
                     operation: "downcast",
-                    source: Box::new(std::io::Error::other(
-                        "typed cache entry has an inconsistent type",
-                    )),
                 }
             })?;
-            let handle = ObjectHandle::indirect(object_id, Arc::downgrade(&entry));
             // Surface a stored failure, while leaving pending entries nonblocking.
-            handle.try_get()?;
-            return Ok(Reservation::Existing(handle));
+            entry.value()?;
+            return Ok(Reservation::Existing(ObjectHandle::indirect(
+                object_id,
+                Arc::downgrade(&entry),
+            )));
         }
         let entry = Arc::new(TypedEntry {
             object_id,
-            state: RwLock::new(EntryState::Loading),
+            state: OnceLock::new(),
         });
         entries.insert(key, Arc::<TypedEntry<T>>::clone(&entry));
-        Ok(Reservation::Vacant(TypedReservation {
-            entry,
-            completed: false,
-        }))
+        Ok(Reservation::Vacant(TypedReservation { entry }))
     }
 }
 
@@ -178,25 +171,35 @@ pub(crate) enum Reservation<T> {
 }
 
 /// The reader retains this allocation; graph edges keep weak handles to it.
-pub(crate) struct TypedEntry<T> {
-    pub(crate) object_id: ObjectId,
-    pub(crate) state: RwLock<EntryState<T>>,
-}
-
-/// Only the reservation owner can publish a terminal state.
-pub(crate) enum EntryState<T> {
-    Loading,
-    Ready(Arc<T>),
-    Failed(Arc<ObjectReadError>),
-}
-
-/// Owns the right to finish an entry without holding a cache or entry lock.
 ///
-/// Drop must mark an unfinished reservation as aborted without panicking or
+/// The state is unset while the reservation owner decodes, and is set exactly
+/// once, by that owner, to the published value or the decoding failure.
+pub(crate) struct TypedEntry<T> {
+    object_id: ObjectId,
+    state: OnceLock<Result<Arc<T>, Arc<ObjectReadError>>>,
+}
+
+impl<T> TypedEntry<T> {
+    /// Returns None while loading, the published value, or the recorded failure.
+    pub(crate) fn value(&self) -> ReadResult<Option<Arc<T>>> {
+        match self.state.get() {
+            None => Ok(None),
+            Some(Ok(value)) => Ok(Some(Arc::clone(value))),
+            Some(Err(source)) => Err(ObjectReadError::CachedDecode {
+                object_id: self.object_id,
+                target: std::any::type_name::<T>(),
+                source: Arc::clone(source),
+            }),
+        }
+    }
+}
+
+/// Owns the right to finish an entry without holding a cache lock.
+///
+/// Drop marks an unfinished reservation as aborted without panicking or
 /// waiting on another decoder, including when a decoder unwinds.
 pub(crate) struct TypedReservation<T> {
     entry: Arc<TypedEntry<T>>,
-    completed: bool,
 }
 
 impl<T> TypedReservation<T> {
@@ -205,47 +208,30 @@ impl<T> TypedReservation<T> {
         ObjectHandle::indirect(self.entry.object_id, Arc::downgrade(&self.entry))
     }
 
-    /// Publishes a completed value and disarms abort-on-drop behavior.
-    pub(crate) fn publish(mut self, value: Arc<T>) -> ReadResult<ObjectHandle<T>> {
-        *self
-            .entry
-            .state
-            .write()
-            .map_err(|_| ObjectReadError::TypedCache {
-                operation: "publish",
-                source: Box::new(ConcurrentObjectCacheError::LockPoisoned {
-                    operation: "publish",
-                }),
-            })? = EntryState::Ready(value);
-        self.completed = true;
-        Ok(self.handle())
+    /// Publishes a completed value, which disarms abort-on-drop behavior.
+    pub(crate) fn publish(self, value: Arc<T>) -> ObjectHandle<T> {
+        self.finish(Ok(value));
+        self.handle()
     }
 
     /// Retains a shared failure so every existing handle observes the same cause.
-    pub(crate) fn fail(mut self, error: Arc<ObjectReadError>) -> ReadResult<()> {
-        *self
-            .entry
-            .state
-            .write()
-            .map_err(|_| ObjectReadError::TypedCache {
-                operation: "fail",
-                source: Box::new(ConcurrentObjectCacheError::LockPoisoned { operation: "fail" }),
-            })? = EntryState::Failed(error);
-        self.completed = true;
-        Ok(())
+    pub(crate) fn fail(self, error: Arc<ObjectReadError>) {
+        self.finish(Err(error));
+    }
+
+    /// Sets the terminal state; only this reservation sets it, so it is still unset.
+    fn finish(&self, state: Result<Arc<T>, Arc<ObjectReadError>>) {
+        // `set` cannot fail: the entry is unset until its single owner finishes it.
+        self.entry.state.set(state).ok();
     }
 }
 
 impl<T> Drop for TypedReservation<T> {
     fn drop(&mut self) {
-        if !self.completed {
-            let mut state = match self.entry.state.write() {
-                Ok(state) => state,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            *state = EntryState::Failed(Arc::new(ObjectReadError::LoadAborted {
+        if self.entry.state.get().is_none() {
+            self.finish(Err(Arc::new(ObjectReadError::LoadAborted {
                 object_id: self.entry.object_id,
-            }));
+            })));
         }
     }
 }

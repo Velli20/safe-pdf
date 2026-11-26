@@ -2,23 +2,9 @@
 
 use std::sync::{Arc, Weak};
 
-use crate::cache::{ConcurrentObjectCacheError, EntryState, TypedEntry};
+use crate::cache::TypedEntry;
 use crate::error::{ObjectReadError, ReadResult};
 use crate::object_id::ObjectId;
-
-/// The observable phase of a live typed resource.
-///
-/// Failures carry their original cause through the handle's value-access
-/// methods. Expiration is an error rather than a state of a live entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HandleState {
-    /// The reservation owner is still decoding this value.
-    Pending,
-    /// A completed immutable value has been published.
-    Ready,
-    /// Decoding failed or the reservation owner abandoned the load.
-    Failed,
-}
 
 /// A shareable reference to a typed object, possibly still under construction.
 ///
@@ -71,32 +57,6 @@ impl<T> ObjectHandle<T> {
         }
     }
 
-    /// Reports readiness, or an expiration or synchronization error.
-    pub fn state(&self) -> ReadResult<HandleState> {
-        match &self.storage {
-            HandleStorage::Direct(_) => Ok(HandleState::Ready),
-            HandleStorage::Indirect { object_id, entry } => {
-                let entry = entry.upgrade().ok_or(ObjectReadError::HandleExpired {
-                    object_id: *object_id,
-                })?;
-                let state = entry
-                    .state
-                    .read()
-                    .map_err(|_| ObjectReadError::TypedCache {
-                        operation: "state",
-                        source: Box::new(ConcurrentObjectCacheError::LockPoisoned {
-                            operation: "state",
-                        }),
-                    })?;
-                Ok(match &*state {
-                    EntryState::Loading => HandleState::Pending,
-                    EntryState::Ready(_) => HandleState::Ready,
-                    EntryState::Failed(_) => HandleState::Failed,
-                })
-            }
-        }
-    }
-
     /// Returns None while loading, a completed value, or the recorded failure.
     ///
     /// An expired reader produces HandleExpired, not None. Returned values can
@@ -104,29 +64,12 @@ impl<T> ObjectHandle<T> {
     pub fn try_get(&self) -> ReadResult<Option<Arc<T>>> {
         match &self.storage {
             HandleStorage::Direct(value) => Ok(Some(Arc::clone(value))),
-            HandleStorage::Indirect { object_id, entry } => {
-                let entry = entry.upgrade().ok_or(ObjectReadError::HandleExpired {
+            HandleStorage::Indirect { object_id, entry } => entry
+                .upgrade()
+                .ok_or(ObjectReadError::HandleExpired {
                     object_id: *object_id,
-                })?;
-                let state = entry
-                    .state
-                    .read()
-                    .map_err(|_| ObjectReadError::TypedCache {
-                        operation: "get",
-                        source: Box::new(ConcurrentObjectCacheError::LockPoisoned {
-                            operation: "get",
-                        }),
-                    })?;
-                match &*state {
-                    EntryState::Loading => Ok(None),
-                    EntryState::Ready(value) => Ok(Some(Arc::clone(value))),
-                    EntryState::Failed(source) => Err(ObjectReadError::CachedDecode {
-                        object_id: *object_id,
-                        target: std::any::type_name::<T>(),
-                        source: Arc::clone(source),
-                    }),
-                }
-            }
+                })?
+                .value(),
         }
     }
 
