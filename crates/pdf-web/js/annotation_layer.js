@@ -20,10 +20,10 @@ export class NativeAnnotationLayer {
    * @param {import('./annotation_host').AnnotationLayerCallbacks} callbacks */
   constructor(root, { onCommand, toPageDelta, onAction = () => { }, onPress = () => { }, onEdit = () => { }, loadFont = () => undefined, renderArtwork = () => { }, onError = () => { } }) {
     this.root = root; this.onCommand = onCommand; this.toPageDelta = toPageDelta; this.onAction = onAction; this.onPress = onPress; this.onEdit = onEdit; this.loadFont = loadFont; this.renderArtwork = renderArtwork; this.onError = onError;
-    /** @type {Map<string, import('./annotation_dom.js').AnnotationComponent>} */
+    /** @type {Map<number, import('./annotation_dom.js').AnnotationComponent>} */
     this.nodes = new Map();
     /** The field font of each text entry, or `null` when it has none.
-     * @type {Map<string, FieldFont | null>} */
+     * @type {Map<number, FieldFont | null>} */
     this.fieldFonts = new Map();
     /** Field fonts registered with `document.fonts`, one per family.
      * @type {Map<string, FontFace>} */
