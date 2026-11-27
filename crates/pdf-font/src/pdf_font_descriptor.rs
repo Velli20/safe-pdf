@@ -1,6 +1,7 @@
 //! Best-effort font descriptor metadata and CID collection information.
 
 use crate::{
+    flags::FontFlags,
     font::LineMetrics,
     pdf::{CidSystemInfo, PDF_GLYPH_SPACE_UNITS_PER_EM, PdfFontDescriptor},
     type0_font_spec::CidToUnicode,
@@ -22,8 +23,12 @@ impl FromPdfObject for PdfFontDescriptor {
         let stem_v = entries.lenient(b"StemV");
         let ascent = entries.lenient(b"Ascent");
         let descent = entries.lenient(b"Descent");
+        // Malformed flags are treated as absent.
+        let symbolic = entries
+            .lenient::<FontFlags>(b"Flags")
+            .is_some_and(|flags| flags.contains(FontFlags::SYMBOLIC));
         Ok(Self {
-            metadata: context.decode()?,
+            symbolic,
             bounds,
             missing_width,
             italic_angle,
@@ -55,14 +60,6 @@ impl PdfFontDescriptor {
             ascent: ascent / PDF_GLYPH_SPACE_UNITS_PER_EM,
             descent: descent / PDF_GLYPH_SPACE_UNITS_PER_EM,
         })
-    }
-
-    /// Derives family metadata from the enclosing font's BaseFont.
-    pub(crate) fn named(mut self, base_font: Option<&[u8]>) -> Self {
-        let family = base_font.map(|name| Arc::<str>::from(String::from_utf8_lossy(name)));
-        self.metadata.family = family.clone();
-        self.metadata.postscript_name = family;
-        self
     }
 }
 

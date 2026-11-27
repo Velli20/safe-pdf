@@ -1,15 +1,13 @@
 //! Runtime whole-font substitution and missing-glyph fallback contracts.
 
 use crate::error::FontError;
-use crate::font::{FontFaceId, FontMetadata, FontSource};
+use crate::font::{FontFaceId, FontSource};
 use crate::pdf_font_spec::PdfFontSpec;
 
 /// Request for a complete substitute before PDF text decoding begins.
 pub struct WholeFontFallbackRequest<'a> {
     /// Normalized PDF resource whose primary program is unusable.
     pub pdf_font: &'a PdfFontSpec,
-    /// Metadata used for family and style matching.
-    pub requested: &'a FontMetadata,
     /// Faces already attempted during this resolution operation.
     pub excluded_faces: &'a [FontFaceId],
 }
@@ -18,8 +16,6 @@ pub struct WholeFontFallbackRequest<'a> {
 pub struct GlyphFallbackRequest<'a> {
     /// Missing Unicode scalar.
     pub character: char,
-    /// Metadata of the primary or requested face.
-    pub requested: &'a FontMetadata,
     /// Source PDF font when fallback occurs in a PDF run.
     pub pdf_font: Option<&'a PdfFontSpec>,
     /// Faces already attempted for this glyph.
@@ -31,8 +27,6 @@ pub struct GlyphFallbackRequest<'a> {
 pub struct FallbackCandidate {
     /// Font program source to attempt.
     pub source: FontSource,
-    /// Matching metadata used by fallback selection and diagnostics.
-    pub metadata: FontMetadata,
 }
 
 /// Application-supplied policy for runtime font substitution.

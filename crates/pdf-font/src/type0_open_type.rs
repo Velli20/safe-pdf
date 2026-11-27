@@ -14,8 +14,8 @@ use skrifa::{
 
 use crate::error::FontError;
 use crate::font::{
-    FALLBACK_ASCENDER_EM_RATIO, FALLBACK_DESCENDER_EM_RATIO, FontFace, FontFaceId, FontMetadata,
-    FontMetrics, FontProgramFormat, GlyphGeometry, GlyphId, GlyphName,
+    FALLBACK_ASCENDER_EM_RATIO, FALLBACK_DESCENDER_EM_RATIO, FontFace, FontFaceId, FontMetrics,
+    FontProgramFormat, GlyphGeometry, GlyphId, GlyphName,
 };
 use crate::pdf_path_pen::PdfPathPen;
 
@@ -45,11 +45,6 @@ impl FontFace for OpenTypeType0FontFace {
     /// Returns the identity allocated when this face was loaded.
     fn id(&self) -> FontFaceId {
         self.program.borrow_owner().id
-    }
-
-    /// Returns the PDF- or application-supplied matching metadata unchanged.
-    fn metadata(&self) -> &FontMetadata {
-        &self.program.borrow_owner().metadata
     }
 
     /// Returns OpenType scale and vertical metrics in unscaled design units.

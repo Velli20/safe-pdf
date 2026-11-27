@@ -24,8 +24,8 @@ use self_cell::self_cell;
 
 use crate::error::FontError;
 use crate::font::{
-    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
-    FontProgramFormat, FontSource, GlyphGeometry, GlyphId, GlyphName,
+    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetrics, FontProgramFormat, FontSource,
+    GlyphGeometry, GlyphId, GlyphName,
 };
 use crate::pdf_path_pen::PdfPathPen;
 use crate::query_cache::QueryCache;
@@ -202,7 +202,6 @@ impl FontDriver for CffFontDriver {
             data.clone(),
             *format,
             request.face_id,
-            request.metadata_hint.clone(),
         )?))
     }
 }
@@ -215,8 +214,6 @@ pub struct CffFontFace {
     program: CffProgram,
     /// Unicode lookup built from the charset's Adobe Glyph List names.
     unicode_charmap: Charmap,
-    /// PDF- or application-provided metadata used for font matching.
-    metadata: FontMetadata,
     /// Global design-space metrics computed during loading.
     metrics: Option<FontMetrics>,
     /// Requested PostScript names cached after their first lookup.
@@ -227,12 +224,7 @@ pub struct CffFontFace {
 
 impl CffFontFace {
     /// Creates a face and parses its retained program exactly once.
-    fn new(
-        data: Bytes,
-        format: FontProgramFormat,
-        id: FontFaceId,
-        metadata: FontMetadata,
-    ) -> Result<Self, FontError> {
+    fn new(data: Bytes, format: FontProgramFormat, id: FontFaceId) -> Result<Self, FontError> {
         let program = CffProgram::try_new(data, |data| CffProgramRef::parse(data, format))?;
         let unicode_charmap = Charmap::from_glyph_names(program.borrow_dependent().glyph_names());
         let metrics = program.borrow_dependent().metrics();
@@ -240,7 +232,6 @@ impl CffFontFace {
             id,
             program,
             unicode_charmap,
-            metadata,
             metrics,
             glyphs_by_name: QueryCache::new(),
             advances: QueryCache::new(),
@@ -282,11 +273,6 @@ impl FontFace for CffFontFace {
     /// Returns the stable identity assigned when the face was loaded.
     fn id(&self) -> FontFaceId {
         self.id
-    }
-
-    /// Returns the metadata associated with the PDF font request.
-    fn metadata(&self) -> &FontMetadata {
-        &self.metadata
     }
 
     /// Returns the face-wide design metrics taken from the font bounding box.
@@ -347,7 +333,7 @@ mod tests {
 
     use pdf_object_reader::inline_bytes::InlineBytes;
 
-    use crate::font::{FontMetadata, FontProgramFormat, FontSource, GlyphGeometry, GlyphName};
+    use crate::font::{FontProgramFormat, FontSource, GlyphGeometry, GlyphName};
     use crate::font_registry::FontRegistry;
     use crate::standard14::{Standard14Font, fallback_font_bytes};
     use crate::type0::Type0FontDriver;
@@ -360,14 +346,11 @@ mod tests {
         registry.register(Arc::new(CffFontDriver::new()));
         registry.register(Arc::new(Type0FontDriver::new()));
         let face = registry
-            .load(
-                FontSource::Memory {
-                    data: bytes::Bytes::from_static(fallback_font_bytes(Standard14Font::Helvetica)),
-                    format: FontProgramFormat::CidCff,
-                    face_index: 0,
-                },
-                FontMetadata::default(),
-            )
+            .load(FontSource::Memory {
+                data: bytes::Bytes::from_static(fallback_font_bytes(Standard14Font::Helvetica)),
+                format: FontProgramFormat::CidCff,
+                face_index: 0,
+            })
             .unwrap();
         let glyph = face.glyph_for_char('A').unwrap();
 
@@ -382,14 +365,11 @@ mod tests {
         let mut registry = FontRegistry::new();
         registry.register(Arc::new(CffFontDriver::new()));
         let face = registry
-            .load(
-                FontSource::Memory {
-                    data: bytes::Bytes::from_static(fallback_font_bytes(Standard14Font::Helvetica)),
-                    format: FontProgramFormat::Cff,
-                    face_index: 0,
-                },
-                FontMetadata::default(),
-            )
+            .load(FontSource::Memory {
+                data: bytes::Bytes::from_static(fallback_font_bytes(Standard14Font::Helvetica)),
+                format: FontProgramFormat::Cff,
+                face_index: 0,
+            })
             .unwrap();
 
         assert_eq!(

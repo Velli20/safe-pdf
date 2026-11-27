@@ -43,8 +43,8 @@ use crate::text::{PdfTextRun, PositionedGlyph, TextLayout, TextVector};
 use pdf_font::fallback::WholeFontFallbackRequest;
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_font::{
-    FallbackCandidate, FallbackProvider, FontFace, FontMetadata, FontProgramFormat, FontRegistry,
-    FontSource, PdfFontSpec, Type3FontSpec,
+    FallbackCandidate, FallbackProvider, FontFace, FontProgramFormat, FontRegistry, FontSource,
+    PdfFontSpec, Type3FontSpec,
 };
 
 /// Identity of an in-memory fallback program: its buffer address and length, format, and face.
@@ -135,7 +135,8 @@ impl FontSystem {
             other => other.source().cloned(),
         };
         let primary = source.map(|source| {
-            self.load_with_metadata(source.clone(), spec.metadata().clone())
+            self.registry
+                .load(source.clone())
                 .map(|face| (face, source))
         });
 
@@ -150,7 +151,7 @@ impl FontSystem {
 
     /// Loads an application font source for use as a PDF fallback face.
     pub fn load_font(&self, source: FontSource) -> Result<Arc<dyn FontFace>, pdf_font::FontError> {
-        self.load_with_metadata(source, FontMetadata::default())
+        self.registry.load(source)
     }
 
     /// Decodes, resolves fallback, and positions a PDF text run.
@@ -191,28 +192,16 @@ impl FontSystem {
         crate::pdf_text_layout::visit_pdf(self, run, visitor)
     }
 
-    /// Loads an owned source with metadata supplied by the PDF or fallback provider.
-    ///
-    /// Ownership is forwarded directly into the registry request, avoiding copies of font bytes
-    /// and metadata at this boundary.
-    pub(crate) fn load_with_metadata(
-        &self,
-        source: FontSource,
-        metadata_hint: FontMetadata,
-    ) -> Result<Arc<dyn FontFace>, pdf_font::FontError> {
-        self.registry.load(source, metadata_hint)
-    }
-
     /// Loads a glyph-fallback candidate, reusing the face loaded earlier for the same program.
     ///
     /// In-memory candidates are cached for the lifetime of the system; other sources load anew.
-    /// Fallback face metadata only describes the substitute, so one face serves every request.
+    /// A loaded face carries no per-request state, so one face serves every request.
     pub(crate) fn load_fallback_face(
         &self,
         candidate: FallbackCandidate,
     ) -> Result<Arc<dyn FontFace>, pdf_font::FontError> {
         let Some(key) = FallbackSourceKey::from_source(&candidate.source) else {
-            return self.load_with_metadata(candidate.source, candidate.metadata);
+            return self.registry.load(candidate.source);
         };
         // Entries are inserted only after their face has loaded, so a poisoned map is still valid.
         let cached = match self.fallback_faces.read() {
@@ -225,7 +214,7 @@ impl FontSystem {
         if let Some(face) = cached {
             return Ok(face);
         }
-        let face = self.load_with_metadata(candidate.source.clone(), candidate.metadata)?;
+        let face = self.registry.load(candidate.source.clone())?;
         let entry = (candidate.source, Arc::clone(&face));
         match self.fallback_faces.write() {
             Ok(mut faces) => faces.insert(key, entry),
@@ -248,12 +237,10 @@ impl FontSystem {
             .fallback
             .whole_font_candidates(&WholeFontFallbackRequest {
                 pdf_font: spec,
-                requested: spec.metadata(),
                 excluded_faces: &[],
             })?;
         for candidate in candidates {
-            if let Ok(face) = self.load_with_metadata(candidate.source.clone(), candidate.metadata)
-            {
+            if let Ok(face) = self.registry.load(candidate.source.clone()) {
                 return Ok((face, candidate.source));
             }
         }

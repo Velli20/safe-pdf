@@ -173,8 +173,7 @@ impl FromPdfObject for CidFontSpec {
         };
         let descriptor = entries
             .optional::<PdfFontDescriptor>(b"FontDescriptor")?
-            .unwrap_or_default()
-            .named(base_font.as_deref());
+            .unwrap_or_default();
         let declared_default = entries
             .optional::<f32>(b"DW")?
             .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM);

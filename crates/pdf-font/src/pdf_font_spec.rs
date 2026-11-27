@@ -10,9 +10,9 @@ use pdf_content_stream::ContentStream;
 use crate::base_encoding::BaseEncoding;
 use crate::error::FontError;
 use crate::flags::FontFlags;
+use crate::font::FontSource;
 use crate::font::GlyphId;
 use crate::font::LineMetrics;
-use crate::font::{FontMetadata, FontSource};
 use crate::glyph_widths_map::GlyphWidthsMap;
 use crate::pdf::{
     FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding, SimpleFontSpec,
@@ -104,17 +104,14 @@ impl From<Standard14Font> for PdfFontSpec {
 }
 
 impl PdfFontSpec {
-    /// Borrows the normalized metadata associated with this PDF font.
-    ///
-    /// Borrowing avoids cloning names and classification data during face loading and fallback
-    /// queries. Type 0 fonts expose their descendant descriptor metadata; Type 3 fonts retain their
-    /// own normalized matching hint.
+    /// Whether the font descriptor marks this font symbolic; a Type 0 font answers for its
+    /// descendant, and a Type 3 font, which has no descriptor, is never symbolic.
     #[must_use]
-    pub fn metadata(&self) -> &FontMetadata {
+    pub fn is_symbolic(&self) -> bool {
         match self {
-            Self::Type0(font) => &font.descendant.descriptor.metadata,
-            Self::Simple(font) => &font.descriptor.metadata,
-            Self::Type3(font) => &font.metadata,
+            Self::Type0(font) => font.descendant.descriptor.symbolic,
+            Self::Simple(font) => font.descriptor.symbolic,
+            Self::Type3(_) => false,
         }
     }
 

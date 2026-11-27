@@ -80,8 +80,7 @@ impl FromPdfObject for SimpleFontSpec {
         };
         let descriptor = entries
             .optional::<PdfFontDescriptor>(b"FontDescriptor")?
-            .unwrap_or_default()
-            .named(base_font.as_deref());
+            .unwrap_or_default();
         // A symbolic TrueType or classic Type 1 program without `/Encoding` addresses its
         // glyphs through its own code mapping.
         let code_keyed_program = kind == SimpleFontKind::TrueType
@@ -92,7 +91,7 @@ impl FromPdfObject for SimpleFontSpec {
                     ..
                 })
             );
-        let symbolic = code_keyed_program && descriptor.metadata.symbolic;
+        let symbolic = code_keyed_program && descriptor.symbolic;
         let standard14 = base_font
             .as_deref()
             .and_then(standard14::from_base_font_name);

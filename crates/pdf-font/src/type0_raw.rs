@@ -8,8 +8,7 @@ use self_cell::self_cell;
 
 use crate::error::FontError;
 use crate::font::{
-    FontFace, FontFaceId, FontMetadata, FontMetrics, FontProgramFormat, GlyphGeometry, GlyphId,
-    GlyphName,
+    FontFace, FontFaceId, FontMetrics, FontProgramFormat, GlyphGeometry, GlyphId, GlyphName,
 };
 use crate::pdf_path_pen::PdfPathPen;
 use crate::query_cache::QueryCache;
@@ -128,11 +127,6 @@ impl FontFace for RawType0FontFace {
         self.program.borrow_owner().id
     }
 
-    /// Returns the PDF- or application-supplied matching metadata unchanged.
-    fn metadata(&self) -> &FontMetadata {
-        &self.program.borrow_owner().metadata
-    }
-
     /// Returns global raw-CFF metrics in unscaled design units.
     ///
     /// Standalone CFF has no OpenType line metrics, so the declared font bounds
@@ -219,8 +213,8 @@ mod tests {
     use bytes::Bytes;
 
     use crate::font::{
-        FontDriver, FontFaceId, FontLoadRequest, FontMetadata, FontProgramFormat, FontSource,
-        GlyphGeometry, GlyphId,
+        FontDriver, FontFaceId, FontLoadRequest, FontProgramFormat, FontSource, GlyphGeometry,
+        GlyphId,
     };
     use crate::type0::Type0FontDriver;
 
@@ -268,7 +262,6 @@ mod tests {
                     format: FontProgramFormat::CidCff,
                     face_index: 0,
                 },
-                metadata_hint: FontMetadata::default(),
                 face_id: FontFaceId(0),
             })
             .unwrap();

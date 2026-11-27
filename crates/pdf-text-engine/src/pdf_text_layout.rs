@@ -281,7 +281,12 @@ fn resolve_glyph(
     cache: &mut FallbackCache,
     decoded: &DecodedGlyph<'_>,
 ) -> Result<ResolvedGlyph, TextError> {
-    if let Some(glyph_id) = select_glyph(font.primary().as_ref(), decoded, font.uses_substitute()) {
+    if let Some(glyph_id) = select_glyph(
+        font.primary().as_ref(),
+        decoded,
+        font.uses_substitute(),
+        font.spec().is_symbolic(),
+    ) {
         return Ok(ResolvedGlyph {
             face: ResolvedFace::Primary,
             glyph_id,
@@ -312,7 +317,6 @@ fn resolve_glyph(
         .fallback_provider()
         .glyph_candidates(&GlyphFallbackRequest {
             character,
-            requested: font.primary().metadata(),
             pdf_font: Some(font.spec()),
             excluded_faces: &excluded,
         })?;
@@ -379,6 +383,7 @@ fn select_glyph(
     face: &dyn FontFace,
     decoded: &DecodedGlyph<'_>,
     prefer_unicode: bool,
+    symbolic: bool,
 ) -> Option<GlyphId> {
     let unicode_glyph = || {
         decoded
@@ -407,7 +412,7 @@ fn select_glyph(
                     .and_then(|code| face.glyph_for_code(code))
                     .filter(|glyph| !prefer_unicode || *glyph != GlyphId(0))
             };
-            return if face.metadata().symbolic {
+            return if symbolic {
                 code_glyph().or_else(unicode_glyph)
             } else {
                 unicode_glyph().or_else(code_glyph)

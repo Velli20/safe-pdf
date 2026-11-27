@@ -17,8 +17,8 @@ use read_fonts::{model::pen::NullPen, ps::type1::Type1Font as ClassicType1Progra
 
 use crate::error::FontError;
 use crate::font::{
-    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
-    FontProgramFormat, FontSource, GlyphGeometry, GlyphId, GlyphName,
+    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetrics, FontProgramFormat, FontSource,
+    GlyphGeometry, GlyphId, GlyphName,
 };
 use crate::pdf_path_pen::PdfPathPen;
 use crate::query_cache::QueryCache;
@@ -84,7 +84,6 @@ impl FontDriver for Type1FontDriver {
             data,
             *format,
             request.face_id,
-            request.metadata_hint.clone(),
         )?))
     }
 }
@@ -96,8 +95,6 @@ pub struct Type1FontFace {
     /// Owned parsed Type 1 program, including decrypted charstrings and
     /// subroutines.
     font: ClassicType1Program,
-    /// PDF- or application-provided metadata used for font matching.
-    metadata: FontMetadata,
     /// Global metrics computed once while loading.
     metrics: Option<FontMetrics>,
     /// Lazily cached PostScript-name results, including lookup misses.
@@ -108,12 +105,7 @@ pub struct Type1FontFace {
 
 impl Type1FontFace {
     /// Parses a classic Type 1 program and initializes its lazy query caches.
-    fn new(
-        data: &[u8],
-        format: FontProgramFormat,
-        id: FontFaceId,
-        metadata: FontMetadata,
-    ) -> Result<Self, FontError> {
+    fn new(data: &[u8], format: FontProgramFormat, id: FontFaceId) -> Result<Self, FontError> {
         // Unlike sfnt and CFF references, `Type1Font` owns its decrypted
         // dictionaries and charstrings, so this face does not need a
         // self-referential owner.
@@ -125,7 +117,6 @@ impl Type1FontFace {
         Ok(Self {
             id,
             font,
-            metadata,
             metrics,
             glyphs_by_name: QueryCache::new(),
             advances: QueryCache::new(),
@@ -169,11 +160,6 @@ impl FontFace for Type1FontFace {
     /// Returns the stable identity assigned when the face was loaded.
     fn id(&self) -> FontFaceId {
         self.id
-    }
-
-    /// Returns the metadata associated with the PDF font request.
-    fn metadata(&self) -> &FontMetadata {
-        &self.metadata
     }
 
     /// Returns the face-wide design metrics, if the Type 1 UPEM fits the

@@ -35,8 +35,7 @@ use read_fonts::ps::{
 
 use crate::error::FontError;
 use crate::font::{
-    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontProgramFormat, FontSource,
-    GlyphId,
+    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontProgramFormat, FontSource, GlyphId,
 };
 use crate::query_cache::QueryCache;
 
@@ -107,7 +106,6 @@ impl FontDriver for Type0FontDriver {
             id: request.face_id,
             data: data.clone(),
             face_index: *face_index,
-            metadata: request.metadata_hint.clone(),
         };
 
         match format {
@@ -129,8 +127,6 @@ pub(crate) struct Type0FaceData {
     pub(super) data: Bytes,
     /// Raw CFF top-dictionary index or OpenType collection-member index.
     pub(super) face_index: u32,
-    /// PDF- or application-provided metadata used for font matching.
-    pub(super) metadata: FontMetadata,
 }
 
 /// Validates the CFF invariants required by both representations.

@@ -2,7 +2,7 @@
 
 use crate::{
     error::FontError,
-    font::{FontMetadata, GlyphId, GlyphName},
+    font::{GlyphId, GlyphName},
     pdf::{PdfMetrics, SimpleEncoding, ToUnicodeMap},
 };
 use pdf_content_stream::ContentStream;
@@ -20,8 +20,6 @@ use std::{
 pub struct Type3FontSpec {
     /// PDF base font name without a leading slash.
     pub base_font: Arc<[u8]>,
-    /// Font matching metadata inferred from the PDF resource.
-    pub metadata: FontMetadata,
     /// Matrix mapping Type 3 glyph space to text space.
     pub font_matrix: Transform,
     /// Declared Type 3 font bounds.
@@ -90,7 +88,6 @@ impl FromPdfObject for Type3FontSpec {
         let to_unicode = entries.lenient(b"ToUnicode").map(Arc::new);
         Ok(Self {
             base_font,
-            metadata: FontMetadata::default(),
             font_matrix,
             bounds,
             encoding,
