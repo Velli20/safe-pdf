@@ -1,4 +1,5 @@
 pub mod base_encoding;
+mod bundled_fallback_provider;
 pub mod cff;
 mod cid_metric_runs;
 pub mod cid_vertical_metrics;
@@ -33,6 +34,7 @@ pub mod type3;
 pub mod type3_font_spec;
 
 pub use base_encoding::BaseEncoding;
+pub use bundled_fallback_provider::BundledFallbackProvider;
 pub use error::FontError;
 pub use fallback::{
     FallbackCandidate, FallbackProvider, GlyphFallbackRequest, WholeFontFallbackRequest,
@@ -46,8 +48,7 @@ pub use font_registry::FontRegistry;
 pub use pdf::{
     CharProcedures, CidFontKind, CidFontSpec, CidSystemInfo, CidToGidMap, CidToUnicode,
     PDF_GLYPH_SPACE_UNITS_PER_EM, PdfCode, PdfFontDescriptor, PdfMetrics, SimpleEncoding,
-    SimpleFontSpec, ToUnicodeMap, Type0FontSpec, Type3FontSpec,
+    SimpleFontKind, SimpleFontSpec, ToUnicodeMap, Type0FontSpec, Type3FontSpec,
 };
-pub use pdf_font_spec::BundledFallbackProvider;
 pub use pdf_font_spec::PdfFontSpec;
 pub use standard14::Standard14Font;

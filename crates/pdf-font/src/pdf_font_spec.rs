@@ -2,65 +2,81 @@
 
 use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use pdf_content_stream::ContentStream;
 
+use crate::base_encoding::BaseEncoding;
 use crate::error::FontError;
-use crate::fallback::{
-    FallbackCandidate, FallbackProvider, GlyphFallbackRequest, WholeFontFallbackRequest,
-};
 use crate::flags::FontFlags;
 use crate::font::GlyphId;
 use crate::font::LineMetrics;
-use crate::font::{FontMetadata, FontProgramFormat, FontSource};
+use crate::font::{FontMetadata, FontSource};
+use crate::glyph_widths_map::GlyphWidthsMap;
 use crate::pdf::{
     FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding, SimpleFontSpec,
     Type0FontSpec, Type3FontSpec,
 };
+use crate::simple_font_spec::SimpleFontKind;
 use crate::standard14::{self, Standard14Font};
 use pdf_cmap::WritingMode;
-
-const NOTO_SANS_CJK_JP_REGULAR: &[u8] =
-    include_bytes!("../../pdf-font/assets/NotoSansCJKjp-Regular.otf");
-const NOTO_SANS_HEBREW_REGULAR: &[u8] =
-    include_bytes!("../../pdf-font/assets/NotoSansHebrew-Regular.otf");
 
 /// Complete normalized representation of a PDF font resource.
 #[derive(Clone)]
 pub enum PdfFontSpec {
     /// A Type 0 composite font.
     Type0(Type0FontSpec),
-    /// A simple Type 1 font.
-    Type1(SimpleFontSpec),
-    /// A simple Multiple Master Type 1 font.
-    MultipleMasterType1(SimpleFontSpec),
-    /// A simple TrueType font, including OpenType-wrapped TrueType programs.
-    TrueType(SimpleFontSpec),
+    /// A simple Type 1, Multiple Master Type 1, or TrueType font.
+    Simple(SimpleFontSpec),
     /// A Type 3 font whose glyphs are PDF content streams.
     Type3(Type3FontSpec),
 }
 
+/// The font dictionary layout a `/Subtype` name selects.
+enum FontSubtype {
+    /// `/Type0`.
+    Type0,
+    /// `/Type1`, `/MMType1`, or `/TrueType`.
+    Simple,
+    /// `/Type3`.
+    Type3,
+}
+
+impl FromPdfObject for FontSubtype {
+    /// Decodes a font dictionary's `/Subtype` name.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<PdfName>()?;
+        match &*name {
+            b"Type0" => Ok(Self::Type0),
+            b"Type1" | b"MMType1" | b"TrueType" => Ok(Self::Simple),
+            b"Type3" => Ok(Self::Type3),
+            other => Err(FontError::UnsupportedFontSubtype {
+                subtype: String::from_utf8_lossy(other).into_owned(),
+            }
+            .into()),
+        }
+    }
+}
+
 impl FromPdfObject for PdfFontSpec {
     /// Reads a font resource, substituting a Standard 14 font on parsing failure.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object();
-        let mut context = context.dictionary()?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut entries = context.entries()?;
+        let subtype = entries.lenient::<FontSubtype>(b"Subtype");
+        let base_font = entries.lenient::<PdfName>(b"BaseFont");
         // Keep recovery at the resource boundary: a missing or unsupported subtype, or a
         // concrete font that fails to parse, falls back to a Standard 14 font.
-        let subtype = context.required::<PdfName>(b"Subtype").ok();
-        let spec = match subtype.as_deref() {
-            Some(b"Type0") => context.read(value).map(Self::Type0).ok(),
-            Some(b"Type1") => context.read(value).map(Self::Type1).ok(),
-            Some(b"MMType1") => context.read(value).map(Self::MultipleMasterType1).ok(),
-            Some(b"TrueType") => context.read(value).map(Self::TrueType).ok(),
-            Some(b"Type3") => context.read(value).map(Self::Type3).ok(),
-            _ => None,
+        let spec = match subtype {
+            Some(FontSubtype::Type0) => context.decode().map(Self::Type0).ok(),
+            Some(FontSubtype::Simple) => context.decode().map(Self::Simple).ok(),
+            Some(FontSubtype::Type3) => context.decode().map(Self::Type3).ok(),
+            None => None,
         };
         // The whole-font fallback follows BaseFont alone, without descriptor flags.
         Ok(spec.unwrap_or_else(|| {
-            let base_font = context.lenient::<PdfName>(b"BaseFont");
             Self::from(standard14::select(base_font.as_deref(), FontFlags::empty()))
         }))
     }
@@ -68,18 +84,19 @@ impl FromPdfObject for PdfFontSpec {
 
 impl From<Standard14Font> for PdfFontSpec {
     fn from(standard14: Standard14Font) -> Self {
-        Self::Type1(SimpleFontSpec {
+        Self::Simple(SimpleFontSpec {
+            kind: SimpleFontKind::Type1,
             base_font: Arc::from(standard14.to_string().into_bytes()),
             descriptor: PdfFontDescriptor::default(),
             program: None,
             standard14: Some(standard14),
             encoding: SimpleEncoding {
-                base: crate::base_encoding::BaseEncoding::Standard,
-                differences: std::collections::BTreeMap::new(),
+                base: BaseEncoding::Standard,
+                differences: BTreeMap::new(),
             },
             metrics: PdfMetrics {
                 default: FALLBACK_GLYPH_WIDTH,
-                explicit: crate::glyph_widths_map::GlyphWidthsMap::default(),
+                explicit: GlyphWidthsMap::default(),
             },
             to_unicode: None,
         })
@@ -96,9 +113,7 @@ impl PdfFontSpec {
     pub fn metadata(&self) -> &FontMetadata {
         match self {
             Self::Type0(font) => &font.descendant.descriptor.metadata,
-            Self::Type1(font) | Self::MultipleMasterType1(font) | Self::TrueType(font) => {
-                &font.descriptor.metadata
-            }
+            Self::Simple(font) => &font.descriptor.metadata,
             Self::Type3(font) => &font.metadata,
         }
     }
@@ -109,9 +124,7 @@ impl PdfFontSpec {
     pub fn declared_line_metrics(&self) -> Option<LineMetrics> {
         match self {
             Self::Type0(font) => font.descendant.descriptor.line_metrics(),
-            Self::Type1(font) | Self::MultipleMasterType1(font) | Self::TrueType(font) => {
-                font.descriptor.line_metrics()
-            }
+            Self::Simple(font) => font.descriptor.line_metrics(),
             Self::Type3(_) => None,
         }
     }
@@ -121,9 +134,7 @@ impl PdfFontSpec {
     pub fn source(&self) -> Option<&FontSource> {
         match self {
             Self::Type0(font) => font.descendant.program.as_ref(),
-            Self::Type1(font) | Self::MultipleMasterType1(font) | Self::TrueType(font) => {
-                font.program.as_ref()
-            }
+            Self::Simple(font) => font.program.as_ref(),
             Self::Type3(_) => None,
         }
     }
@@ -155,13 +166,10 @@ impl PdfFontSpec {
     /// Returns the bundled Standard 14 identity, when present.
     #[must_use]
     pub fn as_standard14(&self) -> Option<Standard14Font> {
-        let font = match self {
-            Self::Type1(font) | Self::MultipleMasterType1(font) | Self::TrueType(font) => {
-                font.standard14?
-            }
-            _ => return None,
-        };
-        Some(font)
+        match self {
+            Self::Simple(font) => font.standard14,
+            _ => None,
+        }
     }
 
     /// Returns whether this font uses one of the predefined CJK CID collections.
@@ -175,96 +183,15 @@ impl PdfFontSpec {
             b"Japan1" | b"GB1" | b"CNS1" | b"Korea1"
         )
     }
-}
 
-/// Bundled whole-font and missing-glyph fallback policy.
-pub struct BundledFallbackProvider;
-
-impl FallbackProvider for BundledFallbackProvider {
-    fn whole_font_candidates(
-        &self,
-        request: &WholeFontFallbackRequest<'_>,
-    ) -> Result<Vec<FallbackCandidate>, FontError> {
-        Ok(vec![fallback_candidate(
-            request.pdf_font,
-            request.requested,
-        )])
-    }
-
-    fn glyph_candidates(
-        &self,
-        request: &GlyphFallbackRequest<'_>,
-    ) -> Result<Vec<FallbackCandidate>, FontError> {
-        let Some(pdf_font) = request.pdf_font else {
-            return Ok(Vec::new());
-        };
-        let mut candidates = vec![fallback_candidate(pdf_font, request.requested)];
-        // The CJK face also covers Greek, Cyrillic, and symbols, such as card suits, that the
-        // Western Latin substitutes lack.
-        if !pdf_font.is_cjk_spec() {
-            candidates.push(cjk_candidate(request.requested));
-        }
-        // Neither the Latin substitutes nor the CJK face cover Hebrew.
-        if matches!(request.character, '\u{0590}'..='\u{05FF}' | '\u{FB1D}'..='\u{FB4F}') {
-            candidates.push(memory_candidate(
-                Bytes::from_static(NOTO_SANS_HEBREW_REGULAR),
-                FontProgramFormat::OpenTypeCff,
-                request.requested,
-            ));
-        }
-        Ok(candidates)
-    }
-}
-
-impl PdfFontSpec {
     /// Returns the Standard 14 identity whose bundled face substitutes for this font.
-    fn substitute_standard14(&self) -> Standard14Font {
+    pub(crate) fn substitute_standard14(&self) -> Standard14Font {
         match self {
-            PdfFontSpec::Type1(font)
-            | PdfFontSpec::MultipleMasterType1(font)
-            | PdfFontSpec::TrueType(font) => font.standard14.unwrap_or_default(),
-            PdfFontSpec::Type0(font) => {
+            Self::Simple(font) => font.standard14.unwrap_or_default(),
+            Self::Type0(font) => {
                 standard14::from_base_font_name(&font.base_font).unwrap_or_default()
             }
-            _ => Standard14Font::Helvetica,
+            Self::Type3(_) => Standard14Font::Helvetica,
         }
-    }
-}
-
-fn fallback_candidate(spec: &PdfFontSpec, metadata: &FontMetadata) -> FallbackCandidate {
-    if spec.is_cjk_spec() {
-        return cjk_candidate(metadata);
-    }
-    memory_candidate(
-        Bytes::from_static(crate::standard14::fallback_font_bytes(
-            spec.substitute_standard14(),
-        )),
-        FontProgramFormat::Cff,
-        metadata,
-    )
-}
-
-/// Returns the bundled Noto Sans CJK face as a fallback candidate.
-fn cjk_candidate(metadata: &FontMetadata) -> FallbackCandidate {
-    memory_candidate(
-        Bytes::from_static(NOTO_SANS_CJK_JP_REGULAR),
-        FontProgramFormat::OpenTypeCff,
-        metadata,
-    )
-}
-
-/// Wraps an in-memory font program as a fallback candidate.
-fn memory_candidate(
-    data: Bytes,
-    format: FontProgramFormat,
-    metadata: &FontMetadata,
-) -> FallbackCandidate {
-    FallbackCandidate {
-        source: FontSource::Memory {
-            data,
-            format,
-            face_index: 0,
-        },
-        metadata: metadata.clone(),
     }
 }

@@ -75,16 +75,12 @@ impl FromPdfObject for GlyphWidthsMap {
     /// indexed from `/FirstChar` for simple and Type 3 fonts.
     ///
     /// Overlapping `/W` entries resolve to the lower-starting entry.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut context = context.dictionary()?;
-        let runs = match context.optional::<CidMetricRuns<1>>(b"W")? {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let runs = match context.entries()?.optional::<CidMetricRuns<1>>(b"W")? {
             Some(CidMetricRuns(runs)) => runs,
-            None => context
-                .read::<SimpleWidthRun>(object)?
-                .0
-                .into_iter()
-                .collect(),
+            None => context.decode::<SimpleWidthRun>()?.0.into_iter().collect(),
         };
         Ok(Self {
             runs: code_range::disjoint(runs),

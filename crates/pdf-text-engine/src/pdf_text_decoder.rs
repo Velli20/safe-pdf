@@ -61,9 +61,7 @@ where
 {
     match spec {
         PdfFontSpec::Type0(font) => decode_type0(font, bytes, &mut consume),
-        PdfFontSpec::Type1(font)
-        | PdfFontSpec::MultipleMasterType1(font)
-        | PdfFontSpec::TrueType(font) => decode_one_byte_font(
+        PdfFontSpec::Simple(font) => decode_one_byte_font(
             &font.encoding,
             &font.metrics,
             font.to_unicode.as_deref(),

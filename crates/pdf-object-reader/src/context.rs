@@ -84,6 +84,16 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
         self.object
     }
 
+    /// Reborrows this context over the same object and reference, for a decoder that
+    /// decodes its own object as more than one type.
+    pub fn reborrow(&mut self) -> ObjectContext<'_, A> {
+        ObjectContext {
+            object: self.object,
+            reference: self.reference,
+            access: &mut *self.access,
+        }
+    }
+
     /// Decodes the bound object as `T` within the same traversal and decode level.
     ///
     /// For decoders whose value is spelled by another decoded type, such as a name enum
@@ -133,6 +143,18 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
         Ok(DictionaryContext {
             dictionary: self.object.dictionary()?,
             access: self.access,
+        })
+    }
+
+    /// Reborrows the bound dictionary's entries, or a stream's dictionary entries, without
+    /// giving up the context.
+    ///
+    /// A decoder can read dispatch keys through it and then [`Self::decode`] the same
+    /// object as another type, within the same traversal and decode level.
+    pub fn entries(&mut self) -> ReadResult<DictionaryContext<'_, A>> {
+        Ok(DictionaryContext {
+            dictionary: self.object.dictionary()?,
+            access: &mut *self.access,
         })
     }
 

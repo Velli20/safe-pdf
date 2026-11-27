@@ -1,6 +1,7 @@
 //! Composite Type 0 specifications and their CID descendant fonts.
 
 use crate::{
+    PDF_GLYPH_SPACE_UNITS_PER_EM,
     cid_vertical_metrics::CidVerticalMetrics,
     core_font_glyph_order::CORE_FONT_GLYPH_RUNS,
     error::FontError,
@@ -155,30 +156,34 @@ impl FromPdfObject for CidFontKind {
 
 impl FromPdfObject for CidFontSpec {
     /// Parses the descendant within its parent font's traversal.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object();
-        let mut context = context.dictionary()?;
-        let kind: CidFontKind = context.required(b"Subtype")?;
-        let base_font: Option<PdfName> = context.lenient(b"BaseFont");
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut entries = context.entries()?;
+        let kind: CidFontKind = entries.required(b"Subtype")?;
+        let base_font: Option<PdfName> = entries.lenient(b"BaseFont");
         // A bad program must not discard an otherwise usable font.
         let program: Option<FontSource> = match kind {
-            CidFontKind::Type0 => context
+            CidFontKind::Type0 => entries
                 .lenient::<CidType0Program>(b"FontDescriptor")
                 .map(Into::into),
-            CidFontKind::Type2 => context
+            CidFontKind::Type2 => entries
                 .lenient::<TrueTypeProgram>(b"FontDescriptor")
                 .map(Into::into),
         };
-        let descriptor = context
+        let descriptor = entries
             .optional::<PdfFontDescriptor>(b"FontDescriptor")?
             .unwrap_or_default()
             .named(base_font.as_deref());
-        let metrics: PdfMetrics = context.read(value)?;
-        let vertical: CidVerticalMetrics = context.read(value)?;
-        let system_info = context
+        let declared_default = entries
+            .optional::<f32>(b"DW")?
+            .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM);
+        let system_info = entries
             .optional::<CidSystemInfo>(b"CIDSystemInfo")?
             .unwrap_or_default();
-        let cid_to_gid: CidToGidMap = context.lenient(b"CIDToGIDMap").unwrap_or_default();
+        let cid_to_gid: CidToGidMap = entries.lenient(b"CIDToGIDMap").unwrap_or_default();
+        let metrics = PdfMetrics::new(Some(declared_default), context.reborrow().decode()?);
+        let vertical: CidVerticalMetrics = context.decode()?;
         // A substituted TrueType core font without its own glyph map is indexed by CID.
         let indexes_core_font = kind == CidFontKind::Type2
             && program.is_none()

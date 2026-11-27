@@ -12,17 +12,24 @@ use std::sync::Arc;
 impl FromPdfObject for PdfFontDescriptor {
     /// Reads a FontDescriptor dictionary, not the enclosing font dictionary, tolerating
     /// malformed optional metadata.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object();
-        let mut context = context.dictionary()?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut entries = context.entries()?;
+        let bounds = entries.lenient(b"FontBBox");
+        let missing_width = entries.lenient(b"MissingWidth");
+        let italic_angle = entries.lenient(b"ItalicAngle");
+        let stem_v = entries.lenient(b"StemV");
+        let ascent = entries.lenient(b"Ascent");
+        let descent = entries.lenient(b"Descent");
         Ok(Self {
-            metadata: context.read(value)?,
-            bounds: context.lenient(b"FontBBox"),
-            missing_width: context.lenient(b"MissingWidth"),
-            italic_angle: context.lenient(b"ItalicAngle"),
-            stem_v: context.lenient(b"StemV"),
-            ascent: context.lenient(b"Ascent"),
-            descent: context.lenient(b"Descent"),
+            metadata: context.decode()?,
+            bounds,
+            missing_width,
+            italic_angle,
+            stem_v,
+            ascent,
+            descent,
         })
     }
 }
