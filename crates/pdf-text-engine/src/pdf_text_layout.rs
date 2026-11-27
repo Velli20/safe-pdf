@@ -371,8 +371,10 @@ fn fallback_fit(
 /// faces try their explicit PDF selector first, then use the first Unicode scalar as a recovery
 /// path. Without an explicit selector, a one-byte code is looked up in the face's code-keyed cmap
 /// subtables or built-in encoding: before Unicode for a symbolic font, whose codes address that
-/// mapping directly, and after it otherwise. A built-in encoding answers `.notdef` for codes it
-/// leaves unassigned, so a symbolic font never draws a glyph guessed from the code's Unicode.
+/// mapping directly, and after it otherwise. The PDF font's own built-in encoding answers
+/// `.notdef` for codes it leaves unassigned, so a symbolic font never draws a glyph guessed from
+/// the code's Unicode. A substitute's encoding is unrelated to the PDF's codes, so a code it
+/// leaves unassigned is left to Unicode and fallback instead.
 fn select_glyph(
     face: &dyn FontFace,
     decoded: &DecodedGlyph<'_>,
@@ -403,6 +405,7 @@ fn select_glyph(
                     .then(|| u8::try_from(decoded.source_code.value()).ok())
                     .flatten()
                     .and_then(|code| face.glyph_for_code(code))
+                    .filter(|glyph| !prefer_unicode || *glyph != GlyphId(0))
             };
             return if face.metadata().symbolic {
                 code_glyph().or_else(unicode_glyph)
