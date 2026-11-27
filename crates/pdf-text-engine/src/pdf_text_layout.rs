@@ -424,13 +424,11 @@ fn select_glyph(
 
 /// Returns a safe scale denominator for physical font metrics.
 ///
-/// [`PDF_GLYPH_SPACE_UNITS_PER_EM`] is used when a face omits metrics or reports an invalid zero.
+/// [`PDF_GLYPH_SPACE_UNITS_PER_EM`] is used when a face omits metrics.
 fn units_per_em(metrics: Option<FontMetrics>) -> f32 {
-    metrics
-        .map(|value| value.units_per_em)
-        .filter(|value| *value != 0)
-        .map(f32::from)
-        .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM)
+    metrics.map_or(PDF_GLYPH_SPACE_UNITS_PER_EM, |value| {
+        f32::from(value.units_per_em.get())
+    })
 }
 
 /// Applies PDF font size, spacing, writing direction, and horizontal scale to an advance.
@@ -521,7 +519,7 @@ fn glyph_bounds(
     writing_mode: WritingMode,
 ) -> Rect {
     let line = face_metrics
-        .and_then(|metrics| metrics.line_metrics())
+        .and_then(|metrics| metrics.line)
         .unwrap_or(LineMetrics::FALLBACK);
     let (ascender, descender) = (
         line.ascent * style.font_size,

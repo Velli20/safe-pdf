@@ -10,6 +10,7 @@
 //! then address glyph indices directly, as FreeType does for such fonts. Programs that are
 //! CID-keyed are left to the Type 0 driver, which maps CIDs through the charset.
 
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -25,7 +26,7 @@ use self_cell::self_cell;
 use crate::error::FontError;
 use crate::font::{
     FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetrics, FontProgramFormat, FontSource,
-    GlyphGeometry, GlyphId, GlyphName,
+    GlyphGeometry, GlyphId, GlyphName, LineMetrics,
 };
 use crate::pdf_path_pen::PdfPathPen;
 use crate::query_cache::QueryCache;
@@ -98,12 +99,15 @@ impl<'a> CffProgramRef<'a> {
     fn metrics(&self) -> Option<FontMetrics> {
         // `upem` comes from the top-level FontMatrix and is normally 1000. Reject a
         // zero or unrepresentable value because it cannot define a layout scale.
-        let units_per_em = u16::try_from(self.font.upem()).ok()?;
+        let units_per_em = NonZeroU16::new(u16::try_from(self.font.upem()).ok()?)?;
         let bbox = self.font.metadata()?.bbox();
-        (units_per_em != 0).then(|| FontMetrics {
+        Some(FontMetrics {
             units_per_em,
-            ascender: bbox.y_max.to_f32(),
-            descender: bbox.y_min.to_f32(),
+            line: LineMetrics::from_design_units(
+                bbox.y_max.to_f32(),
+                bbox.y_min.to_f32(),
+                units_per_em,
+            ),
         })
     }
 

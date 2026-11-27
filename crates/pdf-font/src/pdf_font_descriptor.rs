@@ -13,28 +13,33 @@ use std::sync::Arc;
 impl FromPdfObject for PdfFontDescriptor {
     /// Reads a FontDescriptor dictionary, not the enclosing font dictionary, tolerating
     /// malformed optional metadata.
+    ///
+    /// The declared `/Ascent` and `/Descent` become a line extent as viewers lay out form
+    /// text: a positive descent is read as its negation.
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
         let mut entries = context.entries()?;
-        let bounds = entries.lenient(b"FontBBox");
         let missing_width = entries.lenient(b"MissingWidth");
-        let italic_angle = entries.lenient(b"ItalicAngle");
-        let stem_v = entries.lenient(b"StemV");
-        let ascent = entries.lenient(b"Ascent");
-        let descent = entries.lenient(b"Descent");
+        let ascent: f32 = entries.lenient(b"Ascent").unwrap_or_default();
+        let descent: f32 = entries.lenient(b"Descent").unwrap_or_default();
+        let descent = if descent > MISSIGNED_DESCENT {
+            -descent
+        } else {
+            descent
+        };
+        let line = (ascent != 0.0 || descent != 0.0).then(|| LineMetrics {
+            ascent: ascent / PDF_GLYPH_SPACE_UNITS_PER_EM,
+            descent: descent / PDF_GLYPH_SPACE_UNITS_PER_EM,
+        });
         // Malformed flags are treated as absent.
         let symbolic = entries
             .lenient::<FontFlags>(b"Flags")
             .is_some_and(|flags| flags.contains(FontFlags::SYMBOLIC));
         Ok(Self {
             symbolic,
-            bounds,
             missing_width,
-            italic_angle,
-            stem_v,
-            ascent,
-            descent,
+            line,
         })
     }
 }
@@ -43,25 +48,6 @@ impl FromPdfObject for PdfFontDescriptor {
 /// its sign; smaller positive values are too close to the baseline to tell apart and are
 /// kept as they are.
 const MISSIGNED_DESCENT: f32 = 10.0;
-
-impl PdfFontDescriptor {
-    /// The declared `/Ascent` and `/Descent` as fractions of an em, as viewers lay out
-    /// form text: a positive descent is read as its negation, and a descriptor declaring
-    /// neither, or both as zero, gives `None`.
-    pub(crate) fn line_metrics(&self) -> Option<LineMetrics> {
-        let ascent = self.ascent.unwrap_or_default();
-        let descent = self.descent.unwrap_or_default();
-        let descent = if descent > MISSIGNED_DESCENT {
-            -descent
-        } else {
-            descent
-        };
-        (ascent != 0.0 || descent != 0.0).then(|| LineMetrics {
-            ascent: ascent / PDF_GLYPH_SPACE_UNITS_PER_EM,
-            descent: descent / PDF_GLYPH_SPACE_UNITS_PER_EM,
-        })
-    }
-}
 
 impl FromPdfObject for CidSystemInfo {
     /// Reads optional collection fields independently so malformed hints remain non-fatal.

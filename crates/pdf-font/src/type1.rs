@@ -11,6 +11,7 @@
 //! matching the contract used by the TrueType driver. Text sizing and device
 //! transforms are deliberately left to the layout and rendering layers.
 
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use read_fonts::{model::pen::NullPen, ps::type1::Type1Font as ClassicType1Program};
@@ -18,7 +19,7 @@ use read_fonts::{model::pen::NullPen, ps::type1::Type1Font as ClassicType1Progra
 use crate::error::FontError;
 use crate::font::{
     FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetrics, FontProgramFormat, FontSource,
-    GlyphGeometry, GlyphId, GlyphName,
+    GlyphGeometry, GlyphId, GlyphName, LineMetrics,
 };
 use crate::pdf_path_pen::PdfPathPen;
 use crate::query_cache::QueryCache;
@@ -245,10 +246,14 @@ impl FontFace for Type1FontFace {
 fn type1_metrics(font: &ClassicType1Program) -> Option<FontMetrics> {
     // `upem` comes from the Type 1 FontMatrix and is normally 1000. Reject a
     // zero or unrepresentable value because it cannot define a layout scale.
-    let units_per_em = u16::try_from(font.upem()).ok()?;
-    (units_per_em != 0).then(|| FontMetrics {
+    let units_per_em = NonZeroU16::new(u16::try_from(font.upem()).ok()?)?;
+    let bbox = font.bbox();
+    Some(FontMetrics {
         units_per_em,
-        ascender: font.bbox().y_max.to_f32(),
-        descender: font.bbox().y_min.to_f32(),
+        line: LineMetrics::from_design_units(
+            bbox.y_max.to_f32(),
+            bbox.y_min.to_f32(),
+            units_per_em,
+        ),
     })
 }

@@ -5,6 +5,7 @@
 //! geometry in font design coordinates and applies sizing while laying out and
 //! painting glyphs.
 
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -23,7 +24,7 @@ use skrifa::{
 use crate::error::FontError;
 use crate::font::{
     FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetrics, FontProgramFormat, FontSource,
-    GlyphGeometry, GlyphId, GlyphName,
+    GlyphGeometry, GlyphId, GlyphName, LineMetrics,
 };
 use crate::glyph_name_to_unicode::glyph_name_to_unicode;
 use crate::pdf_path_pen::PdfPathPen;
@@ -347,10 +348,10 @@ fn usable_glyph_names<'a>(font: &FontRef<'a>) -> Option<GlyphNames<'a>> {
 /// Computes size-independent metrics once for reuse by all layout runs.
 fn font_metrics(font: &FontRef<'_>) -> Option<FontMetrics> {
     let metrics = font.metrics(Size::unscaled(), LocationRef::default());
-    (metrics.units_per_em != 0).then_some(FontMetrics {
-        units_per_em: metrics.units_per_em,
-        ascender: metrics.ascent,
-        descender: metrics.descent,
+    let units_per_em = NonZeroU16::new(metrics.units_per_em)?;
+    Some(FontMetrics {
+        units_per_em,
+        line: LineMetrics::from_design_units(metrics.ascent, metrics.descent, units_per_em),
     })
 }
 

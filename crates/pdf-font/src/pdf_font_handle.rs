@@ -88,7 +88,7 @@ impl PdfFontHandle {
         }
         self.primary
             .metrics()
-            .and_then(|metrics| metrics.line_metrics())
+            .and_then(|metrics| metrics.line)
             .unwrap_or(LineMetrics::FALLBACK)
     }
 
