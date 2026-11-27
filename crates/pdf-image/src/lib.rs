@@ -1,3 +1,4 @@
+mod color_key_mask;
 mod decoded_samples;
 pub mod error;
 mod image_decoder;

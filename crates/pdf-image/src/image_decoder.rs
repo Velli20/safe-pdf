@@ -30,6 +30,15 @@ impl PdfImage {
         // forbids an /SMask beside it, so a stray one is dropped rather than
         // multiplied into alpha that already describes the image.
         let soft_mask = soft_mask.filter(|_| !metadata.smask_in_data.overrides_soft_mask());
+        // An /SMask takes the place of a color-key /Mask. A JPX codestream's samples are
+        // not keyed.
+        let key_mask = match (soft_mask, &metadata.color_key, &payload) {
+            (None, Some(key), ImagePayload::Samples(samples)) => {
+                Some(key.coverage(samples, metadata)?)
+            }
+            _ => None,
+        };
+        let soft_mask = soft_mask.or(key_mask.as_ref());
         let size = (metadata.size.width(), metadata.size.height());
         let factor = IMAGE_BUDGET.reduction_factor(size.0, size.1);
         if factor > 1 {
@@ -582,6 +591,40 @@ mod tests {
         .expect("Separation alpha should survive soft-mask application");
 
         assert_eq!(image.data.as_ref(), &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn color_key_mask_hides_pixels_whose_samples_match_the_key() {
+        let dictionary = Dictionary::from_iter(BTreeMap::from([
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
+            (Vec::from(b"ColorSpace"), name("DeviceRGB")),
+            (
+                Vec::from(b"Mask"),
+                ObjectVariant::Array(
+                    [255, 255, 0, 255, 0, 255]
+                        .into_iter()
+                        .map(ObjectVariant::Integer)
+                        .collect(),
+                ),
+            ),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
+        ]));
+
+        let image = decode(
+            StreamObject::new(1, 0, dictionary, vec![255, 0, 255, 0, 0, 0]),
+            None,
+        )
+        .expect("color-keyed image should decode");
+
+        let alphas: Vec<u8> = image
+            .data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|[_, _, _, alpha]| *alpha)
+            .collect();
+        assert_eq!(alphas, [0, 255]);
     }
 
     #[test]

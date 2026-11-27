@@ -113,8 +113,9 @@ impl ImageMask {
 /// An image's `/Mask` stencil: an `/ImageMask` image whose painted samples mark where
 /// the image shows.
 ///
-/// A color-key array, a stream that is not a stencil mask, an unavailable mask, or a
-/// mask that refers back to its own image leaves the image unmasked.
+/// A color-key array is applied by the image's own decoding instead. A stream that is not
+/// a stencil mask, an unavailable mask, or a mask that refers back to its own image leaves
+/// the image unmasked.
 struct StencilMaskImage(Option<Arc<ImageXObject>>);
 
 impl FromPdfObject for StencilMaskImage {
