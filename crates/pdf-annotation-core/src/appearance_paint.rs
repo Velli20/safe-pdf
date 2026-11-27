@@ -1,5 +1,5 @@
 //! Source appearances a host paints in place of a native presentation: widgets, ink
-//! without strokes, and unchanged shape annotations on the page canvas, stamp, note and
+//! without strokes, links, and unchanged shape annotations on the page canvas, stamp, note and
 //! free-text artwork into the annotation's own presentation.
 use crate::{
     engine::DocumentView,
@@ -51,8 +51,8 @@ impl PaintedAppearance {
     /// drawn as it is while the value is still its source `/V`. The widget
     /// `presentation` marks pressed draws its down appearance when it has one for that
     /// state, and the text entry it marks editing draws without its value. Ink without
-    /// strokes, and shape annotations that still show their source shape, draw their
-    /// source `/AS` state.
+    /// strokes, links with a normal appearance, and shape annotations that still show
+    /// their source shape, draw their source `/AS` state.
     ///
     /// # Errors
     /// Returns an error when a widget's bound field is missing.
@@ -466,6 +466,64 @@ mod tests {
             ),
         ]));
         let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&polygon).unwrap();
+        let mut overlay =
+            AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
+        let page = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 612.0,
+            bottom: 792.0,
+        };
+        let viewport = PageViewport::new(page, 0, Size::new(612.0, 792.0)).unwrap();
+        let prepared = overlay.prepare(0, &viewport, 0).unwrap();
+        assert!(prepared.entries().first().unwrap().painted);
+        let appearances = overlay
+            .painted_appearances(0, PresentationState::default())
+            .unwrap();
+        assert_eq!(appearances.len(), 1);
+        assert_eq!(
+            appearances.first().unwrap().stream.value(),
+            &ObjectVariant::Stream(appearance)
+        );
+    }
+
+    #[test]
+    fn link_paints_its_appearance_on_the_canvas() {
+        let name = |bytes: &[u8]| PdfString::from(bytes, StringKind::Name);
+        let appearance = StreamObject::new(
+            2,
+            0,
+            Dictionary::from_entries([]),
+            b"1 0 0 RG 5 w 306 595 82 67 re S".to_vec(),
+        );
+        let link = ObjectVariant::Dictionary(Dictionary::from_entries([
+            (b"Subtype".as_slice(), name(b"Link")),
+            (
+                b"Rect".as_slice(),
+                ObjectVariant::Array(PdfArray::new(
+                    [306, 595, 388, 662].map(ObjectVariant::Integer),
+                )),
+            ),
+            (
+                b"BS".as_slice(),
+                ObjectVariant::Dictionary(Dictionary::from_entries([
+                    (b"W".as_slice(), ObjectVariant::Integer(5)),
+                    (b"S".as_slice(), name(b"S")),
+                ])),
+            ),
+            (
+                b"C".as_slice(),
+                ObjectVariant::Array(PdfArray::new([1, 0, 0].map(ObjectVariant::Integer))),
+            ),
+            (
+                b"AP".as_slice(),
+                ObjectVariant::Dictionary(Dictionary::from_entries([(
+                    b"N".as_slice(),
+                    ObjectVariant::Stream(appearance.clone()),
+                )])),
+            ),
+        ]));
+        let source: SourceAnnotation = ObjectReader::new(EmptySource).read(&link).unwrap();
         let mut overlay =
             AnnotationOverlay::new([std::slice::from_ref(&source)], None, None).unwrap();
         let page = Rect {
