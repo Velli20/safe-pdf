@@ -91,21 +91,19 @@ impl PdfParser<'_> {
 
         // Parse the entire lexeme with the standard library. This handles the sign and
         // overflow checks for integers and provides correctly rounded decimal-to-f64
-        // conversion for reals. A real too long for `f64` parses as infinity and is
+        // conversion for reals. An integer outside the `i64` range is read as a real, as
+        // other readers do. A number too long for `f64` parses as infinity and is
         // rejected, so every decoded number is finite. Both conversion failures use one
         // public numeric error.
-        let number = if is_real {
-            number_str
+        let integer = (!is_real).then(|| number_str.parse::<i64>().ok()).flatten();
+        let number = match integer {
+            Some(integer) => ObjectVariant::Integer(integer),
+            None => number_str
                 .parse::<f64>()
                 .ok()
                 .filter(|value| value.is_finite())
                 .map(ObjectVariant::Real)
-                .ok_or_else(|| ParserError::InvalidNumber(number_str.into_owned()))?
-        } else {
-            number_str
-                .parse::<i64>()
-                .map(ObjectVariant::Integer)
-                .map_err(|_| ParserError::InvalidNumber(number_str.into_owned()))?
+                .ok_or_else(|| ParserError::InvalidNumber(number_str.into_owned()))?,
         };
 
         // A parsed PDF object consumes trailing PDF whitespace, matching the other
@@ -223,18 +221,30 @@ mod tests {
             assert_eq!(parser.position(), input.len());
         }
 
+        let max_half = format!("{:.0}", f64::MAX / 2.0);
+        let min_half = format!("-{max_half}");
         for input in [
             b"9223372036854775808".as_slice(),
             b"-9223372036854775809".as_slice(),
+            max_half.as_bytes(),
+            min_half.as_bytes(),
         ] {
             let mut parser = PdfParser::from(input);
+            let expected = std::str::from_utf8(input).unwrap().parse::<f64>().unwrap();
 
             assert_eq!(
-                parser.parse_number().unwrap_err(),
-                ParserError::InvalidNumber(String::from_utf8_lossy(input).into_owned())
+                parser.parse_number().unwrap(),
+                ObjectVariant::Real(expected)
             );
             assert_eq!(parser.position(), input.len());
         }
+
+        let too_long = format!("{:.0}0", f64::MAX);
+        let mut parser = PdfParser::from(too_long.as_bytes());
+        assert_eq!(
+            parser.parse_number().unwrap_err(),
+            ParserError::InvalidNumber(too_long.clone())
+        );
     }
 
     #[test]

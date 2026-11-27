@@ -63,9 +63,15 @@ impl FromPdfObject for FormXObject {
             _ => context.read::<ContentStream>(object)?,
         };
         Ok(Self {
-            // A malformed /BBox leaves the form unclipped.
+            // A malformed /BBox, or one whose coordinates overflow `f32`, leaves the form
+            // unclipped.
             bbox: context
                 .lenient::<Rect>(b"BBox")
+                .filter(|bbox| {
+                    [bbox.left, bbox.top, bbox.right, bbox.bottom]
+                        .iter()
+                        .all(|value| value.is_finite())
+                })
                 .map(|bbox| bbox.normalized()),
             matrix: context.optional(b"Matrix")?,
             // Retain deferred handles so recursive resource graphs can finish decoding.
