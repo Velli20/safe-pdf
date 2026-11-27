@@ -243,17 +243,17 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     }
 
     /// Handles `Tj`/`TJ`: shows text items, then advances the text matrix past them.
+    ///
+    /// Text shown before any `Tf` has selected a font is skipped and leaves the text matrix
+    /// unchanged: the font size is still zero then, so its adjustments would not move it.
     pub(crate) fn render_text_items(
         &mut self,
         items: &[PdfTextItem],
     ) -> Result<(), PdfCanvasError> {
         let state = &self.state;
-        let font = state
-            .text_state
-            .font
-            .as_ref()
-            .map(Arc::clone)
-            .ok_or(PdfCanvasError::CurrentFontRequired)?;
+        let Some(font) = state.text_state.font.as_ref().map(Arc::clone) else {
+            return Ok(());
+        };
 
         let style = state.text_state.style;
         let rendering_mode = state.paint.rendering_mode;

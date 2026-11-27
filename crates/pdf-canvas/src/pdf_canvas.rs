@@ -1143,4 +1143,25 @@ mod tests {
         drop(canvas);
         assert_eq!(backend.replay_cost(), 0);
     }
+
+    #[test]
+    /// Verifies that text shown before any font is selected is skipped instead of failing.
+    fn text_without_font_is_skipped() {
+        use pdf_content_stream_operators::PdfTextItem;
+        use pdf_graphics::transform::Transform;
+
+        let page = page();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+
+        canvas
+            .render_text_items(&[
+                PdfTextItem::Adjustment(-3092.0),
+                PdfTextItem::Text(b"R".into()),
+            ])
+            .expect("text without a font should be skipped");
+
+        assert_eq!(canvas.state.text_state.matrix, Transform::identity());
+    }
 }
