@@ -8,7 +8,7 @@ use crate::{
     web_paint,
 };
 use num_traits::ToPrimitive;
-use pdf_graphics::{BlendMode, Image, PixelFormat, size::Size, transform::Transform};
+use pdf_graphics::{BlendMode, Image, size::Size, transform::Transform};
 use pdf_image::ReduceImage;
 use web_sys::CanvasRenderingContext2d;
 
@@ -113,15 +113,10 @@ impl Reduction {
     /// Returns the bytes of the reduced copy, in the image's own pixel format.
     fn reduced_bytes(&self, image: &Image) -> WebResult<usize> {
         let Size { width, height } = self.size(image)?;
-        let bytes_per_pixel = match image.pixel_format {
-            PixelFormat::RGBA8888 => 4,
-            PixelFormat::Gray8 | PixelFormat::Alpha8 => 1,
-        };
         usize::try_from(width)
             .ok()
             .zip(usize::try_from(height).ok())
-            .and_then(|(width, height)| width.checked_mul(height))
-            .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
+            .and_then(|(width, height)| image.pixel_format.byte_len(width, height))
             .ok_or(Error::ResourceLimit)
     }
 

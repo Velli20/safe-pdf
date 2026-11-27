@@ -87,7 +87,7 @@ impl ShadingSource {
                 stops,
             } => radial_parameter((*start, *start_radius), (*end, *end_radius), point)
                 .map(|t| stops.color_at(t).to_rgba8()),
-            Self::RasterImage(image) => raster::nearest_pixel(image, point.x, point.y),
+            Self::RasterImage(image) => image.nearest_pixel(point.x, point.y),
         };
         sample.unwrap_or_default()
     }

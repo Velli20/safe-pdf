@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use num_traits::ToPrimitive;
 
 use crate::{PixelFormat, Size, color::Color, transform::Transform};
 
@@ -50,9 +51,8 @@ impl Image {
             return Err(ImageError::EmptyDimensions);
         }
         let expected = self
-            .width
-            .checked_mul(self.height)
-            .and_then(|pixels| pixels.checked_mul(self.pixel_format.bytes_per_pixel()))
+            .pixel_format
+            .byte_len(self.width, self.height)
             .ok_or(ImageError::SizeOverflow)?;
         if self.data.len() != expected {
             return Err(ImageError::ByteLength {
@@ -61,6 +61,39 @@ impl Image {
             });
         }
         Ok(())
+    }
+
+    /// Iterates complete pixels as straight RGBA, see [`PixelFormat::expand`].
+    ///
+    /// This iterator borrows the buffer without validating declared dimensions.
+    /// Decoder soft masks intentionally accept short buffers and ignore incomplete
+    /// trailing RGBA pixels; callers needing exact buffers call [`Self::validate`] first.
+    pub fn rgba_pixels(&self) -> impl Iterator<Item = [u8; 4]> + '_ {
+        let format = self.pixel_format;
+        self.data
+            .chunks_exact(format.bytes_per_pixel())
+            .filter_map(move |pixel| format.expand(pixel))
+    }
+
+    /// Reads the pixel at `index` as straight RGBA, see [`PixelFormat::expand`].
+    ///
+    /// A pixel beyond the end of the buffer reads as zero.
+    pub fn pixel(&self, index: usize) -> [u8; 4] {
+        let format = self.pixel_format;
+        let start = index.saturating_mul(format.bytes_per_pixel());
+        self.data
+            .get(start..start.saturating_add(format.bytes_per_pixel()))
+            .and_then(|pixel| format.expand(pixel))
+            .unwrap_or([0; 4])
+    }
+
+    /// Reads the pixel containing `(x, y)` in source-pixel coordinates as straight RGBA.
+    ///
+    /// Returns `None` outside the image's half-open bounds.
+    pub fn nearest_pixel(&self, x: f32, y: f32) -> Option<[u8; 4]> {
+        let column = x.floor().to_usize().filter(|column| *column < self.width)?;
+        let row = y.floor().to_usize().filter(|row| *row < self.height)?;
+        Some(self.pixel(row.checked_mul(self.width)?.checked_add(column)?))
     }
 
     /// Returns the image dimensions.

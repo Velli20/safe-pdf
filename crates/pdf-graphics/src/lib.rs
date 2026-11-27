@@ -117,4 +117,25 @@ impl PixelFormat {
             Self::Gray8 | Self::Alpha8 => 1,
         }
     }
+
+    /// Returns the packed byte length of `width` × `height` pixels, or `None` if it
+    /// overflows `usize`.
+    pub fn byte_len(self, width: usize, height: usize) -> Option<usize> {
+        width
+            .checked_mul(height)
+            .and_then(|pixels| pixels.checked_mul(self.bytes_per_pixel()))
+    }
+
+    /// Expands one packed pixel to straight RGBA: Gray8 to opaque gray, Alpha8 to
+    /// black with its coverage as alpha, and RGBA unchanged.
+    ///
+    /// Returns `None` if `pixel` is not exactly one pixel long.
+    pub fn expand(self, pixel: &[u8]) -> Option<[u8; 4]> {
+        match (self, pixel) {
+            (Self::Gray8, &[gray]) => Some([gray, gray, gray, 255]),
+            (Self::Alpha8, &[alpha]) => Some([0, 0, 0, alpha]),
+            (Self::RGBA8888, &[r, g, b, a]) => Some([r, g, b, a]),
+            _ => None,
+        }
+    }
 }
