@@ -6,7 +6,7 @@ use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_error::ObjectError,
 };
 
-use crate::{error::PdfImageError, smask_in_data::SMaskInData};
+use crate::{color_key_mask::ColorKeyMask, error::PdfImageError, smask_in_data::SMaskInData};
 
 /// Stores the normalized metadata needed to decode an image stream.
 #[derive(Debug, Clone)]
@@ -30,6 +30,8 @@ pub(crate) struct ImageMetadata {
     pub(crate) smask_in_data: SMaskInData,
     /// Whether the image is smoothed when it is enlarged (`/Interpolate`).
     pub(crate) interpolate: bool,
+    /// The color-key `/Mask`, with one range per color component.
+    pub(crate) color_key: Option<ColorKeyMask>,
 }
 
 /// The entries of an image dictionary other than `/ColorSpace`, whose meaning depends
@@ -53,6 +55,8 @@ pub struct ImageEntries {
     smask_in_data: SMaskInData,
     /// Whether the image is smoothed when it is enlarged (`/Interpolate`).
     interpolate: bool,
+    /// A color-key `/Mask` array; a stencil-mask stream is not read here.
+    color_key: Option<ColorKeyMask>,
 }
 
 /// Reads an image dictionary's entries; null entries count as absent.
@@ -80,6 +84,7 @@ impl FromPdfObject for ImageEntries {
                 .optional::<i64>(b"SMaskInData")?
                 .map_or_else(|| Ok(SMaskInData::default()), SMaskInData::try_from)?,
             interpolate: context.optional(b"Interpolate")?.unwrap_or_default(),
+            color_key: context.lenient(b"Mask"),
         })
     }
 }
@@ -122,6 +127,7 @@ impl ImageMetadata {
             decode,
             smask_in_data,
             interpolate,
+            color_key,
         } = entries;
         let is_jpx = filters.as_ref().is_some_and(Filters::has_jpx_filter);
         let bits_per_component = match bits_per_component {
@@ -158,6 +164,9 @@ impl ImageMetadata {
             decode,
             smask_in_data,
             interpolate,
+            color_key: color_key
+                .filter(|_| !image_mask)
+                .and_then(|key| key.for_components(num_color_components)),
         })
     }
 
