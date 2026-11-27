@@ -79,7 +79,18 @@ impl<'a> CMapParser<'a> {
             ),
             b'/' => self.parse_name_token()?,
             b'<' => self.parse_left_angle_token()?,
-            b'>' => self.parse_right_angle_token(byte)?,
+            b'>' if matches!(self.parser.remaining_input().get(1).copied(), Some(b'>')) => {
+                let _ = self.parser.read_byte();
+                let _ = self.parser.read_byte();
+                CMapToken::DoubleRightAngleBracket
+            }
+            // A lone `>`, as a damaged stream can leave after a name, is an unknown
+            // operator to the lenient reader, which skips the PostScript around the
+            // mapping sections.
+            b'>' if allow_unknown_operators => {
+                let _ = self.parser.read_byte();
+                CMapToken::Operator(b">".to_vec())
+            }
             b'+' | b'-' | b'0'..=b'9' => self.parse_number_token(byte)?,
             _ if PdfParser::is_pdf_regular_character(byte) => {
                 self.parse_keyword_token(allow_unknown_operators)?
@@ -105,16 +116,6 @@ impl<'a> CMapParser<'a> {
             Ok(CMapToken::HexString(
                 self.parser.parse_hex_string()?.to_vec(),
             ))
-        }
-    }
-
-    fn parse_right_angle_token(&mut self, byte: u8) -> Result<CMapToken, CMapError> {
-        if matches!(self.parser.remaining_input().get(1).copied(), Some(b'>')) {
-            let _ = self.parser.read_byte();
-            let _ = self.parser.read_byte();
-            Ok(CMapToken::DoubleRightAngleBracket)
-        } else {
-            Err(self.unexpected_token(byte).into())
         }
     }
 
@@ -327,6 +328,17 @@ mod tests {
             parser.next_token_lenient().unwrap(),
             Some(CMapToken::UseCMap)
         );
+    }
+
+    #[test]
+    fn unicode_map_skips_a_lone_right_angle_outside_sections() {
+        let cmap = b"/CMapName /Adobe-Identity-UC> def\n1 beginbfchar\n<002B> <0048>\nendbfchar";
+
+        let map = CMapParser::from(cmap.as_slice())
+            .into_unicode_map()
+            .unwrap();
+
+        assert_eq!(map.len(), 1);
     }
 
     #[test]
