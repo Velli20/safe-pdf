@@ -1,6 +1,7 @@
 //! Font program, face, registry, and glyph geometry abstractions.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -114,48 +115,13 @@ impl From<&FontSource> for Option<FontProgramFormat> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlyphName(pub InlineBytes);
 
-/// Global metrics expressed in font design units.
+/// Global metrics of a font program.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FontMetrics {
     /// Number of design units per em square.
-    pub units_per_em: u16,
-    /// Typographic ascender.
-    pub ascender: f32,
-    /// Typographic descender.
-    pub descender: f32,
-}
-
-/// Fallback ascender measured as a fraction of one em above the baseline.
-///
-/// This is the conventional 80/20 division of an em-square line box: 80% is
-/// reserved above the baseline and 20% below it. It is not a metric prescribed
-/// by the PDF or OpenType specifications and is used only when a font provides
-/// neither usable line metrics nor usable global bounds.
-pub const FALLBACK_ASCENDER_EM_RATIO: f32 = 0.8;
-
-/// Fallback descender measured as a fraction of one em below the baseline.
-///
-/// Together with [`FALLBACK_ASCENDER_EM_RATIO`], this produces a one-em-high
-/// selection cell using the conventional 80/20 baseline split. The value is
-/// negative because font descenders are expressed below the baseline.
-pub const FALLBACK_DESCENDER_EM_RATIO: f32 = -0.2;
-
-impl FontMetrics {
-    /// The ascender and descender as fractions of an em; `None` when the face has no
-    /// units per em or no positive, finite extent between them.
-    #[must_use]
-    pub fn line_metrics(&self) -> Option<LineMetrics> {
-        let units = f32::from(self.units_per_em);
-        let line = LineMetrics {
-            ascent: self.ascender / units,
-            descent: self.descender / units,
-        };
-        (self.units_per_em > 0
-            && line.ascent.is_finite()
-            && line.descent.is_finite()
-            && line.ascent > line.descent)
-            .then_some(line)
-    }
+    pub units_per_em: NonZeroU16,
+    /// The program's line extent; `None` when it declares no usable ascender and descender.
+    pub line: Option<LineMetrics>,
 }
 
 /// The extent of a line of text, in fractions of the font size.
@@ -168,11 +134,33 @@ pub struct LineMetrics {
 }
 
 impl LineMetrics {
-    /// The extent of a face without usable metrics: the conventional 80/20 split of an em.
+    /// The extent of a face without usable metrics.
+    ///
+    /// This is the conventional 80/20 division of an em-square line box: 80% above the
+    /// baseline and 20% below it. It is not prescribed by the PDF or OpenType
+    /// specifications.
     pub const FALLBACK: Self = Self {
-        ascent: FALLBACK_ASCENDER_EM_RATIO,
-        descent: FALLBACK_DESCENDER_EM_RATIO,
+        ascent: 0.8,
+        descent: -0.2,
     };
+
+    /// The extent between `ascender` and `descender`, in the design units of a program
+    /// with `units_per_em`; `None` unless both are finite and the ascender lies above the
+    /// descender.
+    #[must_use]
+    pub fn from_design_units(
+        ascender: f32,
+        descender: f32,
+        units_per_em: NonZeroU16,
+    ) -> Option<Self> {
+        let units = f32::from(units_per_em.get());
+        let line = Self {
+            ascent: ascender / units,
+            descent: descender / units,
+        };
+        (line.ascent.is_finite() && line.descent.is_finite() && line.ascent > line.descent)
+            .then_some(line)
+    }
 
     /// The distance between the baselines of consecutive lines.
     #[must_use]

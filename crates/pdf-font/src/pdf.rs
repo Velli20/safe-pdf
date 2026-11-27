@@ -3,10 +3,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use pdf_graphics::rect::Rect;
-
 use crate::base_encoding::BaseEncoding;
-use crate::font::GlyphName;
+use crate::font::{GlyphName, LineMetrics};
 use crate::glyph_widths_map::GlyphWidthsMap;
 pub use crate::pdf_font_spec::PdfFontSpec;
 pub use crate::simple_font_spec::{SimpleFontKind, SimpleFontSpec};
@@ -58,18 +56,11 @@ pub struct PdfMetrics {
 pub struct PdfFontDescriptor {
     /// Whether `/Flags` marks the font symbolic: its glyphs lie outside the standard Latin set.
     pub symbolic: bool,
-    /// Declared PDF font bounding box.
-    pub bounds: Option<Rect>,
     /// Missing width in PDF glyph-space units.
     pub missing_width: Option<f32>,
-    /// Italic angle in degrees.
-    pub italic_angle: Option<f32>,
-    /// Stem thickness hint.
-    pub stem_v: Option<f32>,
-    /// Declared height above the baseline, in thousandths of an em.
-    pub ascent: Option<f32>,
-    /// Declared depth below the baseline, in thousandths of an em.
-    pub descent: Option<f32>,
+    /// The line extent `/Ascent` and `/Descent` declare; `None` when the descriptor
+    /// declares neither, or both as zero.
+    pub line: Option<LineMetrics>,
 }
 
 /// Registry and ordering information from a CID font dictionary.

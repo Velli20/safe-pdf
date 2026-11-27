@@ -120,8 +120,8 @@ impl PdfFontSpec {
     #[must_use]
     pub fn declared_line_metrics(&self) -> Option<LineMetrics> {
         match self {
-            Self::Type0(font) => font.descendant.descriptor.line_metrics(),
-            Self::Simple(font) => font.descriptor.line_metrics(),
+            Self::Type0(font) => font.descendant.descriptor.line,
+            Self::Simple(font) => font.descriptor.line,
             Self::Type3(_) => None,
         }
     }

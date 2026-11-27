@@ -3,12 +3,15 @@
 //! Raw CFF has no OpenType cmap. Outlines are obtained by evaluating the
 //! selected charstring with the CFF subfont chosen through `FDSelect`.
 
+use std::num::NonZeroU16;
+
 use read_fonts::{model::pen::NullPen, ps::cff::CffFontRef};
 use self_cell::self_cell;
 
 use crate::error::FontError;
 use crate::font::{
     FontFace, FontFaceId, FontMetrics, FontProgramFormat, GlyphGeometry, GlyphId, GlyphName,
+    LineMetrics,
 };
 use crate::pdf_path_pen::PdfPathPen;
 use crate::query_cache::QueryCache;
@@ -182,12 +185,15 @@ impl FontFace for RawType0FontFace {
 
 /// Computes reusable global metrics for a standalone CFF program.
 fn raw_cff_metrics(cff: &CffFontRef<'_>) -> Option<FontMetrics> {
-    let units_per_em = u16::try_from(cff.upem()).ok()?;
+    let units_per_em = NonZeroU16::new(u16::try_from(cff.upem()).ok()?)?;
     let bounds = cff.metadata()?.bbox();
-    (units_per_em != 0).then_some(FontMetrics {
+    Some(FontMetrics {
         units_per_em,
-        ascender: bounds.y_max.to_f32(),
-        descender: bounds.y_min.to_f32(),
+        line: LineMetrics::from_design_units(
+            bounds.y_max.to_f32(),
+            bounds.y_min.to_f32(),
+            units_per_em,
+        ),
     })
 }
 

@@ -4,6 +4,8 @@
 //! high-level outlines. A raw CFF view of the same table is retained for
 //! the CID charset that translates public CIDs into physical GIDs.
 
+use std::num::NonZeroU16;
+
 use read_fonts::{FontRef, TableProvider, ps::cff::CffFontRef};
 use self_cell::self_cell;
 use skrifa::{
@@ -14,8 +16,8 @@ use skrifa::{
 
 use crate::error::FontError;
 use crate::font::{
-    FALLBACK_ASCENDER_EM_RATIO, FALLBACK_DESCENDER_EM_RATIO, FontFace, FontFaceId, FontMetrics,
-    FontProgramFormat, GlyphGeometry, GlyphId, GlyphName,
+    FontFace, FontFaceId, FontMetrics, FontProgramFormat, GlyphGeometry, GlyphId, GlyphName,
+    LineMetrics,
 };
 use crate::pdf_path_pen::PdfPathPen;
 
@@ -196,49 +198,24 @@ fn validate_outline_format(outlines: &OutlineGlyphCollection<'_>) -> Result<(), 
     })
 }
 
-/// Computes reusable OpenType metrics with CFF-aware fallbacks.
+/// Computes reusable OpenType metrics, taking the line extent from the typographic
+/// metrics, else the font bounds, else the CFF bounding box.
 fn open_type_metrics(font: &FontRef<'_>, cff: &CffFontRef<'_>) -> Option<FontMetrics> {
-    let raw_metrics = font.metrics(Size::unscaled(), LocationRef::default());
-    if raw_metrics.units_per_em == 0 {
-        return None;
-    }
-    let (ascender, descender) = vertical_metrics(&raw_metrics, cff);
-    Some(FontMetrics {
-        units_per_em: raw_metrics.units_per_em,
-        ascender,
-        descender,
-    })
-}
-
-/// Selects usable line metrics, bounds, or the conventional em-box fallback.
-fn vertical_metrics(metrics: &skrifa::metrics::Metrics, cff: &CffFontRef<'_>) -> (f32, f32) {
-    usable_vertical_metrics(metrics.ascent, metrics.descent)
-        .then_some((metrics.ascent, metrics.descent))
+    let metrics = font.metrics(Size::unscaled(), LocationRef::default());
+    let units_per_em = NonZeroU16::new(metrics.units_per_em)?;
+    let line = LineMetrics::from_design_units(metrics.ascent, metrics.descent, units_per_em)
         .or_else(|| {
             metrics.bounds.and_then(|bounds| {
-                usable_vertical_metrics(bounds.y_max, bounds.y_min)
-                    .then_some((bounds.y_max, bounds.y_min))
+                LineMetrics::from_design_units(bounds.y_max, bounds.y_min, units_per_em)
             })
         })
-        .or_else(|| cff_vertical_metrics(cff))
-        .unwrap_or_else(|| {
-            let units = f32::from(metrics.units_per_em);
-            (
-                units * FALLBACK_ASCENDER_EM_RATIO,
-                units * FALLBACK_DESCENDER_EM_RATIO,
+        .or_else(|| {
+            let bounds = cff.metadata()?.bbox();
+            LineMetrics::from_design_units(
+                bounds.y_max.to_f32(),
+                bounds.y_min.to_f32(),
+                units_per_em,
             )
-        })
-}
-
-/// Returns usable vertical bounds from CFF metadata when available.
-fn cff_vertical_metrics(cff: &CffFontRef<'_>) -> Option<(f32, f32)> {
-    let bounds = cff.metadata()?.bbox();
-    let ascender = bounds.y_max.to_f32();
-    let descender = bounds.y_min.to_f32();
-    usable_vertical_metrics(ascender, descender).then_some((ascender, descender))
-}
-
-/// Returns whether two vertical metrics define a finite, positive span.
-fn usable_vertical_metrics(ascender: f32, descender: f32) -> bool {
-    ascender.is_finite() && descender.is_finite() && ascender > descender
+        });
+    Some(FontMetrics { units_per_em, line })
 }
