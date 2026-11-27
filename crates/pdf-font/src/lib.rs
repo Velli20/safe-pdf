@@ -9,7 +9,6 @@ pub mod error;
 pub mod fallback;
 pub mod flags;
 pub mod font;
-mod font_metadata;
 pub mod font_registry;
 pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
@@ -40,9 +39,8 @@ pub use fallback::{
     FallbackCandidate, FallbackProvider, GlyphFallbackRequest, WholeFontFallbackRequest,
 };
 pub use font::{
-    ExternalFontKey, FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
-    FontProgramFormat, FontSource, FontStretch, FontWeight, GlyphGeometry, GlyphId, GlyphName,
-    LineMetrics,
+    ExternalFontKey, FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetrics,
+    FontProgramFormat, FontSource, GlyphGeometry, GlyphId, GlyphName, LineMetrics,
 };
 pub use font_registry::FontRegistry;
 pub use pdf::{

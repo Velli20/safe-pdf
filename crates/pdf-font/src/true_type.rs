@@ -22,8 +22,8 @@ use skrifa::{
 
 use crate::error::FontError;
 use crate::font::{
-    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
-    FontProgramFormat, FontSource, GlyphGeometry, GlyphId, GlyphName,
+    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetrics, FontProgramFormat, FontSource,
+    GlyphGeometry, GlyphId, GlyphName,
 };
 use crate::glyph_name_to_unicode::glyph_name_to_unicode;
 use crate::pdf_path_pen::PdfPathPen;
@@ -199,7 +199,6 @@ impl FontDriver for TrueTypeFontDriver {
             *format,
             *face_index,
             request.face_id,
-            request.metadata_hint.clone(),
         )?))
     }
 }
@@ -212,8 +211,6 @@ pub struct TrueTypeFontFace {
     program: TrueTypeProgram,
     /// Declared container format used when reporting parsing failures.
     format: FontProgramFormat,
-    /// PDF- or application-provided metadata used for font matching.
-    metadata: FontMetadata,
     /// Global design-space metrics computed during loading.
     metrics: Option<FontMetrics>,
     /// Requested PostScript names cached after their first lookup.
@@ -227,7 +224,6 @@ impl TrueTypeFontFace {
         format: FontProgramFormat,
         face_index: u32,
         id: FontFaceId,
-        metadata: FontMetadata,
     ) -> Result<Self, FontError> {
         let program = TrueTypeProgram::try_new(data, move |data| {
             TrueTypeProgramRef::parse(data, face_index, format)
@@ -237,7 +233,6 @@ impl TrueTypeFontFace {
             id,
             program,
             format,
-            metadata,
             metrics,
             glyphs_by_name: QueryCache::new(),
         })
@@ -265,10 +260,6 @@ impl TrueTypeFontFace {
 impl FontFace for TrueTypeFontFace {
     fn id(&self) -> FontFaceId {
         self.id
-    }
-
-    fn metadata(&self) -> &FontMetadata {
-        &self.metadata
     }
 
     fn metrics(&self) -> Option<FontMetrics> {

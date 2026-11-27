@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use crate::error::FontError;
 use crate::font::{
-    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontMetrics,
-    FontProgramFormat, FontSource, GlyphGeometry, GlyphId, GlyphName,
+    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetrics, FontProgramFormat, FontSource,
+    GlyphGeometry, GlyphId, GlyphName,
 };
 
 /// A loader for PDF Type 3 faces represented by character-procedure handles.
@@ -58,7 +58,6 @@ impl FontDriver for Type3FontDriver {
 
         Ok(Arc::new(Type3FontFace::new(
             request.face_id,
-            request.metadata_hint.clone(),
             Arc::clone(glyphs),
         )))
     }
@@ -68,8 +67,6 @@ impl FontDriver for Type3FontDriver {
 pub struct Type3FontFace {
     /// Identity assigned by the driver that loaded this face.
     id: FontFaceId,
-    /// Metadata supplied with the synthetic Type 3 source.
-    metadata: FontMetadata,
     /// Original PDF procedure handles indexed by normalized glyph name.
     glyphs: Arc<BTreeMap<GlyphName, GlyphId>>,
     /// Procedure handles belonging to this face.
@@ -78,18 +75,13 @@ pub struct Type3FontFace {
 
 impl Type3FontFace {
     /// Creates a face and indexes its opaque procedure handles by identifier.
-    fn new(
-        id: FontFaceId,
-        metadata: FontMetadata,
-        glyphs: Arc<BTreeMap<GlyphName, GlyphId>>,
-    ) -> Self {
+    fn new(id: FontFaceId, glyphs: Arc<BTreeMap<GlyphName, GlyphId>>) -> Self {
         // The name map supports PDF encoding lookup, while the identifier set
         // validates handles returned to rendering backends without repeatedly
         // scanning every character procedure.
         let glyph_ids = glyphs.values().copied().collect();
         Self {
             id,
-            metadata,
             glyphs,
             glyph_ids,
         }
@@ -100,11 +92,6 @@ impl FontFace for Type3FontFace {
     /// Returns the registry-assigned identity used to group glyph runs.
     fn id(&self) -> FontFaceId {
         self.id
-    }
-
-    /// Returns the metadata normalized from the PDF font dictionary.
-    fn metadata(&self) -> &FontMetadata {
-        &self.metadata
     }
 
     /// Returns no physical face metrics because PDF Type 3 metrics live in the font specification.

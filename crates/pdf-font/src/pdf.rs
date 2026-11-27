@@ -6,7 +6,7 @@ use std::sync::Arc;
 use pdf_graphics::rect::Rect;
 
 use crate::base_encoding::BaseEncoding;
-use crate::font::{FontMetadata, GlyphName};
+use crate::font::GlyphName;
 use crate::glyph_widths_map::GlyphWidthsMap;
 pub use crate::pdf_font_spec::PdfFontSpec;
 pub use crate::simple_font_spec::{SimpleFontKind, SimpleFontSpec};
@@ -56,8 +56,8 @@ pub struct PdfMetrics {
 /// Descriptor information shared by PDF font subtypes.
 #[derive(Debug, Clone, Default)]
 pub struct PdfFontDescriptor {
-    /// Normalized font matching metadata.
-    pub metadata: FontMetadata,
+    /// Whether `/Flags` marks the font symbolic: its glyphs lie outside the standard Latin set.
+    pub symbolic: bool,
     /// Declared PDF font bounding box.
     pub bounds: Option<Rect>,
     /// Missing width in PDF glyph-space units.

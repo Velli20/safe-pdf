@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::FontError;
 use crate::font::{
-    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontMetadata, FontProgramFormat, FontSource,
+    FontDriver, FontFace, FontFaceId, FontLoadRequest, FontProgramFormat, FontSource,
 };
 
 /// Thread-safe registry used to select a font driver at runtime.
@@ -31,26 +31,18 @@ impl FontRegistry {
 
     /// Loads a face with the first driver accepting the request's format.
     ///
-    /// The source and metadata are consumed into one [`FontLoadRequest`], so drivers can borrow the
+    /// The source is consumed into one [`FontLoadRequest`], so drivers can borrow the
     /// same request in selection order without cloning its bytes. Supporting drivers are tried
     /// until one succeeds; when all fail, the final driver error is returned. Face IDs are assigned
     /// before driver selection and remain unique even when a load attempt fails.
-    pub fn load(
-        &self,
-        source: FontSource,
-        metadata_hint: FontMetadata,
-    ) -> Result<Arc<dyn FontFace>, FontError> {
+    pub fn load(&self, source: FontSource) -> Result<Arc<dyn FontFace>, FontError> {
         let format = Option::<FontProgramFormat>::from(&source).ok_or_else(|| {
             FontError::InvalidPdfSpecification {
                 message: "an external font source requires a format hint".into(),
             }
         })?;
         let face_id = FontFaceId(self.next_face_id.fetch_add(1, Ordering::Relaxed));
-        let request = FontLoadRequest {
-            source,
-            metadata_hint,
-            face_id,
-        };
+        let request = FontLoadRequest { source, face_id };
         let mut accepted = false;
         let mut last_error = None;
         for driver in &self.drivers {

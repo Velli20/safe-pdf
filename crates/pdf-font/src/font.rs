@@ -110,69 +110,6 @@ impl From<&FontSource> for Option<FontProgramFormat> {
     }
 }
 
-/// Slant requested from or reported by a font face.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub enum FontSlant {
-    /// Upright roman glyphs.
-    #[default]
-    Normal,
-    /// Designed italic glyphs.
-    Italic,
-    /// Mechanically or descriptively oblique glyphs.
-    Oblique {
-        /// Slant angle in degrees when known.
-        angle: Option<f32>,
-    },
-}
-
-/// Width class requested from or reported by a font face.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum FontStretch {
-    /// A face narrower than the normal width class.
-    Condensed,
-    /// The normal width class.
-    #[default]
-    Normal,
-    /// A face wider than the normal width class.
-    Expanded,
-}
-
-/// CSS-compatible numeric font weight in the inclusive conceptual range 1–1000.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FontWeight(pub u16);
-
-impl FontWeight {
-    /// The CSS `normal` weight.
-    pub const NORMAL: Self = Self(400);
-    /// The CSS `bold` weight.
-    pub const BOLD: Self = Self(700);
-}
-
-impl Default for FontWeight {
-    fn default() -> Self {
-        Self::NORMAL
-    }
-}
-
-/// Human-readable and stylistic information associated with a loaded face.
-#[derive(Debug, Clone, Default)]
-pub struct FontMetadata {
-    /// PostScript name when one is available.
-    pub postscript_name: Option<Arc<str>>,
-    /// Typographic family name when one is available.
-    pub family: Option<Arc<str>>,
-    /// Typographic subfamily name when one is available.
-    pub subfamily: Option<Arc<str>>,
-    /// Numeric weight used during fallback matching.
-    pub weight: FontWeight,
-    /// Width class used during fallback matching.
-    pub stretch: FontStretch,
-    /// Slant used during fallback matching.
-    pub slant: FontSlant,
-    /// Whether the face is treated as symbolic rather than Unicode-oriented.
-    pub symbolic: bool,
-}
-
 /// A normalized glyph name without a leading PDF slash.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlyphName(pub InlineBytes);
@@ -258,8 +195,6 @@ pub enum GlyphGeometry {
 pub struct FontLoadRequest {
     /// Program source to load.
     pub source: FontSource,
-    /// Metadata inferred from the enclosing PDF or application request.
-    pub metadata_hint: FontMetadata,
     /// Registry-allocated identity for the face being loaded.
     pub face_id: FontFaceId,
 }
@@ -268,9 +203,6 @@ pub struct FontLoadRequest {
 pub trait FontFace: Send + Sync {
     /// Returns the stable identity assigned to this face.
     fn id(&self) -> FontFaceId;
-
-    /// Returns descriptive and matching metadata.
-    fn metadata(&self) -> &FontMetadata;
 
     /// Returns global design-space metrics when the font provides them.
     fn metrics(&self) -> Option<FontMetrics>;
