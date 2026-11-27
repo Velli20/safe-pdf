@@ -210,8 +210,10 @@ impl Filter {
         /// a 4:1 ratio; the cap keeps a small stream that expands enormously from
         /// reserving memory up front instead of growing as it decodes.
         const MAX_RESERVED_CAPACITY: usize = 16 << 20;
+        /// Output space added whenever the decoded data fills the buffer.
+        const OUTPUT_CHUNK: usize = 32 << 10;
 
-        let mut decoder = flate2::read::ZlibDecoder::new(stream_data);
+        let mut inflater = flate2::Decompress::new(true);
         let mut decoded = Vec::with_capacity(
             stream_data
                 .len()
@@ -219,16 +221,29 @@ impl Filter {
                 .min(MAX_RESERVED_CAPACITY),
         );
 
-        use std::io::Read;
-
         // A stream cut short, for example one missing its checksum, or one corrupt
-        // partway still yields the data decoded before that point. `read_to_end`
-        // leaves those bytes in the buffer, so only a stream that decoded nothing
-        // is an error.
-        match decoder.read_to_end(&mut decoded) {
-            Ok(_) => {}
-            Err(_) if !decoded.is_empty() => {}
-            Err(e) => return Err(FilterError::Decompression(e.to_string())),
+        // partway, such as one with a wrong checksum, still yields the data decoded
+        // before that point. `decompress_vec` keeps the bytes a failing call wrote,
+        // so only a stream that decoded nothing is an error.
+        let failure = loop {
+            if decoded.len() == decoded.capacity() {
+                decoded.reserve(OUTPUT_CHUNK);
+            }
+            let consumed = inflater.total_in();
+            let input = usize::try_from(consumed)
+                .ok()
+                .and_then(|consumed| stream_data.get(consumed..))
+                .unwrap_or_default();
+            let written = decoded.len();
+            match inflater.decompress_vec(input, &mut decoded, flate2::FlushDecompress::None) {
+                Ok(flate2::Status::StreamEnd) => break None,
+                Ok(_) if decoded.len() > written || inflater.total_in() > consumed => {}
+                Ok(_) => break Some(String::from("incomplete deflate stream")),
+                Err(e) => break Some(e.to_string()),
+            }
+        };
+        if let Some(message) = failure.filter(|_| decoded.is_empty()) {
+            return Err(FilterError::Decompression(message));
         }
 
         // The decoded data outlives this call, so give back a reservation that
@@ -703,6 +718,24 @@ mod tests {
         .expect("decode failed");
 
         assert_eq!(decoded.as_ref(), b"hello");
+    }
+
+    #[test]
+    fn flate_with_bad_checksum_keeps_decoded_data() {
+        use flate2::{Compression, write::ZlibEncoder};
+        use std::io::Write;
+
+        let payload = b"1 beginbfchar <002B> <0048> endbfchar";
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(payload).expect("zlib write failed");
+        let mut compressed = encoder.finish().expect("zlib finish failed");
+        let checksum = compressed
+            .last_mut()
+            .expect("compressed data ends in a checksum");
+        *checksum ^= 0xFF;
+
+        let decoded = Filter::decode_flate(&compressed).expect("decoded data should be kept");
+        assert_eq!(decoded, payload);
     }
 
     #[test]
