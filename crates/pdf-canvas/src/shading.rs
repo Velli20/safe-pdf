@@ -17,6 +17,8 @@ use crate::{
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Prepares a shading paint and fills the current clip through the selected soft mask.
+    ///
+    /// A shading name missing from the resources paints nothing.
     pub(crate) fn paint_shading(&mut self, shading_name: &[u8]) -> Result<(), PdfCanvasError> {
         let state = &self.state;
 
@@ -25,9 +27,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             .as_ref()
             .and_then(|r| r.shading(shading_name))
         else {
-            return Err(PdfCanvasError::PatternNotFound(
-                String::from_utf8_lossy(shading_name).into_owned(),
-            ));
+            // An unresolvable shading is skipped so the rest of the content still renders.
+            return Ok(());
         };
 
         // Paints the area of the current clipping path with the shading pattern named
@@ -87,4 +88,36 @@ pub(crate) fn with_clip<B: CanvasBackend + ?Sized>(
         .and_then(|()| paint(backend));
     backend.restore()?;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use pdf_document::page::PdfPage;
+    use pdf_resources::resources::Resources;
+    use pdf_text_engine::bundled_font_system;
+
+    use crate::{pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
+
+    #[test]
+    /// Verifies that `sh` with a shading name missing from the resources paints nothing.
+    fn missing_shading_is_skipped() {
+        let page = PdfPage {
+            contents: None,
+            annotations: None,
+            media_box: None,
+            crop_box: None,
+            resources: Some(Arc::new(Resources::default())),
+            rotation: None,
+            annotation_id_high_watermark: 0,
+        };
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+
+        canvas
+            .paint_shading(b"sh6")
+            .expect("missing shading should be skipped");
+    }
 }
