@@ -27,12 +27,14 @@ impl Annotation {
     }
 
     /// Whether this annotation's appearance is painted at its fixed source rectangle instead
-    /// of a native presentation: source ink without strokes, and caret or unknown subtypes
-    /// that carry a normal appearance.
+    /// of a native presentation: source ink without strokes, and link, caret or unknown
+    /// subtypes that carry a normal appearance.
     pub fn is_drawn_from_appearance(&self) -> bool {
         match &self.content {
             AnnotationKind::Ink(ink) => ink.strokes.is_empty(),
-            AnnotationKind::Caret(_) | AnnotationKind::Unknown(_) => self.has_normal_appearance(),
+            AnnotationKind::Link(_) | AnnotationKind::Caret(_) | AnnotationKind::Unknown(_) => {
+                self.has_normal_appearance()
+            }
             _ => false,
         }
     }
@@ -57,7 +59,8 @@ impl Annotation {
     }
 
     /// Whether the page canvas paints this annotation's source appearance at its source
-    /// rectangle: always for [`Self::is_drawn_from_appearance`], and for shape annotations
+    /// rectangle: always for [`Self::is_drawn_from_appearance`] (including links with a
+    /// normal appearance), and for shape annotations
     /// while they show their source shape.
     pub(crate) fn paints_source_appearance(&self) -> bool {
         self.is_drawn_from_appearance() || self.shows_source_shape()
