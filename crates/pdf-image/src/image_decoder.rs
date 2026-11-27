@@ -218,7 +218,7 @@ fn image_from_rgba(
 /// Incomplete RGBA pixels are ignored. The caller zips these values with output
 /// pixels, leaving destination alpha unchanged when the mask ends early.
 fn soft_mask_alphas(mask: &Image) -> impl Iterator<Item = u8> + '_ {
-    raster::rgba_pixels(mask).map(raster::soft_mask_coverage)
+    mask.rgba_pixels().map(raster::soft_mask_coverage)
 }
 
 #[cfg(test)]

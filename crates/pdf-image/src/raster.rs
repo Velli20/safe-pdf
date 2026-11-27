@@ -49,60 +49,6 @@ pub fn pixel_centers(start: f32, extent: f32, count: u32) -> Result<Vec<f32>, Im
         .collect()
 }
 
-/// Reads the pixel containing `(x, y)` in source-pixel coordinates as straight RGBA.
-///
-/// Returns `None` outside the image's half-open bounds.
-pub fn nearest_pixel(image: &Image, x: f32, y: f32) -> Option<[u8; 4]> {
-    let column = x
-        .floor()
-        .to_usize()
-        .filter(|column| *column < image.width)?;
-    let row = y.floor().to_usize().filter(|row| *row < image.height)?;
-    Some(pixel_at(
-        image,
-        row.checked_mul(image.width)?.checked_add(column)?,
-    ))
-}
-
-/// Expands one packed pixel to straight RGBA: Gray8 to opaque gray, Alpha8 to
-/// black with its coverage as alpha, and RGBA unchanged.
-///
-/// Returns `None` if `pixel` is not exactly one pixel long.
-fn expand(format: PixelFormat, pixel: &[u8]) -> Option<[u8; 4]> {
-    match (format, pixel) {
-        (PixelFormat::Gray8, &[gray]) => Some([gray, gray, gray, 255]),
-        (PixelFormat::Alpha8, &[alpha]) => Some([0, 0, 0, alpha]),
-        (PixelFormat::RGBA8888, &[r, g, b, a]) => Some([r, g, b, a]),
-        _ => None,
-    }
-}
-
-/// Iterates complete pixels as straight RGBA, see [`expand`].
-///
-/// This iterator borrows the buffer without validating declared dimensions.
-/// Decoder soft masks intentionally accept short buffers and ignore incomplete
-/// trailing RGBA pixels; public raster operations validate before using it.
-pub(crate) fn rgba_pixels(image: &Image) -> impl Iterator<Item = [u8; 4]> + '_ {
-    let format = image.pixel_format;
-    image
-        .data
-        .chunks_exact(format.bytes_per_pixel())
-        .filter_map(move |pixel| expand(format, pixel))
-}
-
-/// Reads the pixel at `index` as straight RGBA, see [`expand`].
-///
-/// A pixel beyond the end of the buffer reads as zero.
-fn pixel_at(image: &Image, index: usize) -> [u8; 4] {
-    let format = image.pixel_format;
-    let start = index.saturating_mul(format.bytes_per_pixel());
-    image
-        .data
-        .get(start..start.saturating_add(format.bytes_per_pixel()))
-        .and_then(|pixel| expand(format, pixel))
-        .unwrap_or([0; 4])
-}
-
 /// Copies an image into an owned, packed straight-alpha RGBA8 buffer.
 ///
 /// Existing RGBA bytes, including color channels beneath transparent pixels,
@@ -112,17 +58,7 @@ fn pixel_at(image: &Image, index: usize) -> [u8; 4] {
 ///
 /// Returns validation errors from [`Image::validate`] or allocation failures.
 pub fn rgba(image: &Image) -> Result<Vec<u8>, ImageRasterError> {
-    match image.pixel_format {
-        PixelFormat::RGBA8888 => {
-            image.validate()?;
-            let mut data = pixel_buffer(image.width, image.height, 4)?;
-            data.extend_from_slice(&image.data);
-            Ok(data)
-        }
-        PixelFormat::Gray8 | PixelFormat::Alpha8 => {
-            Ok(map_pixels(image, |pixel| pixel)?.data.into())
-        }
-    }
+    Ok(map_pixels(image, |pixel| pixel)?.data.into())
 }
 
 /// Builds a same-sized RGBA image by mapping each straight RGBA source pixel.
@@ -138,7 +74,7 @@ pub fn map_pixels(
 ) -> Result<Image, ImageRasterError> {
     image.validate()?;
     let mut data = pixel_buffer(image.width, image.height, 4)?;
-    for pixel in rgba_pixels(image) {
+    for pixel in image.rgba_pixels() {
         data.extend_from_slice(&map(pixel));
     }
     Ok(Image {
@@ -217,7 +153,7 @@ pub(crate) fn resample_with_soft_mask(
         let mask_row_starts =
             sample_positions(y, mask.height, height).map(|row| row.saturating_mul(mask.width));
         for (image_column, mask_columns) in &columns {
-            let [r, g, b, alpha] = pixel_at(image, image_row_start.saturating_add(*image_column));
+            let [r, g, b, alpha] = image.pixel(image_row_start.saturating_add(*image_column));
             let coverage = average_coverage(mask, mask_row_starts, mask_columns);
             data.extend_from_slice(&[r, g, b, multiply_alpha(alpha, coverage)]);
         }
@@ -235,7 +171,7 @@ fn average_coverage(mask: &Image, row_starts: [usize; 2], columns: &[usize; 2]) 
                 .iter()
                 .map(move |column| row_start.saturating_add(*column))
         })
-        .map(|index| u16::from(soft_mask_coverage(pixel_at(mask, index))))
+        .map(|index| u16::from(soft_mask_coverage(mask.pixel(index))))
         .sum();
     u8::try_from(total / 4).unwrap_or(u8::MAX)
 }
