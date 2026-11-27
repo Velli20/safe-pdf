@@ -12,9 +12,38 @@ use pdf_object_reader::pdf_name::PdfName;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
+/// The subtype of a simple font dictionary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimpleFontKind {
+    /// A Type 1 font.
+    Type1,
+    /// A Multiple Master Type 1 font.
+    MultipleMasterType1,
+    /// A TrueType font, including OpenType-wrapped TrueType programs.
+    TrueType,
+}
+
+impl FromPdfObject for SimpleFontKind {
+    /// Decodes a font dictionary's `/Subtype` name into a simple font kind.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<PdfName>()?;
+        match &*name {
+            b"Type1" => Ok(Self::Type1),
+            b"MMType1" => Ok(Self::MultipleMasterType1),
+            b"TrueType" => Ok(Self::TrueType),
+            other => Err(FontError::UnsupportedFontSubtype {
+                subtype: String::from_utf8_lossy(other).into_owned(),
+            }
+            .into()),
+        }
+    }
+}
+
 /// Data shared by Type 1, Multiple Master Type 1, and TrueType simple fonts.
 #[derive(Clone)]
 pub struct SimpleFontSpec {
+    /// The font dictionary's subtype.
+    pub kind: SimpleFontKind,
     /// PDF base font name without a leading slash.
     pub base_font: Arc<[u8]>,
     /// Parsed descriptor information.
@@ -34,33 +63,28 @@ pub struct SimpleFontSpec {
 impl FromPdfObject for SimpleFontSpec {
     /// Decodes the concrete font dictionary without whole-font substitution, choosing its
     /// program and encoding policy from Subtype.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object();
-        let mut context = context.dictionary()?;
-        let subtype: PdfName = context.required(b"Subtype")?;
-        let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut entries = context.entries()?;
+        let kind: SimpleFontKind = entries.required(b"Subtype")?;
+        let base_font: Option<Arc<[u8]>> = entries.lenient(b"BaseFont");
         // A bad program must not discard an otherwise usable font.
-        let program: Option<FontSource> = match subtype.as_ref() {
-            b"Type1" | b"MMType1" => context
+        let program: Option<FontSource> = match kind {
+            SimpleFontKind::Type1 | SimpleFontKind::MultipleMasterType1 => entries
                 .lenient::<Type1Program>(b"FontDescriptor")
                 .map(Into::into),
-            b"TrueType" => context
+            SimpleFontKind::TrueType => entries
                 .lenient::<TrueTypeProgram>(b"FontDescriptor")
                 .map(Into::into),
-            other => {
-                return Err(FontError::UnsupportedFontSubtype {
-                    subtype: String::from_utf8_lossy(other).into_owned(),
-                }
-                .into());
-            }
         };
-        let descriptor = context
+        let descriptor = entries
             .optional::<PdfFontDescriptor>(b"FontDescriptor")?
             .unwrap_or_default()
             .named(base_font.as_deref());
         // A symbolic TrueType or classic Type 1 program without `/Encoding` addresses its
         // glyphs through its own code mapping.
-        let code_keyed_program = subtype.as_ref() == b"TrueType"
+        let code_keyed_program = kind == SimpleFontKind::TrueType
             || matches!(
                 program,
                 Some(FontSource::Memory {
@@ -75,9 +99,9 @@ impl FromPdfObject for SimpleFontSpec {
         // An unknown or malformed `/Encoding` is ignored rather than discarding the font.
         // A non-embedded standard Type 1 font without `/Encoding` uses its built-in encoding,
         // which differs from the standard one for Symbol and ZapfDingbats.
-        let encoding = context.lenient::<Encoding>(b"Encoding").or_else(|| {
+        let encoding = entries.lenient::<Encoding>(b"Encoding").or_else(|| {
             standard14
-                .filter(|_| subtype.as_ref() == b"Type1" && program.is_none())
+                .filter(|_| kind == SimpleFontKind::Type1 && program.is_none())
                 .and_then(Encoding::standard14_built_in)
         });
         // An encoding dictionary without `/BaseEncoding` differs from the built-in encoding of
@@ -90,20 +114,22 @@ impl FromPdfObject for SimpleFontSpec {
             })
         );
         let encoding = SimpleEncoding::new(encoding, symbolic, built_in_base);
-        let mut metrics: PdfMetrics = context.read(value)?;
+        let to_unicode = entries.lenient(b"ToUnicode").map(Arc::new);
+        let mut metrics = PdfMetrics::new(descriptor.missing_width, context.decode()?);
         if let Some(font) = standard14
             && program.is_none()
         {
             metrics.fill_standard14_widths(font, &encoding);
         }
         Ok(Self {
+            kind,
             base_font: base_font.unwrap_or_default(),
             descriptor,
             program,
             standard14,
             encoding,
             metrics,
-            to_unicode: context.lenient(b"ToUnicode").map(Arc::new),
+            to_unicode,
         })
     }
 }

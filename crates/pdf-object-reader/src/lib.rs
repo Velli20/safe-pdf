@@ -7,7 +7,10 @@
 //! traversal. Domain types implement [`FromPdfObject`] and receive one
 //! [`ObjectContext`], which combines the current value with nested reads and
 //! content-stream IDs. Dictionary, array, and stream contexts preserve this
-//! traversal.
+//! traversal. A decoder that dispatches on its own entries reads them through
+//! [`ObjectContext::entries`] and then decodes the same object as another type with
+//! [`ObjectContext::decode`] (or [`ObjectContext::reborrow`] for more than one), which
+//! adds no decode level and keeps the object's reference.
 //!
 //! Eager reads reject recursive references. Shared reads reserve a typed entry
 //! before decoding and preserve recursive links through [`ObjectHandle`].

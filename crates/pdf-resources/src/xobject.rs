@@ -61,9 +61,9 @@ impl FromPdfObject for FontResource {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let font: PdfFontSpec = context.read(context.object())?;
+        let font: PdfFontSpec = context.reborrow().decode()?;
         let resources = match font.is_type3() {
-            true => context.dictionary()?.optional(b"Resources")?,
+            true => context.entries()?.optional(b"Resources")?,
             false => None,
         };
         Ok(Self { font, resources })

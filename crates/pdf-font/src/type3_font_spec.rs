@@ -78,22 +78,25 @@ impl FromPdfObject for CharProcedures {
 impl FromPdfObject for Type3FontSpec {
     /// Decodes a Type 3 dictionary without whole-font substitution; absent glyph widths
     /// default to zero.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object();
-        let mut context = context.dictionary()?;
-        let font_matrix = context.required(b"FontMatrix")?;
-        let bounds = context.required(b"FontBBox")?;
-        let encoding = SimpleEncoding::new(context.optional(b"Encoding")?, false, false);
-        let metrics: PdfMetrics = context.read(value)?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut entries = context.entries()?;
+        let font_matrix = entries.required(b"FontMatrix")?;
+        let bounds = entries.required(b"FontBBox")?;
+        let encoding = SimpleEncoding::new(entries.optional(b"Encoding")?, false, false);
+        let base_font = entries.lenient(b"BaseFont").unwrap_or_default();
+        let char_procedures = entries.required(b"CharProcs")?;
+        let to_unicode = entries.lenient(b"ToUnicode").map(Arc::new);
         Ok(Self {
-            base_font: context.lenient(b"BaseFont").unwrap_or_default(),
+            base_font,
             metadata: FontMetadata::default(),
             font_matrix,
             bounds,
             encoding,
-            metrics,
-            char_procedures: context.required(b"CharProcs")?,
-            to_unicode: context.lenient(b"ToUnicode").map(Arc::new),
+            metrics: PdfMetrics::new(Some(0.0), context.decode()?),
+            char_procedures,
+            to_unicode,
         })
     }
 }

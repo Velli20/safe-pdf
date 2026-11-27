@@ -1,69 +1,27 @@
-//! Typed decoding of font dictionaries into glyph widths.
+//! Glyph-width tables with their default-width rule.
 
 use crate::{
-    PDF_GLYPH_SPACE_UNITS_PER_EM,
-    error::FontError,
     glyph_widths_map::GlyphWidthsMap,
-    pdf::{FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding},
+    pdf::{FALLBACK_GLYPH_WIDTH, PdfMetrics, SimpleEncoding},
     standard14::Standard14Font,
 };
-use pdf_object_reader::pdf_name::PdfName;
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-impl FromPdfObject for PdfMetrics {
-    /// Reads a simple, Type 3, or descendant CID font dictionary.
+impl PdfMetrics {
+    /// Combines a font's explicit widths with the default width its kind declares.
     ///
-    /// The input is the whole font dictionary, since character bounds and
-    /// default widths are stored outside the width arrays. Type 0 containers
-    /// obtain their metrics from a descendant rather than this decoder.
-    ///
-    /// Simple fonts default to the descriptor's `/MissingWidth`; without one, codes
-    /// outside a `/Widths` table advance zero, and a font with no widths at all uses
-    /// [`FALLBACK_GLYPH_WIDTH`]. Type 3 fonts default to zero, and CID fonts to `/DW`
-    /// or 1000. Missing simple widths and reversed character ranges leave the
-    /// explicit table empty. Short arrays contribute only available widths;
-    /// surplus values remain unread.
-    ///
-    /// # Errors
-    /// Returns a reader error for missing or unsupported subtypes, malformed
-    /// width entries, or invalid required character bounds. CID range errors
-    /// retain their font-domain source; optional descriptor hints remain lenient.
-    /// The explicit table itself is read by [`crate::glyph_widths_map::GlyphWidthsMap`].
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object();
-        let mut context = context.dictionary()?;
-        let subtype: PdfName = context.required(b"Subtype")?;
-        let declared_default = match subtype.as_ref() {
-            // Decode metadata only; font program loading belongs to the font spec.
-            b"Type1" | b"MMType1" | b"TrueType" => context
-                .optional::<PdfFontDescriptor>(b"FontDescriptor")?
-                .and_then(|descriptor| descriptor.missing_width),
-            b"Type3" => Some(0.0),
-            b"CIDFontType0" | b"CIDFontType2" => Some(
-                context
-                    .optional::<f32>(b"DW")?
-                    .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM),
-            ),
-            other => {
-                return Err(FontError::UnsupportedFontSubtype {
-                    subtype: String::from_utf8_lossy(other).into_owned(),
-                }
-                .into());
-            }
-        };
-        let explicit: GlyphWidthsMap = context.read(value)?;
-        // `/MissingWidth` defaults to zero for codes outside a font's `/Widths`; only a
-        // font without any widths falls back to an average advance.
+    /// The declared default is a simple font's descriptor `/MissingWidth`, zero for a
+    /// Type 3 font, and `/DW` or 1000 for a CID font. Without one, codes outside a
+    /// `/Widths` table advance zero, and a font with no widths at all uses
+    /// [`FALLBACK_GLYPH_WIDTH`].
+    pub(crate) fn new(declared_default: Option<f32>, explicit: GlyphWidthsMap) -> Self {
         let default = declared_default.unwrap_or(if explicit.is_empty() {
             FALLBACK_GLYPH_WIDTH
         } else {
             0.0
         });
-        Ok(Self { default, explicit })
+        Self { default, explicit }
     }
-}
 
-impl PdfMetrics {
     /// Supplies Standard 14 AFM widths for encoded glyph names when the PDF lists no widths.
     ///
     /// Explicit `/Widths` entries remain authoritative, so a non-empty table is left unchanged.
@@ -90,12 +48,13 @@ impl PdfMetrics {
 mod tests {
     use super::*;
     use pdf_object_reader::dictionary::Dictionary;
-    use pdf_object_reader::{EmptySource, object_variant::ObjectVariant};
+    use pdf_object_reader::{EmptySource, ReadResult, object_variant::ObjectVariant};
     use std::collections::BTreeMap;
 
     fn read_metrics(dictionary: &Dictionary) -> ReadResult<PdfMetrics> {
         pdf_object_reader::ObjectReader::new(EmptySource)
-            .read::<PdfMetrics>(&ObjectVariant::Dictionary(dictionary.clone()))
+            .read::<GlyphWidthsMap>(&ObjectVariant::Dictionary(dictionary.clone()))
+            .map(|explicit| PdfMetrics::new(None, explicit))
     }
 
     fn make_dict(entries: Vec<(&[u8], ObjectVariant)>) -> Dictionary {

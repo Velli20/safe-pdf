@@ -9,7 +9,7 @@ use crate::base_encoding::BaseEncoding;
 use crate::font::{FontMetadata, GlyphName};
 use crate::glyph_widths_map::GlyphWidthsMap;
 pub use crate::pdf_font_spec::PdfFontSpec;
-pub use crate::simple_font_spec::SimpleFontSpec;
+pub use crate::simple_font_spec::{SimpleFontKind, SimpleFontSpec};
 pub use crate::standard14::Standard14Font;
 pub use crate::type0_font_spec::{
     CidFontKind, CidFontSpec, CidToGidMap, CidToUnicode, Type0FontSpec,
@@ -43,8 +43,8 @@ pub struct SimpleEncoding {
 
 /// Sparse PDF metrics table with a required default.
 ///
-/// Typed object decoding accepts a complete simple, Type 3, or descendant CID
-/// font dictionary. Its subtype selects the width table and default-width rule.
+/// Each font decoder builds it from the font dictionary's width table and the default
+/// width its kind declares.
 #[derive(Debug, Clone)]
 pub struct PdfMetrics {
     /// Width used when no explicit entry exists, in PDF glyph space.

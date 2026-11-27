@@ -90,10 +90,10 @@ fn parse(data: Vec<u8>) -> ContentStream {
 
 fn benchmark(c: &mut Criterion) {
     let font = PdfFontSpec::from(pdf_font::Standard14Font::Helvetica);
-    let PdfFontSpec::Type1(simple) = font else {
+    let PdfFontSpec::Simple(simple) = font else {
         unreachable!("Helvetica should create a simple Type 1 specification");
     };
-    let font = PdfFontSpec::Type1(pdf_font::SimpleFontSpec {
+    let font = PdfFontSpec::Simple(pdf_font::SimpleFontSpec {
         program: Some(FontSource::Memory {
             data: Bytes::from_static(pdf_font::standard14::fallback_font_bytes(
                 pdf_font::Standard14Font::Helvetica,
