@@ -1145,6 +1145,54 @@ mod tests {
     }
 
     #[test]
+    /// Verifies that `Do` finds an XObject the current resources lack in the page's.
+    fn xobject_missing_from_current_resources_resolves_through_page() {
+        use pdf_content_stream_operators::variants::PdfOperatorVariant;
+        use pdf_object_reader::{
+            Dictionary, EmptySource, ObjectReader, StreamObject, object_variant::ObjectVariant,
+            pdf_name::PdfName,
+        };
+        use pdf_resources::resources::Resources;
+        use std::sync::Arc;
+
+        let form = Dictionary::from_entries([
+            (
+                b"Subtype".as_slice(),
+                ObjectVariant::name_from_bytes(b"Form"),
+            ),
+            (
+                b"BBox".as_slice(),
+                ObjectVariant::Array(vec![ObjectVariant::Integer(10); 4].into()),
+            ),
+        ]);
+        let xobjects = Dictionary::from_entries([(
+            b"X".as_slice(),
+            ObjectVariant::Stream(StreamObject::new(1, 0, form, Vec::new())),
+        )]);
+        let reader = ObjectReader::new(EmptySource);
+        let page_resources: Resources = reader
+            .read(&ObjectVariant::Dictionary(Dictionary::from_entries([(
+                b"XObject".as_slice(),
+                ObjectVariant::Dictionary(xobjects),
+            )])))
+            .expect("page resources should read");
+        let page = PdfPage {
+            resources: Some(Arc::new(page_resources)),
+            ..page()
+        };
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+        canvas.state.resources = Some(Arc::new(Resources::default()));
+
+        canvas
+            .apply_operator(&PdfOperatorVariant::InvokeXObject {
+                name: PdfName::from_bytes(b"X"),
+            })
+            .expect("the page's XObject should be drawn");
+    }
+
+    #[test]
     /// Verifies that text shown before any font is selected is skipped instead of failing.
     fn text_without_font_is_skipped() {
         use pdf_content_stream_operators::PdfTextItem;

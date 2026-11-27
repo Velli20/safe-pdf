@@ -61,15 +61,20 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// their own resources. They are rendered by recursively processing
     /// the form's content stream with the form's transformation matrix.
     pub(crate) fn invoke_xobject(&mut self, xobject_name: &[u8]) -> Result<(), PdfCanvasError> {
-        let resources = self
-            .state
-            .resources
-            .clone()
-            .ok_or(PdfCanvasError::PageResourcesMissing)?;
+        let resources = self.state.resources.as_deref();
+        let page_resources = self.page.resources.as_deref();
+        if resources.is_none() && page_resources.is_none() {
+            return Err(PdfCanvasError::PageResourcesMissing);
+        }
 
-        let xobj = resources.xobject(xobject_name).ok_or_else(|| {
-            PdfCanvasError::XObjectNotFound(String::from_utf8_lossy(xobject_name).into_owned())
-        })?;
+        // A name the current resources lack, such as one drawn by a pattern cell whose
+        // own resources omit /XObject, resolves through the page's resources.
+        let xobj = resources
+            .and_then(|resources| resources.xobject(xobject_name))
+            .or_else(|| page_resources?.xobject(xobject_name))
+            .ok_or_else(|| {
+                PdfCanvasError::XObjectNotFound(String::from_utf8_lossy(xobject_name).into_owned())
+            })?;
 
         match xobj.as_ref() {
             Resource::Image(image) => self.render_image_xobject(image)?,
