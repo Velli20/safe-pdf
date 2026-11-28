@@ -10,7 +10,7 @@ use crate::{
     error::{WebCanvasBackendError as Error, WebResult},
     surface::{Surface, context},
     surface_pool::{SurfacePool, byte_size},
-    web_group::IsolatedGroup,
+    web_group::{BackdropGroup, IsolatedGroup},
     web_image::ImageDraw,
     web_mask::IsolatedMask,
     web_paint, web_path,
@@ -51,7 +51,7 @@ impl Default for WebCanvasOptions {
 /// saves are restored within each draw call and never enter that stack. Mask and
 /// pattern replays use separate backends sharing this backend's surface budget.
 pub struct WebCanvasBackend {
-    canvas: web_sys::HtmlCanvasElement,
+    pub(crate) canvas: web_sys::HtmlCanvasElement,
     pub(crate) context: CanvasRenderingContext2d,
     pub(crate) viewport: CanvasViewport,
     pub(crate) state: BackendState,
@@ -323,6 +323,19 @@ impl CanvasBackend for WebCanvasBackend {
         F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
     {
         IsolatedGroup::new(self)?.paint(alpha, blend_mode.as_ref(), paint)
+    }
+
+    fn with_backdrop_layer<F>(
+        &mut self,
+        alpha: f32,
+        mask: Option<&MaskLayer>,
+        paint: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        let mask = mask.filter(|mask| !mask.is_passthrough());
+        BackdropGroup::new(self, mask)?.paint(alpha, paint)
     }
 }
 

@@ -108,7 +108,9 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     ///
     /// An `isolated` group's contents composite against a transparent backdrop rather than
     /// the page, so they always get their own layer: a blend mode inside the group must not
-    /// meet what lies beneath it.
+    /// meet what lies beneath it. A non-isolated group composited with the Normal blend
+    /// mode starts from a copy of what lies beneath it instead, so a blend mode inside the
+    /// group meets the real backdrop even under a soft mask or alpha constant.
     fn render_transparency_group(
         &mut self,
         form: &FormXObject,
@@ -140,6 +142,11 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let group = self.record_nested(size, initial_state, text_glyphs, |canvas| {
             canvas.render_form(form, form.matrix)
         })?;
+        if !isolated && blend_mode.is_none() {
+            return self
+                .canvas
+                .with_backdrop_layer(alpha, mask.as_ref(), |backend| group.replay(backend));
+        }
         // The layer encloses the mask so that its blend mode meets the real backdrop.
         self.canvas
             .with_group_layer(alpha, blend_mode, |backend| match &mask {

@@ -365,6 +365,65 @@ fn image_soft_mask_replaces_the_graphics_state_soft_mask() {
 }
 
 #[test]
+fn soft_masked_non_isolated_group_paints_over_its_backdrop() {
+    let group = |stream: ContentStream, resources: Option<Resources>| FormXObject {
+        bbox: Some(Rect::new(10.0, 10.0)),
+        matrix: None,
+        resources: resources.map(ObjectHandle::from),
+        content_stream: stream,
+        group: Some(FormGroup::Transparency { isolated: false }),
+    };
+    let mask_group = group(content_stream(1, b"1 g 0 0 10 10 re f"), None);
+    let masked = Resource::ExternalGraphicsState(ObjectHandle::from(ExternalGraphicsState {
+        params: vec![ExternalGraphicsStateKey::SoftMask(Some(
+            ObjectHandle::from(SoftMask {
+                mask_type: MaskMode::Luminosity,
+                transfer: None,
+                backdrop: None,
+                shape: mask_group.into(),
+            }),
+        ))],
+    }));
+    let screen = Resource::ExternalGraphicsState(ObjectHandle::from(ExternalGraphicsState {
+        params: vec![ExternalGraphicsStateKey::BlendMode(BlendMode::Screen)],
+    }));
+    // The inner group is Screen-blended, so it must meet the page beneath the outer group.
+    let inner = group(content_stream(2, b"0 g 0 0 10 10 re f"), None);
+    let outer = group(
+        content_stream(3, b"/GS1 gs /Inner Do"),
+        Some(Resources {
+            ext_g_states: HashMap::from([(PdfName::from(b"GS1"), screen)]),
+            xobjects: HashMap::from([(
+                PdfName::from(b"Inner"),
+                ObjectHandle::from(Resource::from(inner)),
+            )]),
+            ..Default::default()
+        }),
+    );
+    let resources = Arc::new(Resources {
+        ext_g_states: HashMap::from([(PdfName::from(b"GS0"), masked)]),
+        xobjects: HashMap::from([(
+            PdfName::from(b"Outer"),
+            ObjectHandle::from(Resource::from(outer)),
+        )]),
+        ..Default::default()
+    });
+
+    let mut recording = RecordingCanvas::new(100.0, 100.0);
+    render(
+        &mut recording,
+        &content_stream(4, b"/GS0 gs /Outer Do"),
+        Some(resources),
+    )
+    .expect("soft-masked group should render");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.backdrop_layers, vec![(1.0, true)]);
+    assert_eq!(observer.begin_mask_count, 1);
+    assert_eq!(observer.group_layers, vec![(1.0, Some(BlendMode::Screen))]);
+}
+
+#[test]
 fn image_mask_paints_the_fill_pattern_through_its_stencil() {
     let mut dictionary = image_dictionary();
     dictionary.insert(Vec::from(b"ImageMask"), ObjectVariant::Boolean(true));

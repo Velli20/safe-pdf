@@ -688,6 +688,74 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
     where
         F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
     {
+        self.paint_masked(
+            mask,
+            skia_safe::canvas::SaveLayerFlags::empty(),
+            paint_content,
+        )
+    }
+
+    /// Paints content into a layer that is composited with `alpha` and `blend_mode`.
+    fn with_group_layer<F>(
+        &mut self,
+        alpha: f32,
+        blend_mode: Option<BlendMode>,
+        paint_content: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        let mut paint = skia_safe::Paint::default();
+        paint.set_alpha_f(alpha.clamp(0.0, 1.0));
+        if let Some(mode) = blend_mode {
+            paint.set_blend_mode(to_skia_blend_mode(mode));
+        }
+        self.paint_layer(
+            &paint,
+            skia_safe::canvas::SaveLayerFlags::empty(),
+            paint_content,
+        )
+    }
+
+    /// Starts each layer from the pixels beneath it. Layers composite source-over, which
+    /// equals interpolating from the backdrop to the content wherever the backdrop is
+    /// opaque.
+    fn with_backdrop_layer<F>(
+        &mut self,
+        alpha: f32,
+        mask: Option<&MaskLayer>,
+        paint_content: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        let flags = skia_safe::canvas::SaveLayerFlags::INIT_WITH_PREVIOUS;
+        let paint_masked = |backend: &mut Self| match mask {
+            Some(mask) => backend.paint_masked(mask, flags, paint_content),
+            None => paint_content(backend),
+        };
+        // An opaque layer starting from the backdrop composites back unchanged.
+        if alpha >= 1.0 {
+            return paint_masked(self);
+        }
+        let mut paint = skia_safe::Paint::default();
+        paint.set_alpha_f(alpha.clamp(0.0, 1.0));
+        self.paint_layer(&paint, flags, paint_masked)
+    }
+}
+
+impl SkiaCanvasBackend<'_> {
+    /// Paints content into a layer created with `flags`, keeps it only where `mask`
+    /// covers it, and composites it source-over.
+    fn paint_masked<F>(
+        &mut self,
+        mask: &MaskLayer,
+        flags: skia_safe::canvas::SaveLayerFlags,
+        paint_content: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
         if mask.is_passthrough() {
             return paint_content(self);
         }
@@ -718,7 +786,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         canvas.concat(&to_skia_matrix(mask.transform()));
         canvas.clip_rect(mask_bounds, skia_safe::ClipOp::Intersect, None);
         canvas.set_matrix(&mapping);
-        canvas.save_layer(&Default::default());
+        canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().flags(flags));
         let layer = canvas.save_count();
         // Protect the initial clip so failed painting can be discarded in its entirety.
         canvas.save();
@@ -737,24 +805,25 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         result
     }
 
-    /// Paints content into a layer that is composited with `alpha` and `blend_mode`.
-    fn with_group_layer<F>(
+    /// Paints content into a layer created with `flags`, composited with `paint`.
+    ///
+    /// Painting failures discard the layer.
+    fn paint_layer<F>(
         &mut self,
-        alpha: f32,
-        blend_mode: Option<BlendMode>,
+        paint: &skia_safe::Paint,
+        flags: skia_safe::canvas::SaveLayerFlags,
         paint_content: F,
     ) -> Result<(), PdfCanvasError>
     where
         F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
     {
-        let mut paint = skia_safe::Paint::default();
-        paint.set_alpha_f(alpha.clamp(0.0, 1.0));
-        if let Some(mode) = blend_mode {
-            paint.set_blend_mode(to_skia_blend_mode(mode));
-        }
         let canvas = self.surface.canvas();
         let parent = canvas.save_count();
-        canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
+        canvas.save_layer(
+            &skia_safe::canvas::SaveLayerRec::default()
+                .paint(paint)
+                .flags(flags),
+        );
         // Protect the initial clip so failed painting can be discarded in its entirety.
         canvas.save();
         let result = paint_content(self);

@@ -131,6 +131,15 @@ enum RecordingCommand {
         /// Number of following commands belonging to this body, including nested headers.
         len: usize,
     },
+    /// Content painted over a copy of its backdrop occupies the following `len` commands.
+    BackdropGroup {
+        /// Constant opacity weighting the layer against its backdrop.
+        alpha: f32,
+        /// Coverage weighting the layer against its backdrop.
+        mask: Option<MaskLayer>,
+        /// Number of following commands belonging to this body, including nested headers.
+        len: usize,
+    },
     /// Content composited as one layer occupies the following `len` commands.
     Group {
         /// Constant opacity applied to the composited layer.
@@ -373,6 +382,15 @@ impl RecordingCanvas {
                         })?;
                         commands = rest;
                     }
+                    BackdropGroup { alpha, mask, len } => {
+                        let (body, rest) = commands
+                            .split_at_checked(*len)
+                            .ok_or(RecordingError::InvalidLayerBody)?;
+                        backend.with_backdrop_layer(*alpha, mask.as_ref(), |backend| {
+                            self.replay_commands(body, backend)
+                        })?;
+                        commands = rest;
+                    }
                 }
             }
             Ok(())
@@ -418,7 +436,9 @@ fn validate_commands(mut commands: &[RecordingCommand]) -> Result<(), RecordingE
             RecordingCommand::Restore => {
                 saves = saves.checked_sub(1).ok_or(RecordingError::UnbalancedSave)?
             }
-            RecordingCommand::Mask { len, .. } | RecordingCommand::Group { len, .. } => {
+            RecordingCommand::Mask { len, .. }
+            | RecordingCommand::Group { len, .. }
+            | RecordingCommand::BackdropGroup { len, .. } => {
                 let (body, rest) = commands
                     .split_at_checked(*len)
                     .ok_or(RecordingError::InvalidLayerBody)?;
@@ -607,6 +627,32 @@ impl CanvasBackend for RecordingCanvas {
             paint,
         )
     }
+
+    /// Appends a backdrop group body in-place and removes it entirely if painting or
+    /// validation fails. A pass-through mask is dropped, as `with_mask_layer` drops it.
+    fn with_backdrop_layer<F>(
+        &mut self,
+        alpha: f32,
+        mask: Option<&MaskLayer>,
+        paint: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        let mask = mask.filter(|mask| !mask.is_passthrough());
+        self.record_body(
+            RecordingCommand::BackdropGroup {
+                alpha,
+                mask: mask.cloned(),
+                len: usize::MAX,
+            },
+            paint,
+        )?;
+        if let Some(mask) = mask {
+            self.nest(mask.recording(), mask.recording().replay_cost());
+        }
+        Ok(())
+    }
 }
 
 impl RecordingCanvas {
@@ -634,6 +680,9 @@ impl RecordingCanvas {
                     len: recorded_len, ..
                 }
                 | RecordingCommand::Group {
+                    len: recorded_len, ..
+                }
+                | RecordingCommand::BackdropGroup {
                     len: recorded_len, ..
                 },
             ) = self.commands.get_mut(start)
