@@ -368,30 +368,42 @@ fn patch_parser_uses_only_the_low_two_flag_bits() {
 }
 
 #[test]
-fn rejects_invalid_patch_widths_and_decode_arity() {
-    let coordinate_width = patch_stream(6, Vec::new(), [3, 8, 8], patch_decode(), None);
-    assert!(matches!(
-        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&coordinate_width),
-        Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
-            MeshDecoderError::InvalidBitsPerCoordinate { value: 3 }
-        )))
-    ));
+fn undescribed_mesh_packing_decodes_no_records_and_rejects_decode_arity() {
+    let read = |object: &ObjectVariant| {
+        pdf_object_reader::ObjectReader::new(EmptySource)
+            .read::<Shading>(object)
+            .expect("a mesh without usable packing should decode")
+    };
+    let is_empty = |shading: Shading| match shading {
+        Shading::FreeFormTriangleMesh { triangles, .. } => triangles.is_empty(),
+        Shading::PatchMesh { patches, .. } => patches.is_empty(),
+        _ => false,
+    };
 
-    let component_width = patch_stream(6, Vec::new(), [8, 3, 8], patch_decode(), None);
-    assert!(matches!(
-        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&component_width),
-        Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
-            MeshDecoderError::InvalidBitsPerComponent { value: 3 }
-        )))
-    ));
-
-    let flag_width = patch_stream(6, Vec::new(), [8, 8, 1], patch_decode(), None);
-    assert!(matches!(
-        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&flag_width),
-        Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
-            MeshDecoderError::InvalidBitsPerFlag { value: 1 }
-        )))
-    ));
+    // Invalid widths, and a mesh missing its widths and /Decode, have no records.
+    for widths in [[3, 8, 8], [8, 3, 8], [8, 8, 1]] {
+        assert!(is_empty(read(&patch_stream(
+            6,
+            vec![0; 64],
+            widths,
+            patch_decode(),
+            None
+        ))));
+    }
+    for shading_type in [4, 6, 7] {
+        let mut entries = mesh_entries(shading_type, 8, 8, 8, patch_decode());
+        for key in [&b"BitsPerCoordinate"[..], b"BitsPerFlag", b"Decode"] {
+            entries.remove(key);
+        }
+        assert!(is_empty(read(&shading_stream(
+            entries.clone(),
+            vec![0; 64]
+        ))));
+        // A mesh shading must be a stream; a plain dictionary has no records.
+        assert!(is_empty(read(&ObjectVariant::Dictionary(
+            Dictionary::from_iter(entries)
+        ))));
+    }
 
     let short_decode = patch_stream(
         6,

@@ -29,7 +29,10 @@ pub enum FreeFormMeshError {
 impl MeshConfig {
     /// Decodes this Type 4 stream into independent mesh triangles.
     pub(crate) fn free_form_triangle_mesh(self) -> Result<Shading, PdfShadingError> {
-        let triangles = self.decoder("Free-form triangle mesh")?.triangles()?;
+        let triangles = match self.decoder("Free-form triangle mesh")? {
+            Some(decoder) => decoder.triangles()?,
+            None => Vec::new(),
+        };
 
         Ok(Shading::FreeFormTriangleMesh {
             color_space: self.color_space,
