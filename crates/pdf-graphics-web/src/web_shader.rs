@@ -14,7 +14,10 @@ use crate::{
 };
 use num_traits::ToPrimitive;
 use pdf_canvas::{
-    CanvasViewport, canvas_backend::Shader, error::PdfCanvasError, tiling_shader::TilingShader,
+    CanvasViewport,
+    canvas_backend::Shader,
+    error::PdfCanvasError,
+    tiling_shader::{TileRaster, TilingShader, TilingShaderError},
 };
 use pdf_graphics::{rect::Rect, size::Size, transform::Transform};
 use pdf_shading::paint::ShadingPaint;
@@ -31,7 +34,7 @@ impl ShaderRaster {
     pub(crate) fn new(backend: &WebCanvasBackend, shader: &Shader) -> WebResult<Self> {
         match shader {
             Shader::Shading(paint) => Self::shading(backend, paint),
-            Shader::TilingPatternImage(pattern) => PatternTile::new(backend, pattern)?.repeat(),
+            Shader::TilingPatternImage(pattern) => backend.tiling_raster(pattern),
         }
     }
 
@@ -76,31 +79,21 @@ struct PatternTile<'a> {
 }
 
 impl<'a> PatternTile<'a> {
-    fn new(parent: &'a WebCanvasBackend, pattern: &TilingShader) -> WebResult<Self> {
-        let plan = pattern
-            .raster_plan(parent.viewport.device_to_backing())
-            .map_err(PdfCanvasError::from)?;
+    fn new(
+        parent: &'a WebCanvasBackend,
+        pattern: &TilingShader,
+        plan: &TileRaster,
+    ) -> WebResult<Self> {
         let step = pattern.repeat_step();
         let surface = parent.surfaces.acquire(plan.size)?;
-        {
-            let [step_x, step_y] = step;
-            let step_size = Size::new(step_x, step_y);
-            let mut backend = WebCanvasBackend::on_surface(
-                &surface,
-                step_size,
-                plan.cell_to_pixel,
-                parent.surfaces.clone(),
-            )?;
-            // Overlapping cells must retain the order chosen during preparation.
-            for cell_transform in pattern.cell_transforms() {
-                backend.set_mapping(CanvasViewport::with_transform(
-                    step_size,
-                    plan.size,
-                    plan.cell_to_pixel.post_concatenated(cell_transform),
-                )?)?;
-                backend.replay_balanced(pattern.recording())?;
-            }
-        }
+        let [step_x, step_y] = step;
+        parent.replay_cells(
+            &surface,
+            Size::new(step_x, step_y),
+            &plan.cell_to_pixel,
+            pattern,
+            pattern.cell_transforms(),
+        )?;
         Ok(Self {
             parent,
             surface,
@@ -135,6 +128,74 @@ impl<'a> PatternTile<'a> {
         self.parent.surfaces.recycle(self.surface);
         Ok(ShaderRaster { surface: output })
     }
+}
+
+impl WebCanvasBackend {
+    /// Repeats a period raster, unless that raster would hold at least as many pixels
+    /// as the backing store; then the visible cells are replayed in place.
+    fn tiling_raster(&self, pattern: &TilingShader) -> WebResult<ShaderRaster> {
+        let backing = self.viewport.backing_size();
+        match pattern.raster_plan(self.viewport.device_to_backing()) {
+            Ok(plan) if pixel_count(plan.size) < pixel_count(backing) => {
+                PatternTile::new(self, pattern, &plan)?.repeat()
+            }
+            Ok(_) | Err(TilingShaderError::RasterLimit) => self.lattice_raster(pattern),
+            Err(error) => Err(PdfCanvasError::from(error).into()),
+        }
+    }
+
+    /// Replays every cell meeting the backing store directly onto a backing-size surface,
+    /// so no surface larger than the target is needed.
+    fn lattice_raster(&self, pattern: &TilingShader) -> WebResult<ShaderRaster> {
+        let backing = self.viewport.backing_size();
+        let pattern_to_backing = self
+            .viewport
+            .device_to_backing()
+            .post_concatenated(pattern.pattern_transform());
+        let visible = pattern_to_backing.inverse_map_rect(&raster_bounds(backing)?)?;
+        let transforms = pattern
+            .lattice_transforms(&visible)
+            .map_err(PdfCanvasError::from)?;
+        let surface = self.surfaces.acquire(backing)?;
+        self.replay_cells(
+            &surface,
+            self.viewport.device_size(),
+            &pattern_to_backing,
+            pattern,
+            &transforms,
+        )?;
+        Ok(ShaderRaster { surface })
+    }
+
+    /// Replays the cell recording onto `surface` once per cell translation, composed
+    /// after `base`, which maps pattern space into the surface's pixels.
+    ///
+    /// Overlapping cells must retain the order chosen during preparation.
+    fn replay_cells(
+        &self,
+        surface: &Surface,
+        device_size: Size,
+        base: &Transform,
+        pattern: &TilingShader,
+        transforms: &[Transform],
+    ) -> WebResult<()> {
+        let mut backend =
+            WebCanvasBackend::on_surface(surface, device_size, *base, self.surfaces.clone())?;
+        for cell_transform in transforms {
+            backend.set_mapping(CanvasViewport::with_transform(
+                device_size,
+                surface.size(),
+                base.post_concatenated(cell_transform),
+            )?)?;
+            backend.replay_balanced(pattern.recording())?;
+        }
+        Ok(())
+    }
+}
+
+/// Returns the pixel count of a raster, widened so it cannot overflow.
+fn pixel_count(Size { width, height }: Size<u32>) -> u64 {
+    u64::from(width).saturating_mul(u64::from(height))
 }
 
 /// Checked half-open tile ranges and the spacing used to derive them.
