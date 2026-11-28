@@ -29,13 +29,14 @@ pub struct LabColorSpace {
 /// The dictionary must contain a `WhitePoint` entry and may contain `BlackPoint`
 /// and `Range` entries.
 impl FromPdfObject for LabColorSpace {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut dictionary = context.dictionary()?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
         let CieColorSpaceParams {
             white_point,
             black_point,
-        } = dictionary.read(object)?;
+        } = context.reborrow().decode()?;
+        let mut dictionary = context.dictionary()?;
         let range = dictionary
             .optional(b"Range")?
             .unwrap_or([-100.0, 100.0, -100.0, 100.0]);

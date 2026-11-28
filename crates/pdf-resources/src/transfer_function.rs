@@ -71,15 +71,12 @@ impl TransferTable {
 }
 
 impl FromPdfObject for TransferTable {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let object = context.object();
-        match object {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object() {
             ObjectVariant::String(name) if matches!(name.as_bytes(), b"Identity" | b"Default") => {
                 Ok(Self(Self::identity()))
             }
-            _ => Ok(Self::sample(&context.read(object)?)?),
+            _ => Ok(Self::sample(&context.decode()?)?),
         }
     }
 }

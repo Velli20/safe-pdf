@@ -47,9 +47,9 @@ impl FromPdfObject for ColorSpace {
 
         let family = context.read::<Arc<[u8]>>(first)?;
         match &*family {
-            b"Indexed" => context.read(object).map(Arc::new).map(Self::Indexed),
-            b"Separation" => context.read(object).map(Arc::new).map(Self::Separation),
-            b"DeviceN" => context.read(object).map(Arc::new).map(Self::DeviceN),
+            b"Indexed" => context.decode().map(Arc::new).map(Self::Indexed),
+            b"Separation" => context.decode().map(Arc::new).map(Self::Separation),
+            b"DeviceN" => context.decode().map(Arc::new).map(Self::DeviceN),
             // The second element is the underlying color space used with uncolored
             // tiling patterns.
             b"Pattern" => Ok(Self::Pattern(Some(Arc::new(context.array()?.at(1)?)))),

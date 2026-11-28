@@ -57,7 +57,7 @@ impl FromPdfObject for SoftMaskGroup {
                 actual: group.kind(),
             });
         }
-        if let XObjectSubtype::Image = context.read::<XObjectSubtype>(group)? {
+        if let XObjectSubtype::Image = context.reborrow().decode::<XObjectSubtype>()? {
             return Err(PdfPagesError::SoftMaskGroupNotForm.into());
         }
         Ok(Self(context.shared()?))

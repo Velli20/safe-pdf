@@ -50,18 +50,19 @@ impl FromPdfObject for FormGroup {
 }
 
 impl FromPdfObject for FormXObject {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        // Both stream-backed and dictionary-only forms expose the same metadata.
-        let mut context = context.dictionary()?;
-        let content_stream = match object {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let content_stream = match context.object() {
             // Dictionary-only forms still receive an ID, but have no drawing operators.
             ObjectVariant::Dictionary(_) => ContentStream {
                 operators: Vec::new(),
                 id: context.content_stream_ids().next_id()?,
             },
-            _ => context.read::<ContentStream>(object)?,
+            _ => context.reborrow().decode::<ContentStream>()?,
         };
+        // Both stream-backed and dictionary-only forms expose the same metadata.
+        let mut context = context.dictionary()?;
         Ok(Self {
             // A malformed /BBox, or one whose coordinates overflow `f32`, leaves the form
             // unclipped.

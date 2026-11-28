@@ -8,15 +8,17 @@ use pdf_object_reader::{
 };
 
 impl FromPdfObject for WidgetAnnotation {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut dictionary = context.dictionary()?;
-        let field_id = dictionary
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let field_id = context
+            .entries()?
             .reference(b"Parent")
             .map(|parent| u32::try_from(parent.number))
             .transpose()
             .map_err(|_| SourceDecodeError::ResourceLimit)?;
-        let fields: FieldProperties = dictionary.read(object)?;
+        let fields: FieldProperties = context.reborrow().decode()?;
+        let mut dictionary = context.dictionary()?;
 
         Ok(Self {
             field_id,

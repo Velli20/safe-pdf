@@ -58,13 +58,12 @@ impl FromPdfObject for ImageResource {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let object = context.object();
-        let image = match context.read::<PdfImage>(object) {
+        let image = match context.reborrow().decode::<PdfImage>() {
             Ok(image) => image,
             Err(error) if PdfImage::is_unreadable(&error) => return Ok(Self::Unavailable),
             Err(error) => return Err(error),
         };
-        let mask = match context.read(object)? {
+        let mask = match context.reborrow().decode()? {
             SoftMaskImage(Some(soft_mask)) => Some(ImageMask::Soft(soft_mask)),
             SoftMaskImage(None) => context
                 .dictionary()?
@@ -119,14 +118,11 @@ impl ImageMask {
 struct StencilMaskImage(Option<Arc<ImageXObject>>);
 
 impl FromPdfObject for StencilMaskImage {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let value = context.object();
-        if !matches!(value, ObjectVariant::Stream(_)) {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        if !matches!(context.object(), ObjectVariant::Stream(_)) {
             return Ok(Self(None));
         }
-        match context.read::<ImageResource>(value) {
+        match context.decode::<ImageResource>() {
             Ok(ImageResource::Available(mask)) if mask.image.is_image_mask() => {
                 Ok(Self(Some(mask)))
             }

@@ -98,8 +98,7 @@ impl FromPdfObject for ImageMetadata {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let object = context.object();
-        let entries = context.read::<ImageEntries>(object)?;
+        let entries = context.reborrow().decode::<ImageEntries>()?;
         let color_space = match entries.image_mask {
             true => None,
             false => context

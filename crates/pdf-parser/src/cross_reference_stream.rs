@@ -16,9 +16,10 @@ use pdf_object_reader::{
 pub(crate) struct XrefStream(pub(crate) CrossReferenceTable);
 
 impl FromPdfObject for XrefStream {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut stream = context.stream()?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut stream = context.reborrow().stream()?;
         let mut dictionary = stream.dictionary();
         if let Some(type_name) = dictionary.optional::<Arc<[u8]>>(b"Type")?
             && *type_name != *b"XRef"
@@ -53,7 +54,7 @@ impl FromPdfObject for XrefStream {
                 .into(),
             });
         };
-        let DecodedStream(data) = stream.read(object)?;
+        let DecodedStream(data) = context.decode()?;
         let mut decoder = XrefStreamEntryDecoder::new(&data, layout);
         let mut entries = BTreeMap::new();
         for &[start, count] in subsections {

@@ -38,15 +38,14 @@ impl FromPdfObject for Resource {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let value = context.object();
-        let subtype = match value {
-            ObjectVariant::Stream(_) => Some(context.read::<XObjectSubtype>(value)?),
-            _ => context.read::<XObjectSubtype>(value).ok(),
+        let subtype = match context.object() {
+            ObjectVariant::Stream(_) => Some(context.reborrow().decode::<XObjectSubtype>()?),
+            _ => context.reborrow().decode::<XObjectSubtype>().ok(),
         };
         match subtype {
-            None => context.read::<FontResource>(value).map(Self::from),
-            Some(XObjectSubtype::Form) => context.read::<FormXObject>(value).map(Self::from),
-            Some(XObjectSubtype::Image) => context.read::<ImageResource>(value).map(Self::from),
+            None => context.decode::<FontResource>().map(Self::from),
+            Some(XObjectSubtype::Form) => context.decode::<FormXObject>().map(Self::from),
+            Some(XObjectSubtype::Image) => context.decode::<ImageResource>().map(Self::from),
         }
     }
 }

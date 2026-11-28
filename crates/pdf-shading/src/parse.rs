@@ -14,27 +14,33 @@ use crate::{
 };
 
 impl FromPdfObject for Shading {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut context = context.dictionary()?;
-        let shading = match context.required::<ShadingType>(b"ShadingType")? {
-            ShadingType::FunctionBased => Shading::FunctionBased(context.read(object)?),
-            ShadingType::Axial => Shading::Axial {
-                coords: context.required(b"Coords")?,
-                gradient: context.read(object)?,
-            },
-            ShadingType::Radial => Shading::Radial {
-                coords: context.required(b"Coords")?,
-                gradient: context.read(object)?,
-            },
-            ShadingType::FreeFormTriangleMesh => context
-                .read::<MeshConfig>(object)?
-                .free_form_triangle_mesh()?,
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let shading = match context.entries()?.required::<ShadingType>(b"ShadingType")? {
+            ShadingType::FunctionBased => Shading::FunctionBased(context.decode()?),
+            ShadingType::Axial => {
+                let coords = context.entries()?.required(b"Coords")?;
+                Shading::Axial {
+                    coords,
+                    gradient: context.decode()?,
+                }
+            }
+            ShadingType::Radial => {
+                let coords = context.entries()?.required(b"Coords")?;
+                Shading::Radial {
+                    coords,
+                    gradient: context.decode()?,
+                }
+            }
+            ShadingType::FreeFormTriangleMesh => {
+                context.decode::<MeshConfig>()?.free_form_triangle_mesh()?
+            }
             ShadingType::CoonsPatchMesh => context
-                .read::<MeshConfig>(object)?
+                .decode::<MeshConfig>()?
                 .patch_mesh(PatchKind::Coons)?,
             ShadingType::TensorProductPatchMesh => context
-                .read::<MeshConfig>(object)?
+                .decode::<MeshConfig>()?
                 .patch_mesh(PatchKind::Tensor)?,
             unsupported @ ShadingType::LatticeFormTriangleMesh => Shading::Unsupported(unsupported),
         };
