@@ -1150,7 +1150,7 @@ fn test_stream_with_compressed_indirect_length_resolves() {
 }
 
 #[test]
-fn test_unresolvable_reference_returns_error() {
+fn test_unresolvable_length_reference_reads_to_endstream() {
     let mut data = Vec::new();
     data.extend_from_slice(b"%PDF-1.7\n");
 
@@ -1178,13 +1178,12 @@ fn test_unresolvable_reference_returns_error() {
 
     let reader = PdfReader;
     let result = reader.read_from_bytes(data, None);
-    assert!(matches!(
-        result,
-        Err(PdfReaderError::UnresolvedObjects {
-            count: 1,
-            first_offset,
-        }) if first_offset == obj4_offset
-    ));
+    assert!(
+        result.is_ok(),
+        "stream with unresolvable /Length should read to endstream: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap().page_count(), 0);
 }
 
 #[test]
