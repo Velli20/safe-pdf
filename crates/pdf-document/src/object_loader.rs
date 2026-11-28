@@ -11,6 +11,11 @@
 //! This avoids rescanning the entire xref table after every successful load. A
 //! deferred object is retried only when the exact object number it needs becomes
 //! available.
+//!
+//! A dependency that never loads does not fail the read. Once no other work
+//! remains, a stream still waiting for its `/Length` is parsed up to its
+//! `endstream` keyword instead, and the members of an object stream that never
+//! loaded are reported as diagnostics and stay absent.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
@@ -115,24 +120,27 @@ impl DeferredObjects {
         self.offsets_by_dependency.remove(&object_number)
     }
 
-    /// Builds the deterministic terminal error for dependencies that never loaded.
-    fn unresolved_error(&self) -> Option<PdfReaderError> {
-        let first_offset = self
+    /// Removes every parked offset, in ascending order, whatever it waits for.
+    fn release_all(&mut self) -> Vec<usize> {
+        let mut offsets = self
             .offsets_by_dependency
-            .values()
-            .flatten()
-            .copied()
-            .min()?;
-        let count = self
-            .offsets_by_dependency
-            .values()
-            .map(Vec::len)
-            .fold(0usize, usize::saturating_add);
-        Some(PdfReaderError::UnresolvedObjects {
-            count,
-            first_offset,
-        })
+            .drain()
+            .flat_map(|(_, offsets)| offsets)
+            .collect::<Vec<_>>();
+        offsets.sort_unstable();
+        offsets
     }
+}
+
+/// How the body of a stream object is delimited.
+#[derive(Clone, Copy)]
+enum StreamBound {
+    /// The stream's `/Length` gives the body length; an unloaded indirect
+    /// `/Length` defers the object until that object loads.
+    Declared,
+    /// The body ends at the `endstream` keyword, used once the `/Length`
+    /// object is known never to load.
+    EndKeyword,
 }
 
 /// A unit of work whose prerequisites are currently available.
@@ -141,6 +149,8 @@ enum ObjectLoadTask {
     Normal {
         /// Absolute byte offset within the PDF input.
         byte_offset: usize,
+        /// How a stream body at this offset is delimited.
+        bound: StreamBound,
     },
     /// Parses one object stream and materializes its requested members.
     CompressedStream {
@@ -162,6 +172,8 @@ struct ObjectLoadQueue {
     ready_streams: VecDeque<(usize, CompressedStreamPlan)>,
     /// Normal objects blocked on an unavailable indirect object.
     deferred_objects: DeferredObjects,
+    /// Released normal objects whose `/Length` never loaded, parsed to `endstream`.
+    unbounded_objects: VecDeque<usize>,
     /// Compressed-stream plans waiting for their containing stream object.
     pending_streams: BTreeMap<usize, CompressedStreamPlan>,
 }
@@ -180,10 +192,15 @@ impl ObjectLoadQueue {
     ///
     /// Normal objects take priority so an object stream is not parsed before all
     /// immediately available indirect values in its dictionary have been loaded.
+    /// Deferred objects are released to the `endstream` scan only once nothing
+    /// else can run, because then their dependencies can no longer load.
     fn next_task(&mut self) -> Option<ObjectLoadTask> {
         loop {
             if let Some(byte_offset) = self.normal_objects.pop_front() {
-                return Some(ObjectLoadTask::Normal { byte_offset });
+                return Some(ObjectLoadTask::Normal {
+                    byte_offset,
+                    bound: StreamBound::Declared,
+                });
             }
             if let Some(object_number) = self.available_objects.pop_front() {
                 self.wake_dependents(object_number);
@@ -195,7 +212,17 @@ impl ObjectLoadQueue {
                     plan,
                 });
             }
-            return None;
+            if let Some(byte_offset) = self.unbounded_objects.pop_front() {
+                return Some(ObjectLoadTask::Normal {
+                    byte_offset,
+                    bound: StreamBound::EndKeyword,
+                });
+            }
+            let released = self.deferred_objects.release_all();
+            if released.is_empty() {
+                return None;
+            }
+            self.unbounded_objects.extend(released);
         }
     }
 
@@ -224,21 +251,9 @@ impl ObjectLoadQueue {
         }
     }
 
-    /// Reports work that could not be scheduled after all ready queues were drained.
-    ///
-    /// Unresolved normal objects take precedence over missing object streams,
-    /// matching the loader's normal-before-compressed processing order.
-    fn terminal_error(&self) -> Option<PdfReaderError> {
-        self.deferred_objects.unresolved_error().or_else(|| {
-            self.pending_streams
-                .first_key_value()
-                .map(|(&object_stream_number, _)| {
-                    ObjectError::FailedResolveObjectReference {
-                        obj_num: object_stream_number,
-                    }
-                    .into()
-                })
-        })
+    /// Removes the plans of object streams that never loaded, once all work is drained.
+    fn take_unloaded_streams(&mut self) -> BTreeMap<usize, CompressedStreamPlan> {
+        std::mem::take(&mut self.pending_streams)
     }
 }
 
@@ -286,15 +301,16 @@ impl<'loader> ObjectLoader<'loader> {
     ///
     /// Each task either inserts objects, defers a normal object on a precise
     /// dependency, records a recoverable diagnostic, or returns a fatal error.
-    /// Once no task remains, unresolved dependencies become a terminal error.
+    /// Once no task remains, the members of object streams that never loaded
+    /// are reported as diagnostics.
     pub(super) fn load(mut self) -> Result<ObjectCollection, PdfReaderError> {
         let mut queue = std::mem::take(&mut self.queue);
         while let Some(task) = queue.next_task() {
             self.execute_task(task, &mut queue)?;
         }
 
-        if let Some(error) = queue.terminal_error() {
-            return Err(error);
+        for plan in queue.take_unloaded_streams().into_values() {
+            self.report_missing_members(plan);
         }
         Ok(self.objects)
     }
@@ -306,7 +322,9 @@ impl<'loader> ObjectLoader<'loader> {
         queue: &mut ObjectLoadQueue,
     ) -> Result<(), PdfReaderError> {
         match task {
-            ObjectLoadTask::Normal { byte_offset } => self.load_normal_object(byte_offset, queue),
+            ObjectLoadTask::Normal { byte_offset, bound } => {
+                self.load_normal_object(byte_offset, bound, queue)
+            }
             ObjectLoadTask::CompressedStream {
                 object_stream_number,
                 plan,
@@ -322,9 +340,10 @@ impl<'loader> ObjectLoader<'loader> {
     fn load_normal_object(
         &mut self,
         byte_offset: usize,
+        bound: StreamBound,
         queue: &mut ObjectLoadQueue,
     ) -> Result<(), PdfReaderError> {
-        match self.load_object(byte_offset) {
+        match self.load_object(byte_offset, bound) {
             Ok(Some(object_number)) => {
                 queue.mark_available(object_number);
                 Ok(())
@@ -363,7 +382,11 @@ impl<'loader> ObjectLoader<'loader> {
     /// The returned object number is used to wake dependent work. `None` means
     /// that parsing was intentionally skipped after a recoverable decryption
     /// failure or that the parsed value did not insert an addressable object.
-    fn load_object(&mut self, byte_offset: usize) -> Result<Option<usize>, PdfReaderError> {
+    fn load_object(
+        &mut self,
+        byte_offset: usize,
+        bound: StreamBound,
+    ) -> Result<Option<usize>, PdfReaderError> {
         let mut parser = PdfParser::from(self.input.as_ref())
             .at_offset(byte_offset)
             .map_err(PdfReaderError::from)?;
@@ -375,7 +398,10 @@ impl<'loader> ObjectLoader<'loader> {
         let object = match parser.parse_indirect_object_value(identifier)? {
             IndirectValue::Object(object) => object,
             IndirectValue::Stream(header) => {
-                let length = self.stream_length(&header)?;
+                let length = match bound {
+                    StreamBound::Declared => self.stream_length(&header)?,
+                    StreamBound::EndKeyword => None,
+                };
                 let body = parser.recover_stream_body(length)?;
                 header.into_stream_in(self.input, body)?
             }
@@ -398,7 +424,8 @@ impl<'loader> ObjectLoader<'loader> {
     /// Reads a stream's `/Length` hint.
     ///
     /// A reference may name an object loaded earlier. One that is not loaded yet fails
-    /// the parse, so the object is retried once that object has been loaded.
+    /// the parse, so the object is retried once that object has been loaded, or with
+    /// [`StreamBound::EndKeyword`] once it is known never to load.
     fn stream_length(&self, header: &StreamHeader) -> Result<Option<usize>, ParserError> {
         let Some(length) = header.length() else {
             return Ok(None);
@@ -490,6 +517,7 @@ impl<'loader> ObjectLoader<'loader> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
 
@@ -514,21 +542,39 @@ mod tests {
         );
     }
 
+    /// Streams whose `/Length` names a free object, or a member of an object
+    /// stream that does not exist, are read up to `endstream`.
     #[test]
-    fn unresolved_error_is_deterministic_across_dependencies() {
-        let mut deferred = DeferredObjects::default();
-        deferred.wait_for(9, 80);
-        deferred.wait_for(9, 20);
-        deferred.wait_for(4, 50);
+    fn unloadable_length_reads_stream_to_endstream() {
+        let input = Bytes::from_static(
+            b"%PDF-1.7\n4 0 obj\n<< /Length 5 0 R >>\nstream\nHello\nendstream\nendobj\n\
+              6 0 obj\n<< /Length 7 0 R >>\nstream\nWorld\nendstream\nendobj\n",
+        );
+        let entries = BTreeMap::from([
+            (4, CrossReferenceEntryType::new_normal(9, 0)),
+            (5, CrossReferenceEntryType::new_free(0, 65_535)),
+            (6, CrossReferenceEntryType::new_normal(67, 0)),
+            (7, CrossReferenceEntryType::new_compressed(9)),
+        ]);
+        let mut diagnostics = Vec::new();
 
-        let error = deferred.unresolved_error();
+        let objects = ObjectLoader::new(&entries, &input, None, &mut diagnostics)
+            .load()
+            .unwrap();
 
+        for (number, body) in [(4, b"Hello"), (6, b"World")] {
+            let Some(ObjectVariant::Stream(stream)) = objects.get(number) else {
+                panic!("object {number} should be a stream");
+            };
+            assert_eq!(stream.raw_data(), body);
+        }
         assert!(matches!(
-            error,
-            Some(PdfReaderError::UnresolvedObjects {
-                count: 3,
-                first_offset: 20
-            })
+            diagnostics.as_slice(),
+            [PdfReadDiagnostic {
+                kind: PdfReadDiagnosticKind::CompressedObject,
+                object: Some(ObjectId { number: 7, .. }),
+                ..
+            }]
         ));
     }
 }

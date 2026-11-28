@@ -36,8 +36,6 @@ pub enum PdfReaderError {
     DecryptionSetup(String),
     #[error("missing document ID required for encryption")]
     MissingDocumentId,
-    #[error("failed to resolve {count} object(s); first unresolved at byte offset {first_offset}")]
-    UnresolvedObjects { count: usize, first_offset: usize },
 }
 
 impl PdfReaderError {
