@@ -131,9 +131,9 @@ impl ColorSpace {
 
     /// Converts the operands of a color operator (`SC`, `SCN`, `sc`, `scn`) to a color.
     ///
-    /// In a device space the number of operands selects gray, RGB or CMYK, because
-    /// malformed content streams set colors of a device space other than the current one.
-    /// Every other space is as strict as [`Self::apply`].
+    /// In a device space operands beyond the space's component count are ignored, so the
+    /// space stays selected. Only when there are too few for it does their number select
+    /// gray, RGB or CMYK. Every other space is as strict as [`Self::apply`].
     ///
     /// # Errors
     ///
@@ -142,11 +142,12 @@ impl ColorSpace {
         if !self.is_device_space() {
             return self.apply(operands);
         }
-        Color::from_device_components(operands).ok_or_else(|| {
-            ColorSpaceError::ComponentCountMismatch {
-                expected: self.num_color_components(),
-                found: operands.len(),
-            }
+        let own = operands
+            .get(..self.num_color_components())
+            .unwrap_or(operands);
+        Color::from_device_components(own).ok_or_else(|| ColorSpaceError::ComponentCountMismatch {
+            expected: self.num_color_components(),
+            found: operands.len(),
         })
     }
 

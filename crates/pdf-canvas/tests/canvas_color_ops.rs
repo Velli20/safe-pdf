@@ -24,15 +24,12 @@ fn render(data: &[u8]) -> Result<RecordingCanvas, PdfCanvasError> {
 }
 
 #[test]
-fn default_device_gray_scn_with_three_components_falls_back_to_rgb() {
+fn default_device_gray_scn_ignores_extra_components() {
     let recording =
-        render(b"0.294118 0.019608 0.196078 scn 0 0 1 1 re f").expect("RGB fallback should render");
+        render(b"0.294118 0.019608 0.196078 scn 0 0 1 1 re f").expect("gray color should render");
 
     let observer = replay(&recording);
-    assert_eq!(
-        observer.fill_colors,
-        vec![Color::from_rgb(0.294_118, 0.019_608, 0.196_078)]
-    );
+    assert_eq!(observer.fill_colors, vec![Color::from_gray(0.294_118)]);
 }
 
 #[test]
@@ -47,10 +44,10 @@ fn device_rgb_scn_with_three_components_still_uses_active_space() {
 #[test]
 fn invalid_generic_operand_count_still_returns_component_error() {
     assert!(matches!(
-        render(b"0.2 0.4 scn"),
+        render(b"/DeviceRGB cs 0.2 0.4 scn"),
         Err(PdfCanvasError::ColorSpaceError(
             ColorSpaceError::ComponentCountMismatch {
-                expected: 1,
+                expected: 3,
                 found: 2
             }
         ))
