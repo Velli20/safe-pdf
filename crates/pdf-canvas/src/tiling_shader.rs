@@ -76,8 +76,8 @@ pub struct TilingShader {
     recording: Arc<RecordingCanvas>,
     /// Mapping from pattern space to logical device space, before backend replay scaling.
     pattern_transform: Transform,
-    /// Positive horizontal and vertical repeat periods in pattern-space units.
-    repeat_step: [f32; 2],
+    /// Cell bounds and positive repeat periods in pattern-space units.
+    lattice: Lattice,
     /// Translations of intersecting cells, ordered by ascending row and then column.
     cell_transforms: Arc<[Transform]>,
 }
@@ -108,34 +108,24 @@ impl TilingShader {
         }
         pattern_transform.try_inverse()?;
 
-        let repeat_step = step.map(f32::abs);
-        let [x_step, y_step] = repeat_step;
-        let x_axis = RepeatAxis::new(cell_bounds.left, cell_bounds.right, x_step)?;
-        let y_axis = RepeatAxis::new(cell_bounds.top, cell_bounds.bottom, y_step)?;
-        // Limit all candidates, not just cells surviving the intersection test, so
-        // sparse patterns cannot force unbounded work for a small output.
-        if x_axis.candidate_count() * y_axis.candidate_count() > MAX_CELL_CANDIDATES {
-            return Err(TilingShaderError::ReplayLimitExceeded);
-        }
-
-        // Row-major traversal defines the compositing order for overlapping cells.
-        // Strict comparisons exclude cells that only touch an edge of the period.
-        let cell_transforms = y_axis
-            .offsets()
-            .flat_map(|y| x_axis.offsets().map(move |x| (x, y)))
-            .filter(|&(x, y)| {
-                cell_bounds.right + x > 0.0
-                    && cell_bounds.bottom + y > 0.0
-                    && cell_bounds.left + x < x_step
-                    && cell_bounds.top + y < y_step
-            })
-            .map(|(x, y)| Transform::from_translate(x, y))
-            .collect();
+        let lattice = Lattice {
+            cell_bounds,
+            step: step.map(f32::abs),
+        };
+        let [x_step, y_step] = lattice.step;
+        let cell_transforms = lattice
+            .cells_meeting(&Rect {
+                left: 0.0,
+                top: 0.0,
+                right: x_step,
+                bottom: y_step,
+            })?
+            .into();
 
         let shader = Self {
             recording,
             pattern_transform,
-            repeat_step,
+            lattice,
             cell_transforms,
         };
         if shader.replay_cost() > MAX_REPLAY_COST {
@@ -163,7 +153,7 @@ impl TilingShader {
 
     /// Returns the positive horizontal and vertical repeat periods in pattern space.
     pub fn repeat_step(&self) -> [f32; 2] {
-        self.repeat_step
+        self.lattice.step
     }
 
     /// Plans a period raster for a target whose logical device maps to backing pixels
@@ -177,7 +167,7 @@ impl TilingShader {
     ) -> Result<TileRaster, TilingShaderError> {
         let pattern_to_backing = device_to_backing.post_concatenated(&self.pattern_transform);
         pattern_to_backing.try_inverse()?;
-        let [step_x, step_y] = self.repeat_step;
+        let [step_x, step_y] = self.lattice.step;
         let period = Size::new(step_x, step_y);
         let size = pattern_to_backing
             .map_edge_lengths(period)
@@ -197,6 +187,81 @@ impl TilingShader {
     /// differently when reordered. Cells only touching the period's edge are omitted.
     pub fn cell_transforms(&self) -> &[Transform] {
         &self.cell_transforms
+    }
+
+    /// Returns pattern-space translations of every lattice cell meeting `visible`, in
+    /// ascending row-major replay order.
+    ///
+    /// Backends that skip the period raster replay the cell recording once per
+    /// translation, directly onto a target whose visible area maps to `visible` in
+    /// pattern space. The order matches [`Self::cell_transforms`], so overlapping cells
+    /// composite as they do in a period raster.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TilingShaderError::ReplayLimitExceeded`] if enumeration requires more
+    /// than 4,096 candidates, replaying the cells exceeds the replay work limit, or a
+    /// cell index or offset cannot be represented faithfully.
+    pub fn lattice_transforms(&self, visible: &Rect) -> Result<Vec<Transform>, TilingShaderError> {
+        let transforms = self.lattice.cells_meeting(visible)?;
+        if self
+            .recording
+            .replay_cost()
+            .saturating_mul(transforms.len())
+            > MAX_REPLAY_COST
+        {
+            return Err(TilingShaderError::ReplayLimitExceeded);
+        }
+        Ok(transforms)
+    }
+}
+
+/// Validated cell bounds repeated at positive periods along both pattern-space axes.
+#[derive(Clone, Copy)]
+struct Lattice {
+    /// Pattern-space bounds of the cell at the lattice origin.
+    cell_bounds: Rect,
+    /// Positive horizontal and vertical repeat periods.
+    step: [f32; 2],
+}
+
+impl Lattice {
+    /// Returns translations of the cells whose interiors meet `window`, ordered by
+    /// ascending row and then column.
+    ///
+    /// Row-major traversal defines the compositing order for overlapping cells. Strict
+    /// comparisons exclude cells that only touch an edge of the window.
+    fn cells_meeting(&self, window: &Rect) -> Result<Vec<Transform>, TilingShaderError> {
+        let bounds = self.cell_bounds;
+        let [x_step, y_step] = self.step;
+        let x_axis = RepeatAxis::new(
+            bounds.left,
+            bounds.right,
+            x_step,
+            [window.left, window.right],
+        )?;
+        let y_axis = RepeatAxis::new(
+            bounds.top,
+            bounds.bottom,
+            y_step,
+            [window.top, window.bottom],
+        )?;
+        // Limit all candidates, not just cells surviving the intersection test, so
+        // sparse patterns cannot force unbounded work for a small output.
+        if x_axis.candidate_count() * y_axis.candidate_count() > MAX_CELL_CANDIDATES {
+            return Err(TilingShaderError::ReplayLimitExceeded);
+        }
+        Ok(y_axis
+            .offsets()
+            .flat_map(|y| x_axis.offsets().map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                bounds.right + x > window.left
+                    && bounds.bottom + y > window.top
+                    && bounds.left + x < window.right
+                    && bounds.top + y < window.bottom
+            })
+            .map(|(x, y)| Transform::from_translate(x, y))
+            .collect())
     }
 }
 
@@ -220,13 +285,19 @@ struct RepeatAxis {
 }
 
 impl RepeatAxis {
-    /// Bounds candidates for a validated cell interval and positive finite period.
-    fn new(lower: f32, upper: f32, period: f32) -> Result<Self, TilingShaderError> {
-        // A translated interval intersects [0, period] when its upper edge exceeds
-        // zero and its lower edge precedes period. Keep one extra candidate beyond
+    /// Bounds candidates for a validated cell interval and positive finite period
+    /// whose translates may meet the window `[start, end]`.
+    fn new(
+        lower: f32,
+        upper: f32,
+        period: f32,
+        [start, end]: [f32; 2],
+    ) -> Result<Self, TilingShaderError> {
+        // A translated interval intersects [start, end] when its upper edge exceeds
+        // start and its lower edge precedes end. Keep one extra candidate beyond
         // each rounded bound; the intersection test removes boundary-only cells.
-        let first = (-upper / period).floor() - 1.0;
-        let last = ((period - lower) / period).ceil() + 1.0;
+        let first = ((start - upper) / period).floor() - 1.0;
+        let last = ((end - lower) / period).ceil() + 1.0;
         // Indices beyond exact integer range would collapse distinct cells onto one
         // origin. Offsets grow monotonically, so finite endpoints bound every offset.
         let representable =
@@ -271,6 +342,25 @@ mod tests {
         assert_eq!(shader.repeat_step(), [4.0, 4.0]);
         assert_eq!(*shader.pattern_transform(), Transform::identity());
         assert_eq!(shader.cell_transforms().len(), 2);
+    }
+
+    #[test]
+    fn tiling_shader_replays_only_visible_cells_of_large_periods() {
+        let image = Arc::new(RecordingCanvas::new(3950.0, 350.0));
+        let shader = TilingShader::new(
+            image,
+            Transform::identity(),
+            Rect::new(3950.0, 350.0),
+            [90_000.0, 90_000.0],
+        )
+        .unwrap();
+
+        assert_eq!(
+            shader
+                .lattice_transforms(&Rect::new(4000.0, 400.0))
+                .unwrap(),
+            [Transform::identity()]
+        );
     }
 
     #[test]
