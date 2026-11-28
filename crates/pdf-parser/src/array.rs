@@ -11,6 +11,9 @@ impl PdfParser<'_> {
     /// An `Array` object containing the parsed PDF objects as its elements,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid object syntax within the array, or an unexpected token).
+    ///
+    /// An array that is still open when its enclosing dictionary's `>>` arrives ends
+    /// there, leaving `>>` to close the dictionary.
     pub fn parse_array(&mut self) -> Result<PdfArray, ParserError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
         self.skip_whitespace_and_comments();
@@ -21,6 +24,7 @@ impl PdfParser<'_> {
 
             match self.tokenizer.peek() {
                 Some(PdfToken::RightSquareBracket) => break,
+                Some(PdfToken::DoubleRightAngleBracket) => return Ok(PdfArray::from(values)),
                 Some(_) => values.push(self.parse_object()?),
                 None => break,
             };
