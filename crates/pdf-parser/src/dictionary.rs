@@ -27,13 +27,16 @@ impl PdfParser<'_> {
 
         let dictionary = self.parse_dictionary_entries()?;
 
-        // Consume the closing `>>` of the dictionary.
-        self.tokenizer.expect(PdfToken::DoubleRightAngleBracket)?;
+        // Consume the closing `>>` of the dictionary. A dictionary that runs into its
+        // object's `endobj` is closed there, leaving the keyword to the object parser.
+        if !self.is_at_endobj() {
+            self.tokenizer.expect(PdfToken::DoubleRightAngleBracket)?;
+        }
 
         Ok(dictionary)
     }
 
-    /// Parses the key-value pairs inside a regular dictionary until `>>`.
+    /// Parses the key-value pairs inside a regular dictionary until `>>` or `endobj`.
     fn parse_dictionary_entries(&mut self) -> Result<Dictionary, ParserError> {
         let mut dictionary = Dictionary::default();
         let mut state = DictionaryEntryState::ExpectKeyOrTerminator;
@@ -167,12 +170,13 @@ impl PdfParser<'_> {
         Ok(DictionaryEntryState::ContinueNameValue { key, value })
     }
 
-    /// Returns `true` when the next token closes the current dictionary.
+    /// Returns `true` when the next token closes the current dictionary: `>>`, or the
+    /// `endobj` of an object whose dictionary was never closed.
     fn is_at_dictionary_end(&mut self) -> bool {
         matches!(
             self.tokenizer.peek(),
             Some(PdfToken::DoubleRightAngleBracket)
-        )
+        ) || self.is_at_endobj()
     }
 }
 

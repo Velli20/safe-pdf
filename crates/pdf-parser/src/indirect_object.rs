@@ -117,6 +117,11 @@ impl PdfParser<'_> {
         self.parse_indirect_object_id_at(offset).is_some()
     }
 
+    /// Returns whether the current input begins with the `endobj` keyword.
+    pub(crate) fn is_at_endobj(&self) -> bool {
+        starts_with_boundary_keyword(self.tokenizer.data(), ENDOBJ_KEYWORD)
+    }
+
     /// Returns whether the current input can terminate an object with an omitted `endobj`.
     fn is_at_implicit_endobj_boundary(&self) -> bool {
         let data = self.tokenizer.data();
@@ -242,8 +247,8 @@ impl PdfParser<'_> {
     /// Locates a stream body using `length` only as a hint, then reads `endobj`.
     ///
     /// A declared boundary is used when it is structurally valid; a missing, stale, or
-    /// otherwise incorrect one falls back to a bounded `endstream` search, as described
-    /// by [`Self::recover_stream_range`].
+    /// otherwise incorrect one falls back to the first `endstream` followed by `endobj`,
+    /// as described by [`Self::recover_stream_range`].
     ///
     /// # Errors
     ///

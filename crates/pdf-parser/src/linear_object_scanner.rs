@@ -16,7 +16,9 @@
 //! replace earlier ones, matching the usual incremental-update semantics. Likewise,
 //! the last successfully parsed trailer that directly contains `/Root` is retained.
 //! Cross-reference stream dictionaries (`/Type /XRef`) count as trailers too, since
-//! files that use them have no `trailer` keyword; their stream data is not decoded.
+//! files that use them have no `trailer` keyword. Their decoded entries supply the
+//! objects stored in object streams, which a byte scan cannot see; their byte offsets
+//! are not trusted, since the scan has located every object it can parse directly.
 //! Recovery succeeds only when that root reference names an object discovered by the
 //! scan. These checks reduce false positives, but arbitrary byte scanning is inherently
 //! less authoritative than a valid cross-reference section; callers should enter this
@@ -24,19 +26,21 @@
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
 use pdf_object_reader::{
     EmptySource, ObjectReader,
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_id::ObjectId,
-    object_variant::ObjectVariant,
     pdf_name::PdfName,
     trailer::Trailer,
 };
 
-use crate::{error::ParserError, parser::PdfParser};
+use crate::{
+    cross_reference_stream::XrefStream, error::ParserError, indirect_object::IndirectValue,
+    parser::PdfParser,
+};
 
 const TRAILER_KEYWORD: &[u8] = b"trailer";
-const STREAM_KEYWORD: &[u8] = b"stream";
 
 /// A complete top-level construct accepted by a recovery probe.
 ///
@@ -46,11 +50,12 @@ const STREAM_KEYWORD: &[u8] = b"stream";
 enum ScanCandidate {
     /// An indirect object declaration and the generation recorded in its header.
     ///
-    /// `trailer` holds the dictionary of a rooted cross-reference stream object.
+    /// `xref_stream` holds a rooted cross-reference stream object: its dictionary as the
+    /// trailer, with the entries its data decodes to, or none when it cannot be decoded.
     IndirectObject {
         object_number: usize,
         generation_number: usize,
-        trailer: Option<Trailer>,
+        xref_stream: Option<CrossReferenceTable>,
     },
     /// A trailer dictionary that directly exposes the document catalog through `/Root`.
     Trailer(Trailer),
@@ -90,9 +95,10 @@ impl<'input> LinearObjectScanner<'input> {
     /// discoverable.
     ///
     /// Inserting entries in byte order means the newest complete declaration of an
-    /// object number wins. The same rule retains the newest rooted trailer. A table is
-    /// returned only if at least one object was found and the retained trailer's `/Root`
-    /// points to one of those objects.
+    /// object number wins. The same rule retains the newest rooted trailer. Compressed
+    /// entries of rooted cross-reference streams are added last, for object numbers the
+    /// scan did not find. A table is returned only if at least one object was found and
+    /// the retained trailer's `/Root` points to one of those objects.
     ///
     /// # Errors
     ///
@@ -101,6 +107,7 @@ impl<'input> LinearObjectScanner<'input> {
     /// accepted candidate reports an invalid end position.
     pub(crate) fn scan(&self) -> Result<CrossReferenceTable, ParserError> {
         let mut objects = BTreeMap::new();
+        let mut compressed = BTreeMap::new();
         let mut trailer = None;
         let mut scanner = self.parser.at_offset(0)?;
 
@@ -129,7 +136,7 @@ impl<'input> LinearObjectScanner<'input> {
                 ScanCandidate::IndirectObject {
                     object_number,
                     generation_number,
-                    trailer: stream_trailer,
+                    xref_stream,
                 } => {
                     // BTreeMap::insert replaces an older declaration of the same object
                     // number, which models incremental updates encountered in file order.
@@ -137,8 +144,11 @@ impl<'input> LinearObjectScanner<'input> {
                         object_number,
                         CrossReferenceEntryType::new_normal(position, generation_number),
                     );
-                    if stream_trailer.is_some() {
-                        trailer = stream_trailer;
+                    if let Some(xref_stream) = xref_stream {
+                        compressed.extend(xref_stream.entries.into_iter().filter(|(_, entry)| {
+                            matches!(entry, CrossReferenceEntryType::Compressed { .. })
+                        }));
+                        trailer = Some(xref_stream.trailer);
                     }
                 }
                 // Later rooted trailers supersede earlier revisions.
@@ -150,6 +160,10 @@ impl<'input> LinearObjectScanner<'input> {
         }
 
         let trailer = trailer.ok_or(ParserError::MissingStartXref)?;
+        // An object declared directly in the file is authoritative over the index.
+        for (object_number, entry) in compressed {
+            let _ = objects.entry(object_number).or_insert(entry);
+        }
         let table = CrossReferenceTable::new(objects, trailer);
         // Merely finding a `/Root` key is insufficient: arbitrary stream bytes can
         // resemble a trailer. Requiring its referenced object number to have a complete
@@ -188,12 +202,12 @@ impl<'input> LinearObjectScanner<'input> {
     /// value existed solely to prove the declaration's extent and structural validity.
     fn indirect_object_at(&self, position: usize) -> Option<(ScanCandidate, usize)> {
         let mut probe = self.parser.at_offset(position).ok()?;
-        let (identifier, trailer) = self.scan_indirect_object(&mut probe).ok()?;
+        let (identifier, xref_stream) = self.scan_indirect_object(&mut probe).ok()?;
         Some((
             ScanCandidate::IndirectObject {
                 object_number: identifier.number,
                 generation_number: identifier.generation,
-                trailer,
+                xref_stream,
             },
             probe.position(),
         ))
@@ -202,16 +216,15 @@ impl<'input> LinearObjectScanner<'input> {
     /// Parses one indirect object far enough to determine its complete byte extent.
     ///
     /// The cross-reference table does not exist yet, so the builder's objects are empty
-    /// and references are not followed. For stream objects, the value must be a
-    /// dictionary and [`PdfParser::recover_stream_range`] locates the containing
-    /// `endstream`, using only a direct `/Length` as its hint. Stream objects
-    /// require an explicit `endobj`, preventing recovered stream terminators from
-    /// swallowing or manufacturing adjacent objects. Non-stream objects retain the
-    /// parser's narrowly defined implicit-`endobj` recovery behavior.
+    /// and references are not followed. A stream's body is located by
+    /// [`PdfParser::recover_stream_body`], using only a direct `/Length` as its hint.
+    /// Stream objects require an explicit `endobj`, preventing recovered stream
+    /// terminators from swallowing or manufacturing adjacent objects. Non-stream objects
+    /// retain the parser's narrowly defined implicit-`endobj` recovery behavior.
     ///
-    /// A stream whose dictionary has `/Type /XRef` and a direct `/Root` also yields
-    /// that dictionary as a trailer, since cross-reference stream files have no
-    /// `trailer` keyword.
+    /// A stream whose dictionary has `/Type /XRef` and a direct `/Root` also yields the
+    /// table it decodes to, since cross-reference stream files have no `trailer` keyword.
+    /// A stream that cannot be decoded yields its dictionary as the trailer alone.
     ///
     /// On success `probe` points immediately after the object terminator.
     ///
@@ -222,36 +235,45 @@ impl<'input> LinearObjectScanner<'input> {
     fn scan_indirect_object(
         &self,
         probe: &mut PdfParser<'input>,
-    ) -> Result<(ObjectId, Option<Trailer>), ParserError> {
+    ) -> Result<(ObjectId, Option<CrossReferenceTable>), ParserError> {
         let object_start = probe.position();
         let identifier = probe.parse_indirect_object_id().ok_or(
             ParserError::ExpectedIndirectObjectDeclaration {
                 position: object_start,
             },
         )?;
-        let object = probe.parse_object()?;
-        probe.skip_whitespace_and_comments();
+        let IndirectValue::Stream(header) = probe.parse_indirect_object_value(identifier)? else {
+            return Ok((identifier, None));
+        };
 
-        if probe.remaining_input().starts_with(STREAM_KEYWORD) {
-            let ObjectVariant::Dictionary(dictionary) = object else {
-                return Err(ParserError::StreamObjectWithoutDictionary);
-            };
-            let length = dictionary
-                .get(b"Length")
-                .and_then(|length| self.objects.read::<usize>(length).ok());
-            probe.recover_stream_range(length)?;
-            probe.consume_required_endobj()?;
-            let is_rooted_xref_stream = dictionary
-                .get(b"Type")
-                .and_then(|type_name| self.objects.read::<PdfName>(type_name).ok())
-                .is_some_and(|type_name| type_name.as_bytes() == b"XRef")
-                && dictionary.get(b"Root").is_some();
-            let trailer = is_rooted_xref_stream.then(|| Trailer::new(Box::new(dictionary), None));
-            return Ok((identifier, trailer));
+        let length = header
+            .length()
+            .and_then(|length| self.objects.read::<usize>(length).ok());
+        let body = probe.recover_stream_body(length)?;
+        let dictionary = header.dictionary();
+        let is_rooted_xref_stream = dictionary
+            .get(b"Type")
+            .and_then(|type_name| self.objects.read::<PdfName>(type_name).ok())
+            .is_some_and(|type_name| type_name.as_bytes() == b"XRef")
+            && dictionary.get(b"Root").is_some();
+        if !is_rooted_xref_stream {
+            return Ok((identifier, None));
         }
 
-        probe.consume_endobj_or_implicit_boundary()?;
-        Ok((identifier, None))
+        let trailer = Trailer::new(Box::new(dictionary.clone()), None);
+        let data = probe
+            .tokenizer
+            .input
+            .get(body)
+            .ok_or(ParserError::UnexpectedEndOfFile)?;
+        let xref_stream = self
+            .objects
+            .read::<XrefStream>(&header.into_stream(Bytes::copy_from_slice(data)))
+            .map_or_else(
+                |_| CrossReferenceTable::new(BTreeMap::new(), trailer),
+                |XrefStream(table)| table,
+            );
+        Ok((identifier, Some(xref_stream)))
     }
 
     /// Probes a complete trailer that directly exposes `/Root`.
@@ -408,5 +430,43 @@ mod tests {
         .expect_err("the missing root object should reject recovery");
 
         assert_eq!(error, ParserError::MissingStartXref);
+    }
+
+    /// Indexes the page tree of a file whose malformed objects used to hide it: an
+    /// unclosed array, an unclosed dictionary, a stream whose `/Length` runs past later
+    /// objects, and a page-tree node that only the xref stream's entries can locate.
+    #[test]
+    fn indexes_objects_hidden_by_malformed_syntax() {
+        let mut input = b"%PDF-1.7\n\
+            1 0 obj <</Type/Catalog/Pages 7 0 R>> endobj\n\
+            2 0 obj <</Kids[3 0 R>> endobj\n\
+            3 0 obj <</Parent 2 0 R endobj\n\
+            4 0 obj <</Length 999>> stream\nabc\nendstream\nendobj\n\
+            5 0 obj null endobj\n\
+            6 0 obj <</Type/ObjStm/N 1/First 4/Length 6>> stream\n7 0 42\nendstream\nendobj\n\
+            8 0 obj <</Type/XRef/Root 1 0 R/Size 9/W[1 1 1]/Index[7 1]/Length 3>> stream\n"
+            .to_vec();
+        input.extend_from_slice(b"\x02\x06\x00\nendstream\nendobj\n");
+
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_slice()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
+
+        for object_number in [1, 2, 3, 4, 5, 6, 8] {
+            assert!(
+                matches!(
+                    table.entries.get(&object_number),
+                    Some(CrossReferenceEntryType::Normal { .. })
+                ),
+                "object {object_number} should be indexed",
+            );
+        }
+        assert_eq!(
+            table.entries.get(&7),
+            Some(&CrossReferenceEntryType::new_compressed(6))
+        );
     }
 }
