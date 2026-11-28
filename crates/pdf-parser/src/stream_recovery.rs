@@ -9,8 +9,9 @@
 //!    and comments, by `endobj`. Some writers truncate the keyword to `endstrea`; that
 //!    form is accepted too. The keyword may directly follow a data byte, since writers
 //!    also leave stray bytes between the data and `endstream`.
-//! 3. With a `/Length` hint, the terminator nearest the declared boundary wins; without
-//!    one, the first in byte order.
+//! 3. The first such terminator in byte order wins. A wrong `/Length` is no guide to
+//!    where the data ends: one past the real end would otherwise carry the body over the
+//!    objects that follow it.
 //!
 //! Requiring `endobj` rejects most accidental matches inside binary stream data, but
 //! cannot rule them out. Structural objects such as cross-reference streams are therefore
@@ -53,7 +54,8 @@ impl PdfParser<'_> {
             return Ok(data_start..data_end);
         }
 
-        let terminator = StreamTerminator::nearest(input, data_start, declared_end)
+        let terminator = StreamTerminator::scan(input, data_start)
+            .next()
             .ok_or(ParserError::UnexpectedEndOfFile)?;
         self.tokenizer.position = terminator.end;
         Ok(data_start..trim_line_ending(input, data_start, terminator.start))
@@ -111,36 +113,6 @@ impl StreamTerminator {
             .filter(|(_, window)| *window == TRUNCATED_ENDSTREAM_KEYWORD)
             .map(move |(offset, _)| data_start.saturating_add(offset))
             .filter_map(|start| Self::at(input, start))
-    }
-
-    /// Selects the terminator nearest `declared_end`, or the first one without a hint.
-    ///
-    /// Ties prefer the earlier terminator. Candidates arrive in byte order, so the scan
-    /// stops at the first one at or past the declared boundary: every later candidate
-    /// lies farther away.
-    fn nearest(input: &[u8], data_start: usize, declared_end: Option<usize>) -> Option<Self> {
-        let mut candidates = Self::scan(input, data_start);
-        let Some(declared_end) = declared_end else {
-            return candidates.next();
-        };
-
-        let mut before = None;
-        for candidate in candidates {
-            if candidate.start < declared_end {
-                before = Some(candidate);
-                continue;
-            }
-            return Some(match before {
-                Some(earlier)
-                    if declared_end.abs_diff(earlier.start)
-                        <= candidate.start.abs_diff(declared_end) =>
-                {
-                    earlier
-                }
-                _ => candidate,
-            });
-        }
-        before
     }
 }
 

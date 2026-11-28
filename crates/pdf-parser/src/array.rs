@@ -21,6 +21,8 @@ impl PdfParser<'_> {
 
             match self.tokenizer.peek() {
                 Some(PdfToken::RightSquareBracket) => break,
+                // An array left open inside a dictionary ends where the dictionary does.
+                Some(PdfToken::DoubleRightAngleBracket) => return Ok(PdfArray::from(values)),
                 Some(_) => values.push(self.parse_object()?),
                 None => break,
             };

@@ -21,15 +21,23 @@
 //! scan. These checks reduce false positives, but arbitrary byte scanning is inherently
 //! less authoritative than a valid cross-reference section; callers should enter this
 //! path only after normal xref discovery has failed.
+//!
+//! Object streams (`/Type /ObjStm`) are decoded far enough to read their headers, so
+//! the objects they hold are indexed as compressed entries unless a top-level
+//! declaration of the same number exists.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Range};
 
+use bytes::Bytes;
+use pdf_filter::filter::DecodedStream;
 use pdf_object_reader::{
-    EmptySource, ObjectReader,
+    EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult,
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
+    dictionary::Dictionary,
     object_id::ObjectId,
     object_variant::ObjectVariant,
     pdf_name::PdfName,
+    stream::StreamObject,
     trailer::Trailer,
 };
 
@@ -46,14 +54,41 @@ const STREAM_KEYWORD: &[u8] = b"stream";
 enum ScanCandidate {
     /// An indirect object declaration and the generation recorded in its header.
     ///
-    /// `trailer` holds the dictionary of a rooted cross-reference stream object.
+    /// `trailer` holds the dictionary of a rooted cross-reference stream object, and
+    /// `members` the object numbers an object stream holds.
     IndirectObject {
         object_number: usize,
         generation_number: usize,
         trailer: Option<Trailer>,
+        members: Vec<usize>,
     },
     /// A trailer dictionary that directly exposes the document catalog through `/Root`.
     Trailer(Trailer),
+}
+
+/// The object numbers listed in an object stream's header, in header order.
+struct ObjectStreamMembers(Vec<usize>);
+
+/// Reads the `/N` header pairs before `/First`, stopping at the first malformed pair.
+impl FromPdfObject for ObjectStreamMembers {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut stream = context.reborrow().stream()?;
+        let mut dictionary = stream.dictionary();
+        let count: usize = dictionary.required(b"N")?;
+        let first: usize = dictionary.required(b"First")?;
+        let DecodedStream(data) = context.decode()?;
+        let mut header = PdfParser::from(data.get(..first).unwrap_or(&data));
+        let members = (0..count)
+            .map_while(|_| {
+                let number = header.read_number::<usize>(true).ok()?;
+                header.read_number::<usize>(true).ok()?;
+                Some(number)
+            })
+            .collect();
+        Ok(Self(members))
+    }
 }
 
 /// Reconstructs cross-reference entries by scanning complete top-level PDF constructs.
@@ -101,6 +136,8 @@ impl<'input> LinearObjectScanner<'input> {
     /// accepted candidate reports an invalid end position.
     pub(crate) fn scan(&self) -> Result<CrossReferenceTable, ParserError> {
         let mut objects = BTreeMap::new();
+        // Object-stream members by object number, mapped to their containing stream.
+        let mut compressed = BTreeMap::new();
         let mut trailer = None;
         let mut scanner = self.parser.at_offset(0)?;
 
@@ -130,6 +167,7 @@ impl<'input> LinearObjectScanner<'input> {
                     object_number,
                     generation_number,
                     trailer: stream_trailer,
+                    members,
                 } => {
                     // BTreeMap::insert replaces an older declaration of the same object
                     // number, which models incremental updates encountered in file order.
@@ -140,6 +178,8 @@ impl<'input> LinearObjectScanner<'input> {
                     if stream_trailer.is_some() {
                         trailer = stream_trailer;
                     }
+                    // Later object streams supersede earlier ones, as declarations do.
+                    compressed.extend(members.into_iter().map(|member| (member, object_number)));
                 }
                 // Later rooted trailers supersede earlier revisions.
                 ScanCandidate::Trailer(candidate) => trailer = Some(candidate),
@@ -147,6 +187,13 @@ impl<'input> LinearObjectScanner<'input> {
             // Resume after the complete accepted construct. In particular, this skips
             // any object-like bytes that appeared inside its stream payload.
             scanner = self.parser.at_offset(candidate_end)?;
+        }
+
+        // A top-level declaration is preferred over an object-stream member.
+        for (member, object_stream_number) in compressed {
+            let _ = objects
+                .entry(member)
+                .or_insert_with(|| CrossReferenceEntryType::new_compressed(object_stream_number));
         }
 
         let trailer = trailer.ok_or(ParserError::MissingStartXref)?;
@@ -188,12 +235,13 @@ impl<'input> LinearObjectScanner<'input> {
     /// value existed solely to prove the declaration's extent and structural validity.
     fn indirect_object_at(&self, position: usize) -> Option<(ScanCandidate, usize)> {
         let mut probe = self.parser.at_offset(position).ok()?;
-        let (identifier, trailer) = self.scan_indirect_object(&mut probe).ok()?;
+        let (identifier, trailer, members) = self.scan_indirect_object(&mut probe).ok()?;
         Some((
             ScanCandidate::IndirectObject {
                 object_number: identifier.number,
                 generation_number: identifier.generation,
                 trailer,
+                members,
             },
             probe.position(),
         ))
@@ -211,7 +259,8 @@ impl<'input> LinearObjectScanner<'input> {
     ///
     /// A stream whose dictionary has `/Type /XRef` and a direct `/Root` also yields
     /// that dictionary as a trailer, since cross-reference stream files have no
-    /// `trailer` keyword.
+    /// `trailer` keyword. A `/Type /ObjStm` stream also yields the object numbers in
+    /// its header; one that cannot be decoded yields none.
     ///
     /// On success `probe` points immediately after the object terminator.
     ///
@@ -222,7 +271,7 @@ impl<'input> LinearObjectScanner<'input> {
     fn scan_indirect_object(
         &self,
         probe: &mut PdfParser<'input>,
-    ) -> Result<(ObjectId, Option<Trailer>), ParserError> {
+    ) -> Result<(ObjectId, Option<Trailer>, Vec<usize>), ParserError> {
         let object_start = probe.position();
         let identifier = probe.parse_indirect_object_id().ok_or(
             ParserError::ExpectedIndirectObjectDeclaration {
@@ -239,19 +288,46 @@ impl<'input> LinearObjectScanner<'input> {
             let length = dictionary
                 .get(b"Length")
                 .and_then(|length| self.objects.read::<usize>(length).ok());
-            probe.recover_stream_range(length)?;
+            let body = probe.recover_stream_range(length)?;
             probe.consume_required_endobj()?;
-            let is_rooted_xref_stream = dictionary
+            let stream_type = dictionary
                 .get(b"Type")
-                .and_then(|type_name| self.objects.read::<PdfName>(type_name).ok())
-                .is_some_and(|type_name| type_name.as_bytes() == b"XRef")
-                && dictionary.get(b"Root").is_some();
+                .and_then(|type_name| self.objects.read::<PdfName>(type_name).ok());
+            let stream_type = stream_type.as_ref().map(PdfName::as_bytes);
+            if stream_type == Some(b"ObjStm") {
+                let members = self.object_stream_members(identifier, dictionary, body);
+                return Ok((identifier, None, members));
+            }
+            let is_rooted_xref_stream =
+                stream_type == Some(b"XRef") && dictionary.get(b"Root").is_some();
             let trailer = is_rooted_xref_stream.then(|| Trailer::new(Box::new(dictionary), None));
-            return Ok((identifier, trailer));
+            return Ok((identifier, trailer, Vec::new()));
         }
 
         probe.consume_endobj_or_implicit_boundary()?;
-        Ok((identifier, None))
+        Ok((identifier, None, Vec::new()))
+    }
+
+    /// Decodes the object stream `identifier` with body `body` and returns the object
+    /// numbers its header lists, or none when it cannot be decoded.
+    fn object_stream_members(
+        &self,
+        identifier: ObjectId,
+        dictionary: Dictionary,
+        body: Range<usize>,
+    ) -> Vec<usize> {
+        let Some(data) = self.parser.tokenizer.input.get(body) else {
+            return Vec::new();
+        };
+        let stream = ObjectVariant::Stream(StreamObject::new_encoded(
+            identifier.number,
+            identifier.generation,
+            dictionary,
+            Bytes::copy_from_slice(data),
+        ));
+        self.objects
+            .read::<ObjectStreamMembers>(&stream)
+            .map_or_else(|_| Vec::new(), |ObjectStreamMembers(members)| members)
     }
 
     /// Probes a complete trailer that directly exposes `/Root`.
@@ -394,6 +470,46 @@ mod tests {
 
         assert_eq!(table.entries.len(), 1);
         assert!(table.entries.contains_key(&1));
+    }
+
+    #[test]
+    fn ends_stream_with_overlong_length_at_first_terminator() {
+        let input = b"%PDF-1.7\n1 0 obj\n<< /Length 60 >>\nstream\nab\nendstream\nendobj\n2 0 obj\nnull\nendobj\n3 0 obj\n<< >>\nstream\ncd\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n";
+
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_slice()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
+
+        assert!(table.entries.contains_key(&2));
+    }
+
+    #[test]
+    fn indexes_object_stream_members_behind_top_level_declarations() {
+        let members = b"2 0 1 5 null <</Type/Pages/Kids[]/Count 0>>";
+        let input = format!(
+            "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n3 0 obj\n<< /Type /ObjStm /N 2 /First 8 /Length {} >>\nstream\n{}\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n",
+            members.len(),
+            String::from_utf8_lossy(members),
+        );
+
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_bytes()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
+
+        assert_eq!(
+            table.entries.get(&2),
+            Some(&CrossReferenceEntryType::new_compressed(3))
+        );
+        assert!(matches!(
+            table.entries.get(&1),
+            Some(CrossReferenceEntryType::Normal { .. })
+        ));
     }
 
     #[test]

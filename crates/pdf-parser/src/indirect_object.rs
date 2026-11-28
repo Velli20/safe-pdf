@@ -73,7 +73,8 @@ impl StreamHeader {
     }
 }
 
-fn starts_with_boundary_keyword(input: &[u8], keyword: &[u8]) -> bool {
+/// Returns whether `input` begins with `keyword` followed by a delimiter or the end of input.
+pub(crate) fn starts_with_boundary_keyword(input: &[u8], keyword: &[u8]) -> bool {
     input.starts_with(keyword)
         && match input.get(keyword.len()).copied() {
             Some(next) => PdfParser::is_pdf_delimiter(next),

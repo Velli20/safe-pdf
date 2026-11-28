@@ -4,7 +4,7 @@ use pdf_object_reader::{
 };
 use pdf_tokenizer::PdfToken;
 
-use crate::{error::ParserError, parser::PdfParser};
+use crate::{error::ParserError, indirect_object::starts_with_boundary_keyword, parser::PdfParser};
 
 enum DictionaryEntryState {
     ExpectKeyOrTerminator,
@@ -27,8 +27,11 @@ impl PdfParser<'_> {
 
         let dictionary = self.parse_dictionary_entries()?;
 
-        // Consume the closing `>>` of the dictionary.
-        self.tokenizer.expect(PdfToken::DoubleRightAngleBracket)?;
+        // Consume the closing `>>` of the dictionary. A dictionary cut off by its
+        // object's `endobj` ends there instead, leaving `endobj` for the object parser.
+        if !self.is_at_endobj() {
+            self.tokenizer.expect(PdfToken::DoubleRightAngleBracket)?;
+        }
 
         Ok(dictionary)
     }
@@ -167,12 +170,18 @@ impl PdfParser<'_> {
         Ok(DictionaryEntryState::ContinueNameValue { key, value })
     }
 
-    /// Returns `true` when the next token closes the current dictionary.
+    /// Returns `true` when the next token closes the current dictionary: its `>>`, or
+    /// the `endobj` of an object whose dictionary was never closed.
     fn is_at_dictionary_end(&mut self) -> bool {
         matches!(
             self.tokenizer.peek(),
             Some(PdfToken::DoubleRightAngleBracket)
-        )
+        ) || self.is_at_endobj()
+    }
+
+    /// Returns `true` when the input continues with the `endobj` keyword.
+    fn is_at_endobj(&self) -> bool {
+        starts_with_boundary_keyword(self.tokenizer.data(), b"endobj")
     }
 }
 
@@ -209,6 +218,25 @@ mod tests {
                 result.len()
             );
         }
+    }
+
+    #[test]
+    fn test_dictionary_closes_unterminated_array_and_dictionary() {
+        let mut parser = PdfParser::from(b"<</Kids[8 0 R>>".as_slice());
+        let result = parser.parse_dictionary().unwrap();
+        assert!(matches!(result.get(b"Kids"), Some(ObjectVariant::Array(kids)) if kids.len() == 1));
+        assert_eq!(parser.tokenizer.peek_byte(), None);
+
+        let mut parser = PdfParser::from(b"<</Type /Page\nendobj".as_slice());
+        let result = parser.parse_dictionary().unwrap();
+        assert_eq!(
+            result.get(b"Type"),
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                b"Page",
+                pdf_object_reader::string_kind::StringKind::Name
+            ))
+        );
+        assert!(parser.tokenizer.data().starts_with(b"endobj"));
     }
 
     #[test]
