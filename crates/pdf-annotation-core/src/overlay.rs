@@ -10,6 +10,7 @@ use crate::{
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
     metadata::AnnotationFlags,
     models::{Annotation, AnnotationId, Point, Revision},
+    page_popups::PagePopups,
     pdf_data::{AnnotationAction, HideTarget, SourceAnnotation},
     projection,
     requests::{ActionReceipt, AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget},
@@ -396,13 +397,10 @@ impl AnnotationOverlay {
     ) -> AnnotationLayerResult<PreparedAnnotations> {
         let view = self.page_view(page)?;
         let annotations = self.page_annotations(&view, page);
-        let popup_parents = popup_parents(&annotations);
+        let popups = PagePopups::new(&annotations)?;
         let entries = annotations
             .iter()
-            .map(|annotation| {
-                let has_popup = popup_parents.contains(&annotation.id.0);
-                self.project_entry(&view, annotation, viewport, has_popup)
-            })
+            .map(|annotation| self.project_entry(&view, annotation, viewport, &popups))
             .collect::<AnnotationLayerResult<Arc<[_]>>>()?;
         Ok(PreparedAnnotations {
             page,
@@ -437,7 +435,7 @@ impl AnnotationOverlay {
         view: &DocumentView<'_>,
         annotation: &Annotation,
         viewport: &PageViewport,
-        has_popup: bool,
+        popups: &PagePopups,
     ) -> AnnotationLayerResult<AnnotationEntry> {
         projection::project(
             annotation,
@@ -446,7 +444,7 @@ impl AnnotationOverlay {
             self.document.hints.get(&annotation.id.0),
             viewport,
             self.modified_revision(annotation.id),
-            has_popup,
+            popups,
         )
     }
 
@@ -564,15 +562,6 @@ impl AnnotationOverlay {
             snapshot.revision = revision;
         }
     }
-}
-
-/// Identities named as a parent by a popup among `annotations`.
-fn popup_parents(annotations: &[&Annotation]) -> BTreeSet<u32> {
-    annotations
-        .iter()
-        .filter_map(|annotation| annotation.content.popup_parent())
-        .map(|id| id.0)
-        .collect()
 }
 
 /// Whether a mounted control may issue `operation` against its own annotation.
