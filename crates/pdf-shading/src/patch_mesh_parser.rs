@@ -2,7 +2,6 @@
 
 use crate::{
     error::PdfShadingError,
-    mesh_config::MeshConfig,
     mesh_decoder::MeshDecoder,
     model::MeshPatch,
     patch_mesh::PatchMeshError,
@@ -16,12 +15,9 @@ pub(crate) struct PatchMeshParser<'a> {
 }
 
 impl<'a> PatchMeshParser<'a> {
-    /// Creates a parser over the stream of `config`.
-    pub(crate) fn new(config: &'a MeshConfig, kind: PatchKind) -> Result<Self, PdfShadingError> {
-        Ok(Self {
-            decoder: config.decoder("Patch mesh")?,
-            kind,
-        })
+    /// Creates a parser over the records `decoder` reads.
+    pub(crate) fn new(decoder: MeshDecoder<'a>, kind: PatchKind) -> Self {
+        Self { decoder, kind }
     }
 
     /// Consumes the packed stream and reconstructs all complete patches.

@@ -28,7 +28,10 @@ pub enum PatchMeshError {
 impl MeshConfig {
     /// Decodes this Type 6 or Type 7 stream into a patch-mesh shading.
     pub(crate) fn patch_mesh(self, kind: PatchKind) -> Result<Shading, PdfShadingError> {
-        let patches = PatchMeshParser::new(&self, kind)?.parse()?;
+        let patches = match self.decoder("Patch mesh")? {
+            Some(decoder) => PatchMeshParser::new(decoder, kind).parse()?,
+            None => Vec::new(),
+        };
 
         Ok(Shading::PatchMesh {
             shading_type: kind.shading_type(),
