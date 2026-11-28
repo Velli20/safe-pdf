@@ -70,18 +70,18 @@ impl From<ImagePayload> for EncodedPayload {
 /// stage, if it has one: a `JPXDecode` stream is deliberately left encoded,
 /// because only the structured image path can read a JPEG 2000 codestream.
 impl FromPdfObject for EncodedPayload {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut context = context.stream()?;
-        let stream = context.stream();
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let stream = context.reborrow().stream()?.stream();
         let data = stream.shared_data();
         if !stream.filters_applied() {
             // An unreadable chain is a filter failure, like a filter that fails to run.
-            let pipeline = context.read(object).map_err(FilterError::from)?;
+            let pipeline = context.decode().map_err(FilterError::from)?;
             return Ok(Self { pipeline, data });
         }
         let jpx = context
-            .dictionary()
+            .entries()?
             .optional::<Filters>(Filters::KEY)?
             .is_some_and(|filters| filters.has_jpx_filter());
         let stages = match jpx {

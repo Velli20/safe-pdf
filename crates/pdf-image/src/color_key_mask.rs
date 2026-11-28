@@ -15,11 +15,8 @@ pub(crate) struct ColorKeyMask {
 }
 
 impl FromPdfObject for ColorKeyMask {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let object = context.object();
-        let values: Vec<f32> = context.read(object)?;
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let values: Vec<f32> = context.decode()?;
         Ok(Self {
             ranges: values.as_chunks::<2>().0.to_vec(),
         })

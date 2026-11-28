@@ -25,10 +25,8 @@ impl PageTree {
 /// Decodes the tree, then passes inherited attributes down it once, so each page and
 /// each `/Pages` node combines with its ancestors a single time.
 impl FromPdfObject for PageTree {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let root: PageTreeBranch = context.read(context.object())?;
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let root: PageTreeBranch = context.decode()?;
         let mut pages = Vec::new();
         root.flatten_into(
             &InheritedAttributes::default(),
@@ -56,12 +54,12 @@ enum PageTreeNode {
 }
 
 impl FromPdfObject for PageTreeNode {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut dictionary = context.dictionary()?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut dictionary = context.entries()?;
         let node_type: Option<Arc<[u8]>> = dictionary.optional(b"Type")?;
         let has_kids = dictionary.contains(b"Kids");
-        let context = ObjectContext::new(object, dictionary.access());
         match node_type.as_deref() {
             Some(PdfPage::KEY) => context.decode().map(Self::Page),
             Some(PageTree::KEY) => context.decode().map(Self::Pages),
@@ -86,11 +84,11 @@ struct PageTreeBranch {
 }
 
 impl FromPdfObject for PageTreeBranch {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut context = context.dictionary()?;
-        let kids_array = context.required::<PdfArray>(b"Kids")?;
-        let inherited = context.read(object)?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let kids_array = context.entries()?.required::<PdfArray>(b"Kids")?;
+        let inherited = context.reborrow().decode()?;
         let mut kids = Vec::with_capacity(kids_array.len());
         for value in kids_array.iter() {
             match context.read::<PageTreeNode>(value) {

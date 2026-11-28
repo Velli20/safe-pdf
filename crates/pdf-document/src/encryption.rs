@@ -243,9 +243,10 @@ impl FromPdfObject for EncryptDictionary {
     /// Parses an encryption dictionary.
     ///
     /// Fails if parsing fails or the security handler is not `/Standard`.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut dictionary = context.dictionary()?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut dictionary = context.entries()?;
         // Other handlers (such as the public-key `/Adobe.PubSec`) lack the Standard entries
         // below and need keys this reader cannot obtain.
         let filter: Arc<[u8]> = dictionary.required(b"Filter")?;
@@ -259,7 +260,8 @@ impl FromPdfObject for EncryptDictionary {
         }
 
         let version: EncryptionVersion = dictionary.required(b"V")?;
-        let crypt_filters: DefaultCryptFilters = dictionary.read(object)?;
+        let crypt_filters: DefaultCryptFilters = context.reborrow().decode()?;
+        let mut dictionary = context.dictionary()?;
         Ok(EncryptDictionary {
             version,
             revision: dictionary.required(b"R")?,

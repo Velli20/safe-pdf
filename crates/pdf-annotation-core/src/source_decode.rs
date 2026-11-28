@@ -21,9 +21,10 @@ use pdf_optional_content::OptionalContentMembership;
 pub(crate) type DecodeResult<T> = Result<T, SourceDecodeError>;
 
 impl FromPdfObject for SourceAnnotation {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut dictionary = context.dictionary()?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let mut dictionary = context.entries()?;
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
@@ -40,7 +41,8 @@ impl FromPdfObject for SourceAnnotation {
         // The source edges are kept as-is so inverted rectangles survive decoding.
         let rect: Option<Rect> = dictionary.optional(b"Rect")?;
         let appearance: Option<AppearanceDictionary> = dictionary.optional(b"AP")?;
-        let kind: NativeAnnotation = dictionary.read(object)?;
+        let kind: NativeAnnotation = context.reborrow().decode()?;
+        let mut dictionary = context.dictionary()?;
         // Like PDFium, a note without a normal appearance is drawn with a generated icon
         // placed at its rectangle's lower-left corner, whatever the rectangle's size.
         let (rect, appearance) = match (&kind, rect, appearance) {

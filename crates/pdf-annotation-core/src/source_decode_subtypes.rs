@@ -14,28 +14,28 @@ use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 /// Dispatches on `/Subtype`; unrecognized names retain their bytes unparsed.
 impl FromPdfObject for NativeAnnotation {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut dictionary = context.dictionary()?;
-        let subtype = dictionary.required::<PdfName>(b"Subtype")?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let subtype = context.entries()?.required::<PdfName>(b"Subtype")?;
         Ok(match subtype.as_ref() {
-            b"Text" => Self::Text(Box::new(dictionary.read(object)?)),
-            b"Link" => Self::Link(Box::new(dictionary.read(object)?)),
-            b"FreeText" => Self::FreeText(Box::new(dictionary.read(object)?)),
-            b"Line" => Self::Line(Box::new(dictionary.read(object)?)),
-            b"Square" => Self::Square(Box::new(dictionary.read(object)?)),
-            b"Circle" => Self::Circle(Box::new(dictionary.read(object)?)),
-            b"Polygon" => Self::Polygon(Box::new(dictionary.read(object)?)),
-            b"PolyLine" => Self::PolyLine(Box::new(dictionary.read(object)?)),
-            b"Highlight" => Self::Highlight(Box::new(dictionary.read(object)?)),
-            b"Underline" => Self::Underline(Box::new(dictionary.read(object)?)),
-            b"Squiggly" => Self::Squiggly(Box::new(dictionary.read(object)?)),
-            b"StrikeOut" => Self::StrikeOut(Box::new(dictionary.read(object)?)),
-            b"Stamp" => Self::Stamp(Box::new(dictionary.read(object)?)),
-            b"Caret" => Self::Caret(Box::new(dictionary.read(object)?)),
-            b"Ink" => Self::Ink(Box::new(dictionary.read(object)?)),
-            b"Popup" => Self::Popup(Box::new(dictionary.read(object)?)),
-            b"Widget" => Self::Widget(Box::new(dictionary.read(object)?)),
+            b"Text" => Self::Text(Box::new(context.decode()?)),
+            b"Link" => Self::Link(Box::new(context.decode()?)),
+            b"FreeText" => Self::FreeText(Box::new(context.decode()?)),
+            b"Line" => Self::Line(Box::new(context.decode()?)),
+            b"Square" => Self::Square(Box::new(context.decode()?)),
+            b"Circle" => Self::Circle(Box::new(context.decode()?)),
+            b"Polygon" => Self::Polygon(Box::new(context.decode()?)),
+            b"PolyLine" => Self::PolyLine(Box::new(context.decode()?)),
+            b"Highlight" => Self::Highlight(Box::new(context.decode()?)),
+            b"Underline" => Self::Underline(Box::new(context.decode()?)),
+            b"Squiggly" => Self::Squiggly(Box::new(context.decode()?)),
+            b"StrikeOut" => Self::StrikeOut(Box::new(context.decode()?)),
+            b"Stamp" => Self::Stamp(Box::new(context.decode()?)),
+            b"Caret" => Self::Caret(Box::new(context.decode()?)),
+            b"Ink" => Self::Ink(Box::new(context.decode()?)),
+            b"Popup" => Self::Popup(Box::new(context.decode()?)),
+            b"Widget" => Self::Widget(Box::new(context.decode()?)),
             _ => Self::Unknown {
                 subtype: subtype.to_vec(),
             },

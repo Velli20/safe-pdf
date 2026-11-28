@@ -32,10 +32,9 @@ impl FromPdfObject for PdfImage {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let object = context.object();
         Ok(Self {
-            metadata: context.read(object)?,
-            payload: context.read(object)?,
+            metadata: context.reborrow().decode()?,
+            payload: context.decode()?,
         })
     }
 }

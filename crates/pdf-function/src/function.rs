@@ -99,17 +99,18 @@ impl FunctionImpl for Function {
 
 /// Reads a function dictionary or stream, dispatching on its `/FunctionType`.
 impl FromPdfObject for Function {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let mut context = context.dictionary()?;
-        match context.required::<FunctionType>(b"FunctionType")? {
-            FunctionType::Sampled => context.read(object).map(Function::Sampled),
-            FunctionType::ExponentialInterpolation => {
-                context.read(object).map(Function::Exponential)
-            }
-            FunctionType::Stitching => context.read(object).map(Function::Stitching),
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        match context
+            .entries()?
+            .required::<FunctionType>(b"FunctionType")?
+        {
+            FunctionType::Sampled => context.decode().map(Function::Sampled),
+            FunctionType::ExponentialInterpolation => context.decode().map(Function::Exponential),
+            FunctionType::Stitching => context.decode().map(Function::Stitching),
             FunctionType::PostScriptCalculator => {
-                context.read(object).map(Function::PostScriptCalculator)
+                context.decode().map(Function::PostScriptCalculator)
             }
         }
     }

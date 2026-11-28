@@ -116,29 +116,38 @@ impl Pattern {
 }
 
 impl FromPdfObject for Pattern {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
         // Tiling patterns are streams and shading patterns are dictionaries; both expose the same entries.
-        let mut context = context.dictionary()?;
-        let matrix = context.optional::<Transform>(b"Matrix")?;
-        match context.required::<PatternType>(b"PatternType")? {
-            PatternType::Tiling => Ok(Pattern::Tiling {
-                paint_type: context.required(b"PaintType")?,
-                tiling_type: context.required(b"TilingType")?,
-                bbox: context.required::<Rect>(b"BBox")?.normalized(),
-                x_step: context.required(b"XStep")?,
-                y_step: context.required(b"YStep")?,
-                matrix,
+        let mut entries = context.entries()?;
+        let matrix = entries.optional::<Transform>(b"Matrix")?;
+        match entries.required::<PatternType>(b"PatternType")? {
+            PatternType::Tiling => {
+                let paint_type = entries.required(b"PaintType")?;
+                let tiling_type = entries.required(b"TilingType")?;
+                let bbox = entries.required::<Rect>(b"BBox")?.normalized();
+                let x_step = entries.required(b"XStep")?;
+                let y_step = entries.required(b"YStep")?;
                 // Keep a deferred handle so resources that refer back to this pattern can finish decoding.
-                resources: context
+                let resources = entries
                     .optional::<ObjectHandle<Resources>>(b"Resources")?
-                    .unwrap_or_else(|| ObjectHandle::from(Resources::default())),
-                content_stream: context.read::<ContentStream>(object)?,
-            }),
+                    .unwrap_or_else(|| ObjectHandle::from(Resources::default()));
+                Ok(Pattern::Tiling {
+                    paint_type,
+                    tiling_type,
+                    bbox,
+                    x_step,
+                    y_step,
+                    matrix,
+                    resources,
+                    content_stream: context.decode::<ContentStream>()?,
+                })
+            }
             PatternType::Shading => Ok(Pattern::Shading {
-                shading: context.required::<Shading>(b"Shading")?,
+                shading: entries.required::<Shading>(b"Shading")?,
                 matrix,
-                ext_g_state: context.optional::<ExternalGraphicsState>(b"ExtGState")?,
+                ext_g_state: entries.optional::<ExternalGraphicsState>(b"ExtGState")?,
             }),
         }
     }

@@ -31,8 +31,10 @@ pub(crate) struct MeshConfig {
 
 /// Reads the mesh entries of a Type 4, 6, or 7 shading stream.
 impl FromPdfObject for MeshConfig {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let widths = context.reborrow().decode()?;
         let mut context = context.stream()?;
         let data = context.stream().data.clone();
         let mut dictionary = context.dictionary();
@@ -42,7 +44,7 @@ impl FromPdfObject for MeshConfig {
                 .lenient::<Rect>(b"BBox")
                 .map(|bbox| bbox.normalized()),
             anti_alias: dictionary.optional(b"AntiAlias")?,
-            widths: dictionary.read(object)?,
+            widths,
             decode: dictionary.required(b"Decode")?,
             functions: dictionary.optional_list(b"Function")?,
             data,

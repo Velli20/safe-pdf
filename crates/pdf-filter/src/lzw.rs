@@ -37,7 +37,7 @@ impl FromPdfObject for LzwParams {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let predictor = context.read(context.object())?;
+        let predictor = context.reborrow().decode()?;
         let early_change = context.dictionary()?.optional::<i32>(b"EarlyChange")?;
         Ok(Self {
             early_change: early_change.is_none_or(|early_change| early_change != 0),
