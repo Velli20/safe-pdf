@@ -70,6 +70,7 @@ mod kind_validation;
 pub mod layer_error;
 /// Document-owned Core editing with per-viewport prepared entries.
 pub mod overlay;
+mod page_popups;
 mod projection;
 /// Command envelopes and committed edit receipts shared by every host.
 pub mod requests;

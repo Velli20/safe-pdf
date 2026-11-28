@@ -7,6 +7,7 @@ use crate::{
     import::LayoutHint,
     layer_error::AnnotationLayerResult,
     models::{Annotation, Revision},
+    page_popups::PagePopups,
     pdf_data::AnnotationAction,
     shapes,
 };
@@ -36,7 +37,7 @@ pub(crate) fn project(
     hint: Option<&LayoutHint>,
     viewport: &PageViewport,
     modified_revision: Revision,
-    has_popup: bool,
+    popups: &PagePopups,
 ) -> AnnotationLayerResult<AnnotationEntry> {
     let bounds = annotation
         .content
@@ -44,7 +45,8 @@ pub(crate) fn project(
     let field = annotation.widget_field(view)?;
     let style = annotation.style()?;
     let action = annotation.action();
-    let visible = annotation.is_displayed(optional_content);
+    // A popup with no text to show stays hidden whatever its open state.
+    let visible = annotation.is_displayed(optional_content) && !popups.is_blank(annotation.id);
     let artwork = PaintedAppearance::artwork(annotation, optional_content).is_some();
     let painted = annotation.paints_source_appearance();
     Ok(AnnotationEntry {
@@ -70,7 +72,7 @@ pub(crate) fn project(
         interactive: visible,
         modified_revision,
         label: annotation.content.label(),
-        has_popup,
+        has_popup: popups.has_popup(annotation.id),
         control: field.and_then(|field| annotation.widget_control(field)),
         artwork,
         painted: visible && painted,
