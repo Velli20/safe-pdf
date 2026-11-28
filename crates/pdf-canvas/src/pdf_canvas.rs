@@ -16,7 +16,7 @@ use crate::{
     text::TextGlyph,
     tiling_shader::{TilingShader, TilingShaderError, validate_geometry},
 };
-use pdf_content_stream::ContentStream;
+use pdf_content_stream::{ContentStream, ContentStreamSource};
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
 use pdf_font::pdf_font_handle::PdfFontHandle;
@@ -830,14 +830,47 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         resources: Option<Arc<Resources>>,
         filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
-        let Some(invocation) = self.content_stream_render_state.enter(content_stream.id) else {
+        self.render_if_admitted(content_stream.id, mat, bbox, resources, |canvas| {
+            canvas.apply_operators(&content_stream.operators, filter)
+        })
+    }
+
+    /// Renders the operators of `source` as they are parsed, without collecting them first.
+    ///
+    /// This draws like [`Self::render_content_stream`] with no matrix, bounding box or
+    /// filter, for content drawn once, such as a page's `/Contents`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an operator fails to apply. Operators before the failure have
+    /// been drawn.
+    pub fn render_content_source(
+        &mut self,
+        source: &ContentStreamSource,
+        resources: Option<Arc<Resources>>,
+    ) -> Result<(), PdfCanvasError> {
+        self.render_if_admitted(source.id(), None, None, resources, |canvas| {
+            source.for_each_batch(|operators| canvas.apply_operators(operators, None))
+        })
+    }
+
+    /// Renders the content stream `id`, whose operators `apply` draws, unless rendering it
+    /// now would repeat a stream being drawn or nest too deeply.
+    fn render_if_admitted(
+        &mut self,
+        id: usize,
+        mat: Option<Transform>,
+        bbox: Option<&Rect>,
+        resources: Option<Arc<Resources>>,
+        apply: impl FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    ) -> Result<(), PdfCanvasError> {
+        let Some(invocation) = self.content_stream_render_state.enter(id) else {
             // A refused stream is a successful no-op so a cycle or excessive
             // nesting cannot abort the rest of the page.
             return Ok(());
         };
 
-        let result =
-            self.render_admitted_content_stream(content_stream, mat, bbox, resources, filter);
+        let result = self.render_admitted_content_stream(mat, bbox, resources, apply);
 
         // Release admission state even when setup or an operator returned an
         // error, allowing later streams to render normally on this canvas.
@@ -846,17 +879,35 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         result
     }
 
-    /// Renders an admitted content stream and balances graphics state on exit.
+    /// Applies `operators` in order, skipping those `filter` selects.
+    ///
+    /// Every content stream draws through this loop, so `apply_operator` keeps one call
+    /// site and stays inlined into it.
+    fn apply_operators(
+        &mut self,
+        operators: &[PdfOperatorVariant],
+        mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
+    ) -> Result<(), PdfCanvasError> {
+        for op in operators {
+            if filter.as_mut().is_some_and(|filter| filter(op)) {
+                continue;
+            }
+            self.apply_operator(op)?;
+        }
+        Ok(())
+    }
+
+    /// Renders an admitted content stream, whose operators `apply` draws, and balances
+    /// graphics state on exit.
     ///
     /// Restores in the stream cannot pop states saved by its caller, and states the
     /// stream saved without restoring are restored when it ends.
     fn render_admitted_content_stream(
         &mut self,
-        content_stream: &ContentStream,
         mat: Option<Transform>,
         bbox: Option<&Rect>,
         resources: Option<Arc<Resources>>,
-        mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
+        apply: impl FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
     ) -> Result<(), PdfCanvasError> {
         let depth = self.saved_states.len();
         let marked_content_depth = self
@@ -888,14 +939,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 self.state.resources = Some(resources);
             }
 
-            for op in &content_stream.operators {
-                if filter.as_mut().is_some_and(|filter| filter(op)) {
-                    continue;
-                }
-                self.apply_operator(op)?;
-            }
-
-            Ok(())
+            apply(self)
         })();
         // A Type 3 glyph procedure runs inside the caller's text object; its own text
         // objects must neither clear nor apply the caller's pending text clip.

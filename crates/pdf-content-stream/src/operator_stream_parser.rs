@@ -64,6 +64,11 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
         self.unfinished
     }
 
+    /// Returns the operators parsed so far that the caller has not taken.
+    pub(super) fn parsed(&mut self) -> &mut Vec<PdfOperatorVariant> {
+        self.out
+    }
+
     /// Returns the operand buffer, holding any operands still awaiting their operator.
     pub(super) fn into_operands(self) -> Vec<ObjectVariant> {
         self.operands
