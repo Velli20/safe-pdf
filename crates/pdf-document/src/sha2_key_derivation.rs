@@ -18,6 +18,10 @@ use crate::{
 pub(crate) struct Sha2KeyDerivation<'a> {
     /// The encryption dictionary from the PDF trailer.
     encrypt: &'a EncryptDictionary,
+    /// The 48-byte owner password entry (`/O`), without any trailing padding.
+    owner_hash: &'a [u8],
+    /// The 48-byte user password entry (`/U`), without any trailing padding.
+    user_hash: &'a [u8],
     /// The owner-wrapped file key (`/OE`).
     owner_encrypted_key: &'a [u8],
     /// The user-wrapped file key (`/UE`).
@@ -54,11 +58,10 @@ impl<'a> Sha2KeyDerivation<'a> {
                 "V=5 requires AESV3 or Identity crypt filters".to_string(),
             ));
         }
-        validate_v5_entry(&encrypt.owner_password_hash, "O", 48)?;
-        validate_v5_entry(&encrypt.user_password_hash, "U", 48)?;
-
         Ok(Self {
             encrypt,
+            owner_hash: leading_v5_entry(&encrypt.owner_password_hash, "O", 48)?,
+            user_hash: leading_v5_entry(&encrypt.user_password_hash, "U", 48)?,
             owner_encrypted_key: required_v5_entry(
                 encrypt.owner_encrypted_key.as_deref(),
                 "OE",
@@ -86,8 +89,8 @@ impl<'a> Sha2KeyDerivation<'a> {
     /// Unwraps the file key with whichever of the user or owner entries `password` opens.
     fn unwrap_file_key(&self, password: &[u8]) -> Result<Option<Vec<u8>>, DecryptionError> {
         let revision = self.encrypt.revision;
-        let user_hash = self.encrypt.user_password_hash.as_ref();
-        let owner_hash = self.encrypt.owner_password_hash.as_ref();
+        let user_hash = self.user_hash;
+        let owner_hash = self.owner_hash;
 
         let (password_entry, owner_input, encrypted_key) =
             if validate_v5_password(password, revision, user_hash, None)? {
@@ -134,7 +137,7 @@ impl<'a> Sha2KeyDerivation<'a> {
     }
 }
 
-/// Returns a required V=5 encryption dictionary entry with its expected length.
+/// Returns the leading `expected_length` bytes of a required V=5 encryption dictionary entry.
 fn required_v5_entry<'a>(
     entry: Option<&'a [u8]>,
     name: &str,
@@ -143,22 +146,23 @@ fn required_v5_entry<'a>(
     let value = entry.ok_or_else(|| {
         DecryptionError::InvalidData(format!("V=5 encryption dictionary is missing /{name}"))
     })?;
-    validate_v5_entry(value, name, expected_length)?;
-    Ok(value)
+    leading_v5_entry(value, name, expected_length)
 }
 
-/// Validates the exact length of a V=5 encryption dictionary byte string.
-fn validate_v5_entry(
-    value: &[u8],
+/// Returns the leading `expected_length` bytes of a V=5 encryption dictionary byte string.
+///
+/// Some writers pad these strings past their defined length (for example `/O` and `/U` to
+/// 127 bytes); only the leading bytes carry the hashes, salts and wrapped keys.
+fn leading_v5_entry<'a>(
+    value: &'a [u8],
     name: &str,
     expected_length: usize,
-) -> Result<(), DecryptionError> {
-    if value.len() != expected_length {
-        return Err(DecryptionError::InvalidData(format!(
-            "V=5 /{name} entry must contain {expected_length} bytes"
-        )));
-    }
-    Ok(())
+) -> Result<&'a [u8], DecryptionError> {
+    value.get(..expected_length).ok_or_else(|| {
+        DecryptionError::InvalidData(format!(
+            "V=5 /{name} entry must contain at least {expected_length} bytes"
+        ))
+    })
 }
 
 /// Applies the Unicode password preparation required by revisions 5 and 6.
@@ -336,6 +340,48 @@ mod tests {
             hash.as_slice(),
             user_hash.get(..32).expect("test U entry contains hash")
         );
+    }
+
+    #[test]
+    fn owner_password_authenticates_with_zero_padded_password_entries() {
+        let padded = |hex: &str| {
+            let mut entry = decode_hex(hex);
+            entry.resize(127, 0);
+            std::sync::Arc::<[u8]>::from(entry)
+        };
+        let encrypt = EncryptDictionary {
+            version: crate::encryption::EncryptionVersion::V5,
+            revision: 6,
+            owner_password_hash: padded(concat!(
+                "9bd8ab2da3571f1a99d0a2f1ebc6d9124aedd63a4d1a19a2",
+                "274c5359d05cb7db6f776e657276616c6f776e65726b6579"
+            )),
+            user_password_hash: padded(concat!(
+                "c206774951dc445f4dc7ef45968a72b81f01e05f545b3bda",
+                "b46d40b909e22818757365722d76616c757365722d6b6579"
+            )),
+            permissions: -44,
+            key_length: Some(256),
+            encrypt_metadata: false,
+            owner_encrypted_key: Some(
+                decode_hex(concat!(
+                    "cacc39e9fc44a4aac93c59e03036746a",
+                    "a1446cbabc3b2c9ab77523ba6cbf3a40"
+                ))
+                .into(),
+            ),
+            user_encrypted_key: Some(vec![0; 32].into()),
+            encrypted_permissions: Some(decode_hex("d2f7619d83c6ed3d428c82f31800768f").into()),
+            stream_method: CryptFilterMethod::Aes256,
+            string_method: CryptFilterMethod::Aes256,
+        };
+
+        let file_key = Sha2KeyDerivation::new(&encrypt)
+            .expect("padded /O and /U are accepted")
+            .authenticate(b"owner")
+            .expect("owner password authenticates");
+
+        assert_eq!(file_key.len(), Sha2KeyDerivation::FILE_KEY_BYTES);
     }
 
     #[test]

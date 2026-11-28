@@ -242,7 +242,7 @@ fn revision_5_authenticates_and_decrypts_aes_256_content() {
             Some("pässword".as_bytes())
         ),
         Err(PdfReaderError::DecryptionSetup(message))
-            if message == "invalid encrypted data: V=5 /UE entry must contain 32 bytes"
+            if message == "invalid encrypted data: V=5 /UE entry must contain at least 32 bytes"
     ));
 }
 
