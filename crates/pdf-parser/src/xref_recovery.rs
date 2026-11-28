@@ -17,6 +17,7 @@ use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_id::ObjectId,
     object_variant::ObjectVariant,
+    pdf_name::PdfName,
 };
 
 use crate::{
@@ -577,19 +578,59 @@ impl<'input> XrefRecovery<'input> {
             .matches_indirect_object_header_at(offset, object_number, generation_number)
     }
 
+    /// Returns whether the table's `/Root` reaches an object that can be the catalog.
+    ///
+    /// Beyond [`CrossReferenceTable::indexes_catalog`], a `/Root` stored at a byte offset
+    /// is parsed there and must be a dictionary with `/Pages` or `/Type /Catalog`. An
+    /// appended revision whose
+    /// table describes another file can name an unrelated object, such as the document
+    /// information dictionary, and offset repair then finds that object's header. A value
+    /// that does not parse is left to object loading, and a member of an object stream
+    /// cannot be inspected before the table exists, so both are accepted.
+    fn roots_catalog(&self, table: &CrossReferenceTable) -> bool {
+        if !table.indexes_catalog() {
+            return false;
+        }
+        let Some(ObjectVariant::Reference(root)) = table.trailer.dictionary.get(b"Root") else {
+            return true;
+        };
+        let Some(CrossReferenceEntryType::Normal { byte_offset, .. }) =
+            table.entries.get(&root.number)
+        else {
+            return true;
+        };
+        let Ok(mut probe) = self.parser.at_offset(*byte_offset) else {
+            return true;
+        };
+        let Some(identifier) = probe.parse_indirect_object_id() else {
+            return true;
+        };
+        match probe.parse_indirect_object_value(identifier) {
+            Ok(IndirectValue::Object(ObjectVariant::Dictionary(catalog))) => {
+                catalog.get(b"Pages").is_some()
+                    || catalog
+                        .get(b"Type")
+                        .and_then(|type_name| self.objects.read::<PdfName>(type_name).ok())
+                        .is_some_and(|type_name| type_name.as_bytes() == b"Catalog")
+            }
+            Ok(_) => false,
+            Err(_) => true,
+        }
+    }
+
     /// Rejects a merged table that disagrees with the source bytes or cannot be used.
     ///
     /// Every normal entry must still name the indirect object it claims. Beyond that, the
-    /// table must reach the document catalog: a syntactically valid section can be empty
-    /// or omit `/Root`'s object entirely, and accepting it would yield an index that
-    /// cannot load a single page. Rejecting it here lets the caller fall back to linear
-    /// object reconstruction instead.
+    /// table must reach the document catalog: a syntactically valid section can be empty,
+    /// omit `/Root`'s object entirely, or name an object that is no catalog, and accepting
+    /// it would yield an index that cannot load a single page. Rejecting it here lets the
+    /// caller try an older revision or fall back to linear object reconstruction instead.
     pub(crate) fn validate(
         &self,
         table: CrossReferenceTable,
         xref_offset: usize,
     ) -> Result<CrossReferenceTable, ParserError> {
-        let is_valid = table.indexes_catalog()
+        let is_valid = self.roots_catalog(&table)
             && table.entries.iter().all(|(&object_number, entry)| {
                 let CrossReferenceEntryType::Normal {
                     byte_offset,
@@ -629,6 +670,49 @@ mod tests {
     /// Formats one textual xref row for recovery tests.
     fn format_xref_entry(offset: usize, generation: usize, status: char) -> Vec<u8> {
         format!("{offset:010} {generation:05} {status} \n").into_bytes()
+    }
+
+    /// Verifies a revision whose `/Root` names a non-catalog object yields to an older one.
+    #[test]
+    fn root_naming_a_non_catalog_object_falls_back_to_older_revision() {
+        let mut data = b"%PDF-1.5\n".to_vec();
+        let mut offsets = Vec::new();
+        for body in [
+            "<< /Producer (x) >>",
+            "<< /Type /Catalog /Pages 3 0 R >>",
+            "<< /Type /Pages /Kids [] /Count 0 >>",
+        ] {
+            offsets.push(data.len());
+            let number = offsets.len();
+            data.extend_from_slice(format!("{number} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+        let original = data.len();
+        data.extend_from_slice(b"xref\n0 4\n");
+        data.extend_from_slice(&format_xref_entry(0, 65_535, 'f'));
+        for offset in &offsets {
+            data.extend_from_slice(&format_xref_entry(*offset, 0, 'n'));
+        }
+        data.extend_from_slice(
+            format!(
+                "trailer\n<< /Size 4 /Root 2 0 R /Info 1 0 R >>\nstartxref\n{original}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+        let update = data.len();
+        data.extend_from_slice(b"xref\n0 0\n");
+        data.extend_from_slice(
+            format!(
+                "trailer\n<< /Size 4 /Root 1 0 R /Prev {original} >>\nstartxref\n{update}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+
+        let table = PdfParser::from(data.as_slice()).build_xref_table().unwrap();
+
+        assert_eq!(
+            table.trailer.dictionary.get(b"Root"),
+            Some(&ObjectVariant::Reference(ObjectId::new(2, 0)))
+        );
     }
 
     #[test]
