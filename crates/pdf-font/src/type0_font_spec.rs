@@ -7,7 +7,7 @@ use crate::{
     error::FontError,
     font::{FontSource, GlyphId},
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
-    pdf_font_program::{CidType0Program, TrueTypeProgram},
+    pdf_font_program::{CidType0Program, FontDescriptorEntry, TrueTypeProgram},
     standard14::{Standard14Font, from_base_font_name},
 };
 use pdf_cmap::{Cid, PdfCMap, Type0EncodingCMap};
@@ -162,18 +162,18 @@ impl FromPdfObject for CidFontSpec {
         let mut entries = context.entries()?;
         let kind: CidFontKind = entries.required(b"Subtype")?;
         let base_font: Option<PdfName> = entries.lenient(b"BaseFont");
-        // A bad program must not discard an otherwise usable font.
-        let program: Option<FontSource> = match kind {
+        let FontDescriptorEntry {
+            descriptor,
+            program,
+        } = match kind {
             CidFontKind::Type0 => entries
-                .lenient::<CidType0Program>(b"FontDescriptor")
-                .map(Into::into),
+                .optional::<FontDescriptorEntry<CidType0Program>>(b"FontDescriptor")?
+                .map(FontDescriptorEntry::into_source),
             CidFontKind::Type2 => entries
-                .lenient::<TrueTypeProgram>(b"FontDescriptor")
-                .map(Into::into),
-        };
-        let descriptor = entries
-            .optional::<PdfFontDescriptor>(b"FontDescriptor")?
-            .unwrap_or_default();
+                .optional::<FontDescriptorEntry<TrueTypeProgram>>(b"FontDescriptor")?
+                .map(FontDescriptorEntry::into_source),
+        }
+        .unwrap_or_default();
         let declared_default = entries
             .optional::<f32>(b"DW")?
             .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM);

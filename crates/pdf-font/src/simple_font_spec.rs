@@ -5,7 +5,7 @@ use crate::{
     error::FontError,
     font::{FontProgramFormat, FontSource},
     pdf::{PdfFontDescriptor, PdfMetrics, SimpleEncoding, ToUnicodeMap},
-    pdf_font_program::{TrueTypeProgram, Type1Program},
+    pdf_font_program::{FontDescriptorEntry, TrueTypeProgram, Type1Program},
     standard14::{self, Standard14Font},
 };
 use pdf_object_reader::pdf_name::PdfName;
@@ -69,18 +69,18 @@ impl FromPdfObject for SimpleFontSpec {
         let mut entries = context.entries()?;
         let kind: SimpleFontKind = entries.required(b"Subtype")?;
         let base_font: Option<Arc<[u8]>> = entries.lenient(b"BaseFont");
-        // A bad program must not discard an otherwise usable font.
-        let program: Option<FontSource> = match kind {
+        let FontDescriptorEntry {
+            descriptor,
+            program,
+        } = match kind {
             SimpleFontKind::Type1 | SimpleFontKind::MultipleMasterType1 => entries
-                .lenient::<Type1Program>(b"FontDescriptor")
-                .map(Into::into),
+                .optional::<FontDescriptorEntry<Type1Program>>(b"FontDescriptor")?
+                .map(FontDescriptorEntry::into_source),
             SimpleFontKind::TrueType => entries
-                .lenient::<TrueTypeProgram>(b"FontDescriptor")
-                .map(Into::into),
-        };
-        let descriptor = entries
-            .optional::<PdfFontDescriptor>(b"FontDescriptor")?
-            .unwrap_or_default();
+                .optional::<FontDescriptorEntry<TrueTypeProgram>>(b"FontDescriptor")?
+                .map(FontDescriptorEntry::into_source),
+        }
+        .unwrap_or_default();
         // A symbolic TrueType or classic Type 1 program without `/Encoding` addresses its
         // glyphs through its own code mapping.
         let code_keyed_program = kind == SimpleFontKind::TrueType

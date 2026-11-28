@@ -6,7 +6,49 @@ use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use crate::{
     error::FontError,
     font::{FontProgramFormat, FontSource},
+    pdf::PdfFontDescriptor,
 };
+
+/// A font's `/FontDescriptor`, resolved once and decoded both for its metrics and for the
+/// embedded program `P` its font kind reads.
+pub(crate) struct FontDescriptorEntry<P> {
+    /// Metrics and flags the descriptor declares.
+    pub(crate) descriptor: PdfFontDescriptor,
+    /// The embedded program, or `None` when it is absent or malformed.
+    pub(crate) program: Option<P>,
+}
+
+impl<P: FromPdfObject> FromPdfObject for FontDescriptorEntry<P> {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        // A bad program must not discard the descriptor's metrics and flags.
+        let program = context.reborrow().decode::<P>().ok();
+        Ok(Self {
+            descriptor: context.decode()?,
+            program,
+        })
+    }
+}
+
+impl<P: Into<FontSource>> FontDescriptorEntry<P> {
+    /// Erases the program kind so the arms of a font-kind match share one type.
+    pub(crate) fn into_source(self) -> FontDescriptorEntry<FontSource> {
+        FontDescriptorEntry {
+            descriptor: self.descriptor,
+            program: self.program.map(Into::into),
+        }
+    }
+}
+
+impl Default for FontDescriptorEntry<FontSource> {
+    fn default() -> Self {
+        Self {
+            descriptor: PdfFontDescriptor::default(),
+            program: None,
+        }
+    }
+}
 
 /// Type 1 program read from a FontDescriptor, with FontFile3 taking precedence over FontFile.
 pub(crate) struct Type1Program(FontSource);
