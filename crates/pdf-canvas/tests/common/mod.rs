@@ -39,6 +39,8 @@ pub struct ObservingCanvas {
     /// Each mask's recording size and the fill colors it paints.
     pub masks: Vec<(f32, f32, Vec<Color>)>,
     pub group_layers: Vec<(f32, Option<BlendMode>)>,
+    /// Each backdrop layer's alpha and whether it carries a mask.
+    pub backdrop_layers: Vec<(f32, bool)>,
     pub knockout_strokes: usize,
 }
 
@@ -185,6 +187,23 @@ impl CanvasBackend for ObservingCanvas {
     {
         self.group_layers.push((alpha, blend_mode));
         paint(self)
+    }
+
+    /// Observes one backdrop layer and forwards its painting callback through its mask.
+    fn with_backdrop_layer<F>(
+        &mut self,
+        alpha: f32,
+        mask: Option<&MaskLayer>,
+        paint: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        self.backdrop_layers.push((alpha, mask.is_some()));
+        match mask {
+            Some(mask) => self.with_mask_layer(mask, paint),
+            None => paint(self),
+        }
     }
 }
 

@@ -180,4 +180,31 @@ pub trait CanvasBackend {
         let _ = (alpha, blend_mode);
         paint(self)
     }
+
+    /// Paints a non-isolated group composited with the Normal blend mode.
+    ///
+    /// The content starts from a copy of the pixels beneath it, so blend modes inside the
+    /// group meet the real backdrop, and is composited back weighted by `alpha` and the
+    /// coverage of `mask`. Where the content paints nothing the backdrop is unchanged.
+    ///
+    /// Painting failures discard the layer. The callback must balance its own
+    /// saves/restores and must not restore caller-owned state.
+    ///
+    /// The default implementation paints into a transparent group layer that encloses
+    /// the mask layer, for backends that cannot read back their own pixels.
+    fn with_backdrop_layer<F>(
+        &mut self,
+        alpha: f32,
+        mask: Option<&MaskLayer>,
+        paint: F,
+    ) -> Result<(), PdfCanvasError>
+    where
+        Self: Sized,
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
+        self.with_group_layer(alpha, None, |backend| match mask {
+            Some(mask) => backend.with_mask_layer(mask, paint),
+            None => paint(backend),
+        })
+    }
 }

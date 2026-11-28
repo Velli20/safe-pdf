@@ -16,7 +16,7 @@ use pdf_canvas::{
     mask_layer::{CoverageTarget, MaskLayer},
 };
 use pdf_graphics::{Image, pdf_path::PdfPath, rect::Rect, transform::Transform};
-use web_sys::CanvasRenderingContext2d;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 /// A mask's coverage and isolated child canvas, owned as one rendering operation.
 ///
@@ -32,12 +32,9 @@ pub(crate) struct IsolatedMask<'a> {
 
 impl<'a> IsolatedMask<'a> {
     pub(crate) fn new(parent: &'a WebCanvasBackend, mask: &MaskLayer) -> WebResult<Self> {
-        let coverage = mask.render_coverage(&mut MaskTarget {
-            parent,
-            _retained: None,
-        })?;
+        let coverage = parent.mask_coverage(mask)?;
         let content = parent.surfaces.acquire(parent.viewport.backing_size())?;
-        let backend = Self::content_backend(parent, &content, mask)?;
+        let backend = parent.isolated_within_mask(&content, mask)?;
         Ok(Self {
             parent,
             backend,
@@ -65,21 +62,34 @@ impl<'a> IsolatedMask<'a> {
             paint(&mut backend).and_then(|()| backend.finish_surface().map_err(Into::into))
         };
         let result = result.and_then(|()| {
-            composite_surface(content.context(), &coverage, 1.0, "destination-in")?;
-            composite_surface(&parent.context, &content, 1.0, "source-over").map_err(Into::into)
+            composite_surface(content.context(), coverage.canvas(), 1.0, "destination-in")?;
+            composite_surface(&parent.context, content.canvas(), 1.0, "source-over")
+                .map_err(Into::into)
         });
         // The child backend is gone before either canvas is reset for reuse.
         parent.surfaces.recycle(content);
         parent.surfaces.recycle(coverage);
         result
     }
+}
 
-    fn content_backend(
-        parent: &WebCanvasBackend,
+impl WebCanvasBackend {
+    /// Renders the coverage of `mask` onto a full backing-size surface.
+    pub(crate) fn mask_coverage(&self, mask: &MaskLayer) -> Result<Surface, PdfCanvasError> {
+        mask.render_coverage(&mut MaskTarget {
+            parent: self,
+            _retained: None,
+        })
+    }
+
+    /// Creates a child backend on `content` with this backend's clips and the bounds of
+    /// `mask`, outside which masked content cannot show.
+    pub(crate) fn isolated_within_mask(
+        &self,
         content: &Surface,
         mask: &MaskLayer,
     ) -> WebResult<WebCanvasBackend> {
-        let mut backend = parent.isolated_on(content)?;
+        let mut backend = self.isolated_on(content)?;
         let bounds = PdfPath::from(&Rect::new(
             mask.recording().width(),
             mask.recording().height(),
@@ -138,14 +148,14 @@ impl CoverageTarget for MaskTarget<'_> {
     }
 }
 
-/// Composites a full backing-size surface onto a context with a constant `alpha` and a
+/// Composites a full backing-size canvas onto a context with a constant `alpha` and a
 /// native operation.
 ///
 /// Resetting the transform prevents the device-to-backing mapping from being
 /// applied a second time.
 pub(crate) fn composite_surface(
     context: &CanvasRenderingContext2d,
-    source: &Surface,
+    source: &HtmlCanvasElement,
     alpha: f32,
     operation: &str,
 ) -> WebResult<()> {
@@ -153,6 +163,6 @@ pub(crate) fn composite_surface(
     web_paint::set_transform(context, &Transform::identity())?;
     context.set_global_alpha(f64::from(alpha.clamp(0.0, 1.0)));
     context.set_global_composite_operation(operation)?;
-    context.draw_image_with_html_canvas_element(source.canvas(), 0.0, 0.0)?;
+    context.draw_image_with_html_canvas_element(source, 0.0, 0.0)?;
     Ok(())
 }
